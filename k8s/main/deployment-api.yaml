@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: avm-trade-reporter-app-deployment
+  namespace: biatec-scan
+spec:
+  selector:
+    matchLabels:
+      app: avm-trade-reporter-app
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: avm-trade-reporter-app
+    spec:
+      containers:
+        - name: avm-trade-reporter-app
+          image: scholtz2/avm-trade-reporter:1.2025.08.01-main
+          imagePullPolicy: Always
+          resources:
+            requests:
+              cpu: 200m
+              memory: "200Mi"
+            limits:
+              cpu: 4000m
+              memory: "1000Mi"
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - secretRef:
+                name: avm-trade-reporter-secret
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 2
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 2
+            terminationGracePeriodSeconds: 1
+          volumeMounts:
+            - name: avm-trade-reporter-main-conf
+              mountPath: /app/appsettings.json
+              subPath: appsettings.json
+      volumes:
+        - name: avm-trade-reporter-main-conf
+          configMap:
+            name: avm-trade-reporter-main-conf
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: avm-trade-reporter-service
+  namespace: biatec-scan
+spec:
+  type: ClusterIP
+  selector:
+    app: avm-trade-reporter-app
+  ports:
+    - name: http
+      protocol: TCP
+      appProtocol: http
+      port: 8080
+      targetPort: 8080
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: avm-trade-reporter-ingress-main
+  namespace: biatec-scan
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    cert-manager.io/cluster-issuer: letsencrypt
+    nginx.ingress.kubernetes.io/rewrite-target: /$1
+spec:
+  ingressClassName: "nginx"
+  tls:
+    - hosts:
+        - algorand-trades.de-4.biatec.io
+      secretName: tls-algorand-trades.de-4.biatec.io
+  rules:
+    - host: algorand-trades.de-4.biatec.io
+      http:
+        paths:
+          - path: /(.*)
+            pathType: Prefix
+            backend:
+              service:
+                name: avm-trade-reporter-service
+                port:
+                  number: 8080
