@@ -30,7 +30,7 @@ namespace AVMTradeReporter.Services
         private readonly HttpClient _httpClient;
         private readonly ElasticsearchClient _elasticClient;
 
-        private Indexer Indexer { get; set; }
+        public static Indexer? Indexer { get; set; }
 
         public TradeReporterBackgroundService(
             ILogger<TradeReporterBackgroundService> logger,
