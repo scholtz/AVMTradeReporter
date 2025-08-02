@@ -6,6 +6,14 @@
         /// Gets or sets the unique identifier for the indexer.
         /// </summary>
         public string IndexerId { get; set; } = String.Empty;
+        public int? DelayMs { get; set; } = 0;
+        /// <summary>
+        /// + or -
+        /// </summary>
+        public string Direction { get; set; } = "+";
+        public ulong? StartRound { get; set; } = null;
+        public ulong? MinRound { get; set; } = null;
+        public ulong? MaxRound { get; set; } = null;
         /// <summary>
         /// AVM Algod configuration
         /// </summary>

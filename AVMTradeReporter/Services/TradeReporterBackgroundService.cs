@@ -46,7 +46,15 @@ namespace AVMTradeReporter.Services
             _elasticClient = elasticClient;
 
             CreateTradeIndexTemplateAsync().Wait();
-
+#if DEBUG
+            Indexer = new Indexer()
+            {
+                Id = _appConfig.Value.IndexerId,
+                Updated = DateTimeOffset.Now,
+                Round = _appConfig.Value.StartRound ?? 52337928,
+                GenesisId = "mainnet-v1.0"
+            };
+#else
             var indexerRequest = _elasticClient.Get<Indexer>(new Id(_appConfig.Value.IndexerId));
             if (indexerRequest.IsValidResponse && indexerRequest.Source != null)
             {
@@ -58,8 +66,8 @@ namespace AVMTradeReporter.Services
                 Indexer = new Indexer()
                 {
                     Id = _appConfig.Value.IndexerId,
-                    Updated = DateTimeOffset.UtcNow,
-                    Round = 52335125,
+                    Updated = DateTimeOffset.Now,
+                    Round = _appConfig.Value.StartRound ?? 52337928,
                     GenesisId = "mainnet-v1.0"
                 };
                 var indexResult = _elasticClient.Index(Indexer, new Id(Indexer.Id));
@@ -72,6 +80,7 @@ namespace AVMTradeReporter.Services
                     _logger.LogError("Failed to create indexer: {error}", indexerRequest.DebugInformation);
                 }
             }
+#endif
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -82,14 +91,40 @@ namespace AVMTradeReporter.Services
             {
                 try
                 {
+                    if (Indexer == null)
+                    {
+                        await Task.Delay(1000);
+                        continue;
+                    }
                     //await ProcessBlockWorkAsync(52243617, stoppingToken);// pact
                     //await ProcessBlockWorkAsync(52279620, stoppingToken);// biatec
                     //await ProcessBlockWorkAsync(52335125, stoppingToken);//tiny
 
-                    var blockStatus = await _algod.WaitForBlockAsync(stoppingToken, Indexer.Round);
+                    if (_appConfig.Value.MinRound != null && _appConfig.Value.MinRound > Indexer.Round)
+                    {
+                        _logger.LogInformation("Min round reached");
+                        await Task.Delay(TimeSpan.FromMinutes(10));
+                        continue;
+                    }
+                    if (_appConfig.Value.MaxRound != null && _appConfig.Value.MaxRound < Indexer.Round)
+                    {
+                        _logger.LogInformation("Max round reached");
+                        await Task.Delay(TimeSpan.FromMinutes(10));
+                        continue;
+                    }
+
+
+                    var blockStatus = await _algod.WaitForBlockAsync(stoppingToken, Indexer?.Round ?? throw new Exception("Rund not defined"));
                     await ProcessBlockWorkAsync(Indexer.Round, stoppingToken);
                     await IncrementIndexer(stoppingToken);
 
+                    if (_appConfig.Value.DelayMs.HasValue && _appConfig.Value.DelayMs > 0)
+                    {
+                        await Task.Delay(_appConfig.Value.DelayMs.Value);
+                    }
+#if DEBUG
+                    return;
+#endif
                     // 
                     //await Task.Delay(TimeSpan.FromMinutes(5), stoppingToken); // Run every 5 minutes
                 }
@@ -515,7 +550,15 @@ namespace AVMTradeReporter.Services
         }
         private async Task IncrementIndexer(CancellationToken cancellationToken)
         {
-            Indexer.Round = Indexer.Round + 1;
+            if (Indexer == null) return;
+            if (_appConfig.Value.Direction == "-")
+            {
+                Indexer.Round = Indexer.Round - 1;
+            }
+            else
+            {
+                Indexer.Round = Indexer.Round + 1;
+            }
             Indexer.Updated = DateTimeOffset.Now;
             var indexResult = await _elasticClient.IndexAsync(Indexer, new Id(Indexer.Id), cancellationToken);
             if (indexResult.IsSuccess())
