@@ -1,20 +1,20 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: avm-trade-reporter-app-deployment
+  name: avm-trade-reporter2-app-deployment
   namespace: biatec-scan
 spec:
   selector:
     matchLabels:
-      app: avm-trade-reporter-app
+      app: avm-trade-reporter2-app
   replicas: 1
   template:
     metadata:
       labels:
-        app: avm-trade-reporter-app
+        app: avm-trade-reporter2-app
     spec:
       containers:
-        - name: avm-trade-reporter-app
+        - name: avm-trade-reporter2-app
           image: scholtz2/avm-trade-reporter:1.2025.08.02-main
           imagePullPolicy: Always
           resources:
@@ -29,7 +29,7 @@ spec:
               protocol: TCP
           envFrom:
             - secretRef:
-                name: avm-trade-reporter-secret
+                name: avm-trade-reporter2-secret
           readinessProbe:
             tcpSocket:
               port: 8080
@@ -55,12 +55,12 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: avm-trade-reporter-service
+  name: avm-trade-reporter2-service
   namespace: biatec-scan
 spec:
   type: ClusterIP
   selector:
-    app: avm-trade-reporter-app
+    app: avm-trade-reporter2-app
   ports:
     - name: http
       protocol: TCP
@@ -72,7 +72,7 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: avm-trade-reporter-ingress-main
+  name: avm-trade-reporter2-ingress-main
   namespace: biatec-scan
   annotations:
     nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
@@ -82,16 +82,16 @@ spec:
   ingressClassName: "nginx"
   tls:
     - hosts:
-        - algorand-trades.de-4.biatec.io
-      secretName: tls-algorand-trades.de-4.biatec.io
+        - algorand-trades-2.de-4.biatec.io
+      secretName: tls-algorand-trades-2.de-4.biatec.io
   rules:
-    - host: algorand-trades.de-4.biatec.io
+    - host: algorand-trades-2.de-4.biatec.io
       http:
         paths:
           - path: /(.*)
             pathType: Prefix
             backend:
               service:
-                name: avm-trade-reporter-service
+                name: avm-trade-reporter2-service
                 port:
                   number: 8080
