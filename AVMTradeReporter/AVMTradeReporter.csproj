@@ -9,7 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Algorand4" Version="4.1.2.2025080112" />
+    <PackageReference Include="Algorand4" Version="4.1.2.2025080218" />
     <PackageReference Include="Elastic.Clients.Elasticsearch" Version="9.0.7" />
     <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.22.1" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="9.0.3" />
