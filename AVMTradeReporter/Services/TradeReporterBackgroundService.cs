@@ -171,7 +171,7 @@ namespace AVMTradeReporter.Services
                 var algodConfig = _appConfig.Value.Algod;
 
                 _logger.LogInformation("Loading block {blockId}", blockId);
-                var block = await _algod.GetBlockAsync(blockId, Format.Msgpack, false);
+                var block = await _algod.GetBlockAsync(blockId, Format.Json, false);
                 _logger.LogInformation("Found transactions: {txCount}", block.Block?.Transactions?.Count);
                 Algorand.Algod.Model.Transactions.SignedTransaction? prevTx = null;
                 if (block.Block?.Transactions != null)
