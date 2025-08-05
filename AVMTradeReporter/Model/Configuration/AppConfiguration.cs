@@ -1,4 +1,7 @@
-﻿namespace AVMTradeReporter.Model.Configuration
+﻿using Algorand.Gossip;
+using Elastic.Clients.Elasticsearch.Inference;
+
+namespace AVMTradeReporter.Model.Configuration
 {
     public class AppConfiguration
     {
@@ -18,10 +21,14 @@
         /// AVM Algod configuration
         /// </summary>
         public AlgodConfiguration Algod { get; set; } = new AlgodConfiguration();
-        
+
         /// <summary>
         /// Elasticsearch configuration
         /// </summary>
         public ElasticConfiguration Elastic { get; set; } = new ElasticConfiguration();
+        /// <summary>
+        /// Config of the gossip algod nodes
+        /// </summary>
+        public List<GossipWebsocketClientConfiguration> GossipWebsocketClientConfigurations { get; set; } = new();
     }
 }

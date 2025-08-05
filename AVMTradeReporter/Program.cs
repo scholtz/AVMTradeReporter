@@ -1,4 +1,7 @@
+using AVMIndexReporter.Repository;
+using AVMTradeReporter.Hubs;
 using AVMTradeReporter.Model.Configuration;
+using AVMTradeReporter.Repository;
 using AVMTradeReporter.Services;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Security;
@@ -18,13 +21,19 @@ namespace AVMTradeReporter
             // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
             builder.Services.AddEndpointsApiExplorer();
             builder.Services.AddSwaggerGen();
+            builder.Services.AddSignalR();
 
             // Configure AppConfiguration from appsettings.json
             builder.Services.Configure<AppConfiguration>(
                 builder.Configuration.GetSection("AppConfiguration"));
 
+            builder.Services.AddSingleton<IndexerRepository>();
+            builder.Services.AddSingleton<TradeRepository>();
+            builder.Services.AddSingleton<TransactionProcessor>();
+
             // Register the background service
             builder.Services.AddHostedService<TradeReporterBackgroundService>();
+            builder.Services.AddHostedService<GossipBackgroundService>();
 
             builder.Services.AddSingleton<ElasticsearchClient>(sp =>
             {
@@ -58,6 +67,7 @@ namespace AVMTradeReporter
             app.UseAuthorization();
 
             app.MapControllers();
+            app.MapHub<BiatecScanHub>("/biatecScanHub");
 
 
             var bw = app.Services.GetService<TradeReporterBackgroundService>();
