@@ -138,8 +138,8 @@ namespace AVMTradeReporter.Services
             _logger.LogInformation("Trade Reporter Background Service stopped.");
         }
 
-        
-        
+
+
         ConcurrentDictionary<string, Trade> _trades = new ConcurrentDictionary<string, Trade>();
         private async Task RegisterTrade(Trade trade, CancellationToken cancellationToken)
         {
@@ -198,7 +198,11 @@ namespace AVMTradeReporter.Services
                 }
                 //var tx = block.Block.Transactions.FirstOrDefault();
                 //var id = tx?.Tx.TxID();
-                _tradeRepository.StoreTradesAsync(_trades.Values.ToArray(), cancellationToken).Wait(cancellationToken);
+                var result = await _tradeRepository.StoreTradesAsync(_trades.Values.ToArray(), cancellationToken);
+                if (result)
+                {
+                    _trades.Clear();
+                }
                 await Task.CompletedTask; // Placeholder for actual work
             }
             catch (Exception ex)

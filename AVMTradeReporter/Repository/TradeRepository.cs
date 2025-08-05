@@ -62,12 +62,12 @@ namespace AVMTradeReporter.Repository
 
             Console.WriteLine($"Template created: {response.IsValidResponse}");
         }
-        public async Task StoreTradesAsync(Trade[] trades, CancellationToken cancellationToken)
+        public async Task<bool> StoreTradesAsync(Trade[] trades, CancellationToken cancellationToken)
         {
             if (!trades.Any())
             {
                 _logger.LogDebug("No trades to store");
-                return;
+                return false;
             }
 
             try
@@ -123,15 +123,18 @@ namespace AVMTradeReporter.Repository
                         }
 
                     }
+                    return true;
                 }
                 else
                 {
                     _logger.LogError("Bulk indexing failed: {error}", bulkResponse.DebugInformation);
+                    return false;
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to bulk index trades");
+                return false;
             }
         }
 
