@@ -59,20 +59,18 @@ namespace AVMTradeReporter
             });
 
             // Add CORS policy
-            var corsConfig = builder.Configuration.GetSection("Cors").AsEnumerable().Select(k => k.Value).Where(k => !string.IsNullOrEmpty(k)).ToArray();
+            var corsConfig = builder.Configuration.GetSection("Cors").AsEnumerable().Select(k => k.Value ?? "").Where(k => !string.IsNullOrEmpty(k)).ToArray();
             if (!(corsConfig?.Length > 0)) throw new Exception("Cors not defined");
-
+            Console.WriteLine($"Cors: {string.Join(",",corsConfig)}");
             builder.Services.AddCors(options =>
             {
                 options.AddDefaultPolicy(
                 builder =>
                 {
                     builder.WithOrigins(corsConfig)
-                            .SetIsOriginAllowedToAllowWildcardSubdomains()
-                            .AllowAnyMethod()
-                            .AllowAnyHeader()
-                            .AllowCredentials()
-                            .WithExposedHeaders("rowcount", "rowstate");
+                        .AllowAnyMethod()
+                        .AllowAnyHeader()
+                        .AllowCredentials();
                 });
             });
 
