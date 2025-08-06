@@ -10,7 +10,7 @@
 
   <ItemGroup>
     <PackageReference Include="Algorand4" Version="4.1.2.2025080600" />
-    <PackageReference Include="AlgorandAuthentication" Version="2.0.1" />
+    <PackageReference Include="AlgorandAuthentication" Version="2.0.2" />
     <PackageReference Include="Elastic.Clients.Elasticsearch" Version="9.1.0" />
     <PackageReference Include="Microsoft.AspNetCore.SignalR" Version="1.2.0" />
     <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.22.1" />

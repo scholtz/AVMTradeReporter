@@ -81,6 +81,7 @@ namespace AVMTradeReporter
             builder.Services.AddAuthentication(AlgorandAuthenticationHandlerV2.ID).AddAlgorand(a =>
             {
                 a.Realm = authOptions.Realm;
+                a.AllowEmptyAccounts = authOptions.AllowEmptyAccounts;
                 a.CheckExpiration = authOptions.CheckExpiration;
                 a.EmptySuccessOnFailure = authOptions.EmptySuccessOnFailure;
                 a.AllowedNetworks = authOptions.AllowedNetworks;
