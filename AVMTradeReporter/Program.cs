@@ -22,7 +22,6 @@ namespace AVMTradeReporter
             // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
             builder.Services.AddEndpointsApiExplorer();
             builder.Services.AddSwaggerGen();
-            builder.Services.AddSignalR();
 
             // Configure AppConfiguration from appsettings.json
             builder.Services.Configure<AppConfiguration>(
@@ -58,7 +57,7 @@ namespace AVMTradeReporter
                 return new ElasticsearchClient(settings);
             });
 
-            // Add CORS policy
+            // Add CORS policy - must be before SignalR and authentication
             var corsConfig = builder.Configuration.GetSection("Cors").AsEnumerable().Select(k => k.Value ?? "").Where(k => !string.IsNullOrEmpty(k)).ToArray();
             if (!(corsConfig?.Length > 0)) throw new Exception("Cors not defined");
             Console.WriteLine($"Cors: {string.Join(",",corsConfig)}");
@@ -74,6 +73,7 @@ namespace AVMTradeReporter
                 });
             });
 
+            // Configure authentication
             var authOptions = builder.Configuration.GetSection("AlgorandAuthentication").Get<AlgorandAuthenticationOptionsV2>();
             if (authOptions == null) throw new Exception("Config for the authentication is missing");
             builder.Services.AddAuthentication(AlgorandAuthenticationHandlerV2.ID).AddAlgorand(a =>
@@ -86,21 +86,32 @@ namespace AVMTradeReporter
                 a.Debug = authOptions.Debug;
             });
 
+            // Add SignalR after CORS and authentication
+            builder.Services.AddSignalR(options =>
+            {
+                // Configure SignalR options for better debugging
+                options.EnableDetailedErrors = builder.Environment.IsDevelopment();
+            });
+
             builder.Services.AddProblemDetails();
 
             var app = builder.Build();
 
+            // Configure the HTTP request pipeline
+            // CORS must be before authentication/authorization
             app.UseCors();
+            
             app.UseSwagger();
             app.UseSwaggerUI();
-
+            
+            // WebSockets must be before authentication for SignalR
             app.UseWebSockets();
+            
             app.UseAuthentication();
             app.UseAuthorization();
 
             app.MapControllers();
             app.MapHub<BiatecScanHub>("/biatecScanHub");
-
 
             var bw = app.Services.GetService<TradeReporterBackgroundService>();
             bw?.StartAsync(CancellationToken.None).GetAwaiter().GetResult();

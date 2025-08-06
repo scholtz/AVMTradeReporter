@@ -5,11 +5,11 @@ using System.Collections.Concurrent;
 
 namespace AVMTradeReporter.Hubs
 {
-    [Authorize]
+    
     public class BiatecScanHub : Hub
     {
         private static readonly ConcurrentDictionary<string, string> User2Subscription = new ConcurrentDictionary<string, string>();
-        
+        [Authorize]
         public async Task Subscribe(string filter)
         {
             try
@@ -25,12 +25,12 @@ namespace AVMTradeReporter.Hubs
                 await Clients.Caller.SendAsync("Error", e.Message);
             }
         }
-
+        [Authorize]
         public async Task Unsubscribe()
         {
             try
             {
-                var userId = Context.UserIdentifier;
+                var userId = Context.UserIdentifier ?? Context.ConnectionId;
                 if (string.IsNullOrEmpty(userId)) throw new Exception("userId is empty");
                 
                 User2Subscription.TryRemove(userId, out _);
@@ -42,12 +42,21 @@ namespace AVMTradeReporter.Hubs
             }
         }
 
+        public override async Task OnConnectedAsync()
+        {
+            // Log connection for debugging
+            var userId = Context.UserIdentifier;
+            Console.WriteLine($"SignalR client connected: {userId}");
+            await base.OnConnectedAsync();
+        }
+
         public override async Task OnDisconnectedAsync(Exception? exception)
         {
             var userId = Context.UserIdentifier;
             if (!string.IsNullOrEmpty(userId))
             {
                 User2Subscription.TryRemove(userId, out _);
+                Console.WriteLine($"SignalR client disconnected: {userId}");
             }
             await base.OnDisconnectedAsync(exception);
         }
