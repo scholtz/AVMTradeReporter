@@ -57,10 +57,29 @@ namespace AVMTradeReporter
                 return new ElasticsearchClient(settings);
             });
 
+            // Add CORS policy
+            var corsConfig = builder.Configuration.GetSection("Cors").AsEnumerable().Select(k => k.Value).Where(k => !string.IsNullOrEmpty(k)).ToArray();
+            if (!(corsConfig?.Length > 0)) throw new Exception("Cors not defined");
+
+            builder.Services.AddCors(options =>
+            {
+                options.AddDefaultPolicy(
+                builder =>
+                {
+                    builder.WithOrigins(corsConfig)
+                            .SetIsOriginAllowedToAllowWildcardSubdomains()
+                            .AllowAnyMethod()
+                            .AllowAnyHeader()
+                            .AllowCredentials()
+                            .WithExposedHeaders("rowcount", "rowstate");
+                });
+            });
+
             var app = builder.Build();
 
             app.UseSwagger();
             app.UseSwaggerUI();
+            app.UseCors();
 
             app.UseHttpsRedirection();
 
