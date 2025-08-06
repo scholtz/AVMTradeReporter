@@ -92,10 +92,11 @@ namespace AVMTradeReporter
 
             var app = builder.Build();
 
+            app.UseCors();
             app.UseSwagger();
             app.UseSwaggerUI();
-            app.UseCors();
 
+            app.UseWebSockets();
             app.UseAuthentication();
             app.UseAuthorization();
 
