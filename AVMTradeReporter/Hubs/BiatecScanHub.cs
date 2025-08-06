@@ -6,10 +6,11 @@ using System.Collections.Concurrent;
 namespace AVMTradeReporter.Hubs
 {
 
-    [Authorize]
+    
     public class BiatecScanHub : Hub
     {
         private static readonly ConcurrentDictionary<string, string> User2Subscription = new ConcurrentDictionary<string, string>();
+        [Authorize]
         public async Task Subscribe(string filter)
         {
             try
@@ -25,6 +26,7 @@ namespace AVMTradeReporter.Hubs
                 await Clients.Caller.SendAsync("Error", e.Message);
             }
         }
+        [Authorize]
         public async Task Unsubscribe()
         {
             try
@@ -40,7 +42,7 @@ namespace AVMTradeReporter.Hubs
                 await Clients.Caller.SendAsync("Error", e.Message);
             }
         }
-
+        [Authorize]
         public override async Task OnConnectedAsync()
         {
             // Log connection for debugging
@@ -48,7 +50,7 @@ namespace AVMTradeReporter.Hubs
             Console.WriteLine($"SignalR client connected: {userId}");
             await base.OnConnectedAsync();
         }
-
+        [Authorize]
         public override async Task OnDisconnectedAsync(Exception? exception)
         {
             var userId = Context.UserIdentifier;
