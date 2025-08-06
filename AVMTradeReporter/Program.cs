@@ -1,3 +1,4 @@
+using AlgorandAuthenticationV2;
 using AVMIndexReporter.Repository;
 using AVMTradeReporter.Hubs;
 using AVMTradeReporter.Model.Configuration;
@@ -75,14 +76,28 @@ namespace AVMTradeReporter
                 });
             });
 
+            var authOptions = builder.Configuration.GetSection("AlgorandAuthentication").Get<AlgorandAuthenticationOptionsV2>();
+            if (authOptions == null) throw new Exception("Config for the authentication is missing");
+            builder.Services.AddAuthentication(AlgorandAuthenticationHandlerV2.ID).AddAlgorand(a =>
+            {
+                a.Realm = authOptions.Realm;
+                a.CheckExpiration = authOptions.CheckExpiration;
+                a.EmptySuccessOnFailure = authOptions.EmptySuccessOnFailure;
+                a.AllowedNetworks = authOptions.AllowedNetworks;
+                a.Debug = authOptions.Debug;
+            });
+
+            builder.Services.AddProblemDetails();
+
             var app = builder.Build();
 
             app.UseSwagger();
             app.UseSwaggerUI();
             app.UseCors();
-
+            
             app.UseHttpsRedirection();
 
+            app.UseAuthentication();
             app.UseAuthorization();
 
             app.MapControllers();
