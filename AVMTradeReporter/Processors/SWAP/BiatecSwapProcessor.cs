@@ -5,7 +5,7 @@ using AVMTradeReporter.Model;
 using AVMTradeReporter.Model.Data;
 using System.Threading;
 
-namespace AVMTradeReporter.Processors
+namespace AVMTradeReporter.Processors.SWAP
 {
     public class BiatecSwapProcessor : ISwapProcessor
     {

@@ -12,7 +12,7 @@ using System.Collections.Concurrent;
 
 namespace AVMTradeReporter.Services
 {
-    public class TradeReporterBackgroundService : BackgroundService, ITradeService
+    public class TradeReporterBackgroundService : BackgroundService, ITradeService, ILiquidityService
     {
         private readonly ILogger<TradeReporterBackgroundService> _logger;
         private readonly IOptions<AppConfiguration> _appConfig;
@@ -141,11 +141,18 @@ namespace AVMTradeReporter.Services
 
 
         ConcurrentDictionary<string, Trade> _trades = new ConcurrentDictionary<string, Trade>();
-        private async Task RegisterTrade(Trade trade, CancellationToken cancellationToken)
+        private Task RegisterTrade(Trade trade, CancellationToken cancellationToken)
         {
             _trades[trade.TxId] = trade;
+            return Task.CompletedTask;
         }
+        ConcurrentDictionary<string, Liquidity> _liquidityUpdates = new ConcurrentDictionary<string, Liquidity>();
 
+        public Task RegisterLiquidity(Liquidity liquidityUpdate, CancellationToken cancellationToken)
+        {
+            _liquidityUpdates[liquidityUpdate.TxId] = liquidityUpdate;
+            return Task.CompletedTask;
+        }
 
         private async Task IncrementIndexer(CancellationToken cancellationToken)
         {
@@ -174,28 +181,29 @@ namespace AVMTradeReporter.Services
                 var block = await _algod.GetBlockAsync(blockId, Format.Json, false);
                 _logger.LogInformation("Found transactions: {txCount}", block.Block?.Transactions?.Count);
                 Algorand.Algod.Model.Transactions.SignedTransaction? prevTx = null;
-                if (block.Block?.Transactions != null)
-                {
-                    ulong index = 0;
-                    foreach (var currTx in block.Block.Transactions)
-                    {
-                        index++;
-                        try
-                        {
-                            if (prevTx != null)
-                            {
-                                currTx.Tx.FillInParamsFromBlockHeader(block.Block);
-                                var txId = currTx.Tx.TxID();
-                                await _transactionProcessor.ProcessTransaction(currTx, prevTx, block.Block, currTx.Tx.Group, txId, currTx.Tx.Sender, TradeState.Confirmed, this, cancellationToken);
-                            }
-                        }
-                        catch (Exception exc)
-                        {
-                            _logger.LogInformation("Error processing transaction {index} in block {block}: {error}", index, block.Block.Round, exc.Message);
-                        }
-                        prevTx = currTx;
-                    }
-                }
+                await _transactionProcessor.ProcessBlock(block, this, this, cancellationToken);
+                //if (block.Block?.Transactions != null)
+                //{
+                //    ulong index = 0;
+                //    foreach (var currTx in block.Block.Transactions)
+                //    {
+                //        index++;
+                //        try
+                //        {
+                //            if (prevTx != null)
+                //            {
+                //                currTx.Tx.FillInParamsFromBlockHeader(block.Block);
+                //                var txId = currTx.Tx.TxID();
+                //                await _transactionProcessor.ProcessTransaction(currTx, prevTx, block.Block, currTx.Tx.Group, txId, currTx.Tx.Sender, TradeState.Confirmed, this, cancellationToken);
+                //            }
+                //        }
+                //        catch (Exception exc)
+                //        {
+                //            _logger.LogInformation("Error processing transaction {index} in block {block}: {error}", index, block.Block.Round, exc.Message);
+                //        }
+                //        prevTx = currTx;
+                //    }
+                //}
                 //var tx = block.Block.Transactions.FirstOrDefault();
                 //var id = tx?.Tx.TxID();
                 var result = await _tradeRepository.StoreTradesAsync(_trades.Values.ToArray(), cancellationToken);
@@ -221,5 +229,6 @@ namespace AVMTradeReporter.Services
         {
             return RegisterTrade(trade, cancellationToken);
         }
+
     }
 }

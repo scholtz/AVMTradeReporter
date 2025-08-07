@@ -49,6 +49,9 @@ namespace AVMTradeReporter
                 .DefaultMappingFor<Model.Data.Trade>(m => m
                     .IndexName("trades")
                     .IdProperty(t => t.TxId))
+                .DefaultMappingFor<Model.Data.Liquidity>(m => m
+                    .IndexName("liquidity")
+                    .IdProperty(t => t.TxId))
                 .DefaultMappingFor<Model.Data.Indexer>(m => m
                     .IndexName("indexers")
                     .IdProperty(t => t.Id))
@@ -76,6 +79,9 @@ namespace AVMTradeReporter
             // Configure authentication
             var authOptions = builder.Configuration.GetSection("AlgorandAuthentication").Get<AlgorandAuthenticationOptionsV2>();
             if (authOptions == null) throw new Exception("Config for the authentication is missing");
+            
+            Console.WriteLine($"Auth Config: Realm={authOptions.Realm}, AllowEmptyAccounts={authOptions.AllowEmptyAccounts}, Debug={authOptions.Debug}");
+            
             builder.Services.AddAuthentication(AlgorandAuthenticationHandlerV2.ID).AddAlgorand(a =>
             {
                 a.Realm = authOptions.Realm;
@@ -85,12 +91,15 @@ namespace AVMTradeReporter
                 a.AllowedNetworks = authOptions.AllowedNetworks;
                 a.Debug = authOptions.Debug;
             });
+            
+            builder.Services.AddAuthorization();
 
             // Add SignalR after CORS and authentication
             builder.Services.AddSignalR(options =>
             {
                 // Configure SignalR options for better debugging
                 options.EnableDetailedErrors = builder.Environment.IsDevelopment();
+                options.MaximumReceiveMessageSize = null; // Remove message size limit
             });
 
             builder.Services.AddProblemDetails();
@@ -106,6 +115,58 @@ namespace AVMTradeReporter
             
             // WebSockets must be before authentication for SignalR
             app.UseWebSockets();
+            
+            // Add middleware for SignalR authentication - move access_token from query to header
+            app.Use(async (context, next) =>
+            {
+                if (context.Request.Path.StartsWithSegments("/biatecScanHub"))
+                {
+                    Console.WriteLine($"SignalR request: {context.Request.Method} {context.Request.Path}");
+                    Console.WriteLine($"Query: {context.Request.QueryString}");
+                    
+                    // Check for access_token in query and move to Authorization header
+                    if (context.Request.Query.ContainsKey("access_token"))
+                    {
+                        var accessToken = context.Request.Query["access_token"].ToString();
+                        Console.WriteLine($"Access token in query: {accessToken.Substring(0, Math.Min(30, accessToken.Length))}...");
+                        
+                        // Move to Authorization header for our authentication handler
+                        if (!context.Request.Headers.ContainsKey("Authorization"))
+                        {
+                            // URL decode the token
+                            var decodedToken = System.Web.HttpUtility.UrlDecode(accessToken);
+                            context.Request.Headers["Authorization"] = decodedToken;
+                            Console.WriteLine($"Moved and decoded access_token to Authorization header: {decodedToken.Substring(0, Math.Min(30, decodedToken.Length))}...");
+                        }
+                    }
+                    
+                    // Debug: Show all headers
+                    Console.WriteLine("Request Headers:");
+                    foreach (var header in context.Request.Headers)
+                    {
+                        Console.WriteLine($"  {header.Key}: {header.Value}");
+                    }
+                }
+                
+                await next();
+                
+                if (context.Request.Path.StartsWithSegments("/biatecScanHub"))
+                {
+                    Console.WriteLine($"Response status: {context.Response.StatusCode}");
+                    if (context.User?.Identity != null)
+                    {
+                        Console.WriteLine($"User authenticated: {context.User.Identity.IsAuthenticated}, Name: '{context.User.Identity.Name}'");
+                        if (context.User.Claims != null)
+                        {
+                            Console.WriteLine("User Claims:");
+                            foreach (var claim in context.User.Claims)
+                            {
+                                Console.WriteLine($"  {claim.Type}: {claim.Value}");
+                            }
+                        }
+                    }
+                }
+            });
             
             app.UseAuthentication();
             app.UseAuthorization();

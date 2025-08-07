@@ -2,19 +2,20 @@
 using Algorand.Algod.Model.Transactions;
 using AVMTradeReporter.Model.Data;
 
-namespace AVMTradeReporter.Processors
+namespace AVMTradeReporter.Processors.Liqudity
 {
-    public interface ISwapProcessor
+    public interface ILiquidityProcessor
     {
         public string AppArg { get; set; }
 
-        public Trade? GetTrade(
+        public Liquidity? GetLiquidityUpdate(
             SignedTransaction current,
-            SignedTransaction? previous,
+            SignedTransaction? previous1,
+            SignedTransaction? previous2,
             Algorand.Algod.Model.Block? block,
             Digest? txGroup,
             string topTxId,
-            Address trader,
+            Address liqudityProvider,
             TradeState tradeState
             );
     }

@@ -3,11 +3,11 @@ using AVMTradeReporter.Model.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
+using System.Security.Claims;
 
 namespace AVMTradeReporter.Controllers
 {
     [ApiController]
-    [Authorize]
     [Route("api/signalr")]
     public class SignalRTestController : ControllerBase
     {
@@ -20,7 +20,41 @@ namespace AVMTradeReporter.Controllers
             _logger = logger;
         }
 
+        [HttpGet("auth-test")]
+        public IActionResult AuthTest()
+        {
+            var authInfo = new
+            {
+                IsAuthenticated = User?.Identity?.IsAuthenticated ?? false,
+                Name = User?.Identity?.Name,
+                AuthenticationType = User?.Identity?.AuthenticationType,
+                Claims = User?.Claims?.Select(c => new { c.Type, c.Value }).ToArray(),
+                Headers = Request.Headers.ToDictionary(h => h.Key, h => h.Value.ToString())
+            };
+            
+            Console.WriteLine($"Auth test result: {System.Text.Json.JsonSerializer.Serialize(authInfo)}");
+            return Ok(authInfo);
+        }
+
+        [HttpGet("auth-test-authorized")]
+        [Authorize]
+        public IActionResult AuthTestAuthorized()
+        {
+            var authInfo = new
+            {
+                IsAuthenticated = User?.Identity?.IsAuthenticated ?? false,
+                Name = User?.Identity?.Name,
+                AuthenticationType = User?.Identity?.AuthenticationType,
+                Claims = User?.Claims?.Select(c => new { c.Type, c.Value }).ToArray(),
+                Headers = Request.Headers.ToDictionary(h => h.Key, h => h.Value.ToString())
+            };
+            
+            Console.WriteLine($"Authorized auth test result: {System.Text.Json.JsonSerializer.Serialize(authInfo)}");
+            return Ok(authInfo);
+        }
+
         [HttpPost("test-broadcast")]
+        [Authorize]
         public async Task<IActionResult> TestBroadcast([FromBody] string message)
         {
             try
@@ -37,6 +71,7 @@ namespace AVMTradeReporter.Controllers
         }
 
         [HttpPost("test-trade")]
+        [Authorize]
         public async Task<IActionResult> TestTrade()
         {
             try

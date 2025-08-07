@@ -74,6 +74,15 @@ namespace AVMTradeReporter.Repository
             {
                 _ = Task.Run(() => PublishTradesToHub(trades, cancellationToken));
 
+                foreach (var item in trades)
+                {
+                    BiatecScanHub.RecentTrades.Enqueue(item);
+                    if (BiatecScanHub.RecentTrades.Count > 100)
+                    {
+                        BiatecScanHub.RecentTrades.TryDequeue(out _);
+                    }
+                }
+
                 _logger.LogInformation("Bulk indexing {tradeCount} trades", trades.Length);
 
                 var bulkRequest = new BulkRequest("trades")
@@ -108,21 +117,6 @@ namespace AVMTradeReporter.Repository
                         }
                     }
 
-                    // Publish successfully stored trades to SignalR hub
-                    if (successCount > 0)
-                    {
-                        var successfulTrades = new List<Trade>();
-                        var bulkResponseItems = bulkResponse.Items.ToList();
-
-                        for (int i = 0; i < trades.Length && i < bulkResponseItems.Count; i++)
-                        {
-                            if (bulkResponseItems[i].IsValid)
-                            {
-                                successfulTrades.Add(trades[i]);
-                            }
-                        }
-
-                    }
                     return true;
                 }
                 else
@@ -161,7 +155,7 @@ namespace AVMTradeReporter.Repository
                         var userId = subscription.Key;
                         var filter = subscription.Value;
 
-                        if (ShouldSendTradeToUser(trade, filter))
+                        if (BiatecScanHub.ShouldSendTradeToUser(trade, filter))
                         {
                             await _hubContext.Clients.User(userId).SendAsync("FilteredTradeUpdated", trade, cancellationToken);
                         }
@@ -176,47 +170,6 @@ namespace AVMTradeReporter.Repository
             }
         }
 
-        private bool ShouldSendTradeToUser(Trade trade, string filter)
-        {
-            if (string.IsNullOrEmpty(filter))
-            {
-                return true; // No filter means send all trades
-            }
-
-            try
-            {
-                // Simple filtering logic - can be enhanced based on requirements
-                // Filter format examples:
-                // "protocol:Biatec" - filter by protocol
-                // "asset:123" - filter by asset ID (either in or out)
-                // "trader:ADDR123" - filter by trader address
-                // "pool:456" - filter by pool app ID
-
-                var filterParts = filter.Split(':', StringSplitOptions.RemoveEmptyEntries);
-                if (filterParts.Length != 2)
-                {
-                    return true; // Invalid filter format, send all
-                }
-
-                var filterType = filterParts[0].ToLowerInvariant();
-                var filterValue = filterParts[1];
-
-                return filterType switch
-                {
-                    "protocol" => trade.Protocol.ToString().Equals(filterValue, StringComparison.OrdinalIgnoreCase),
-                    "asset" => trade.AssetIdIn.ToString() == filterValue || trade.AssetIdOut.ToString() == filterValue,
-                    "trader" => trade.Trader.Equals(filterValue, StringComparison.OrdinalIgnoreCase),
-                    "pool" => trade.PoolAppId.ToString() == filterValue,
-                    "pooladdress" => trade.PoolAddress.Equals(filterValue, StringComparison.OrdinalIgnoreCase),
-                    "state" => trade.TradeState.ToString().Equals(filterValue, StringComparison.OrdinalIgnoreCase),
-                    _ => true // Unknown filter type, send all
-                };
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Error evaluating filter '{filter}' for trade {tradeId}", filter, trade.TxId);
-                return true; // On error, send the trade
-            }
-        }
+        
     }
 }

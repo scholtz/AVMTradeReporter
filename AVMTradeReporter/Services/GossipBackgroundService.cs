@@ -11,7 +11,7 @@ using System.Collections.Concurrent;
 
 namespace AVMTradeReporter.Services
 {
-    public class GossipBackgroundService : BackgroundService, ITradeService
+    public class GossipBackgroundService : BackgroundService, ITradeService, ILiquidityService
     {
         private readonly ILogger<GossipBackgroundService> _logger;
         private readonly ILoggerFactory _loggerFactory;
@@ -37,6 +37,11 @@ namespace AVMTradeReporter.Services
         public async Task RegisterTrade(Trade trade, CancellationToken cancellationToken)
         {
             await _tradeRepository.StoreTradesAsync([trade], cancellationToken);
+        }
+        public Task RegisterLiquidity(Liquidity liquidityUpdate, CancellationToken cancellationToken)
+        {
+            //throw new NotImplementedException();
+            return Task.CompletedTask;
         }
         ConcurrentBag<GossipWebsocketClient> _clients = new ConcurrentBag<GossipWebsocketClient>();
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -72,7 +77,8 @@ namespace AVMTradeReporter.Services
                 List<SignedTransaction> txsGroup = txs.ToList();
                 _tx_group.Set(tx.Tx.Group.ToString(), txsGroup, TimeSpan.FromMinutes(10));
 
-                Algorand.Algod.Model.Transactions.SignedTransaction? prevTx = null;
+                Algorand.Algod.Model.Transactions.SignedTransaction? prevTx1 = null;
+                Algorand.Algod.Model.Transactions.SignedTransaction? prevTx2 = null;
                 var cancellationTokenSource = new CancellationTokenSource();
                 if (txsGroup != null)
                 {
@@ -82,22 +88,21 @@ namespace AVMTradeReporter.Services
                         index++;
                         try
                         {
-                            if (prevTx != null)
-                            {
-                                //currTx.Tx.FillInParamsFromBlockHeader(block.Block);
-                                var currTxId = currTx.Tx.TxID();
-                                await _transactionProcessor.ProcessTransaction(currTx, prevTx, null, currTx.Tx.Group, currTxId, currTx.Tx.Sender, TradeState.TxPool, this, cancellationTokenSource.Token);
-                            }
+                            //currTx.Tx.FillInParamsFromBlockHeader(block.Block);
+                            var currTxId = currTx.Tx.TxID();
+                            await _transactionProcessor.ProcessTransaction(currTx, prevTx1, prevTx2, null, currTx.Tx.Group, currTxId, currTx.Tx.Sender, TradeState.TxPool, this, this, cancellationTokenSource.Token);
                         }
                         catch (Exception exc)
                         {
                             _logger.LogInformation("Error processing transaction from gossip {group}: {error}", tx.Tx.Group.ToString(), exc.Message);
                         }
-                        prevTx = currTx;
+                        prevTx2 = prevTx1;
+                        prevTx1 = currTx;
                     }
                 }
 
             }
         }
+
     }
 }
