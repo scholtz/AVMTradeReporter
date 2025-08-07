@@ -32,5 +32,9 @@ namespace AVMTradeReporter.Model.Data
         public string TopTxId { get; set; }
         [JsonConverter(typeof(JsonStringEnumConverter))]
         public TradeState TradeState { get; set; } = TradeState.TxPool;
+
+        public ulong A { get; set; }
+        public ulong B { get; set; }
+        public ulong L { get; set; }
     }
 }

@@ -106,17 +106,17 @@ namespace AVMTradeReporter.Processors.Liqudity
 
                 ulong A = 0, B = 0, L = 0;
                 var AItem = current.Detail?.GlobalDelta?.FirstOrDefault(kv => kv.Key.ToString() == "A");
-                if (AItem != null)
+                if (AItem != null && AItem.Value.Value != null)
                 {
                     A = Convert.ToUInt64(AItem.Value.Value.Uint64);
                 }
                 var BItem = current.Detail?.GlobalDelta?.FirstOrDefault(kv => kv.Key.ToString() == "B");
-                if (BItem != null)
+                if (BItem != null && BItem.Value.Value != null)
                 {
                     B = Convert.ToUInt64(BItem.Value.Value.Uint64);
                 }
                 var LItem = current.Detail?.GlobalDelta?.FirstOrDefault(kv => kv.Key.ToString() == "L");
-                if (LItem != null)
+                if (LItem != null && LItem.Value.Value != null)
                 {
                     L = Convert.ToUInt64(LItem.Value.Value.Uint64);
                 }

@@ -22,10 +22,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="Processors\SWAP\" />
-  </ItemGroup>
-
-  <ItemGroup>
     <ProjectReference Include="..\AVMTradeReporter\AVMTradeReporter.csproj" />
   </ItemGroup>
 

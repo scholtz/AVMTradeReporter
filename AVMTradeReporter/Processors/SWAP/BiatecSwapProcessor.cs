@@ -28,29 +28,28 @@ namespace AVMTradeReporter.Processors.SWAP
                     // This is the first transaction, no previous transaction to compare with.
                     return null;
                 }
+
+                ulong AssetIdIn = 0;
+                ulong AssetIdOut = 0;
+                ulong AssetAmountIn = 0;
+                ulong AssetAmountOut = 0;
+                Address? poolAddress = null;
+
+                if (block != null) current.Tx.FillInParamsFromBlockHeader(block);
+                if (txGroup != null) current.Tx.Group = txGroup;
+
+
                 if (previous.Tx is AssetTransferTransaction inAssetTransferTx)
                 {
+                    poolAddress = inAssetTransferTx.AssetReceiver;
+
                     if (current.Detail?.InnerTxns == null)
                     {
                         if (tradeState == TradeState.Confirmed) return null;
-                        var trade = new Trade
-                        {
-                            AssetIdIn = inAssetTransferTx.XferAsset,
-                            AssetIdOut = 0,
-                            AssetAmountIn = inAssetTransferTx.AssetAmount,
-                            AssetAmountOut = 0,
-                            TxId = current.Tx.TxID(),
-                            BlockId = block?.Round ?? 0,
-                            TxGroup = Convert.ToBase64String(current.Tx.Group.Bytes),
-                            Timestamp = block == null ? DateTimeOffset.UtcNow : DateTimeOffset.FromUnixTimeSeconds(Convert.ToInt64(block?.Timestamp ?? 0)),
-                            Protocol = DEXProtocol.Biatec,
-                            PoolAddress = inAssetTransferTx.AssetReceiver.EncodeAsString(),
-                            PoolAppId = appCallTx.ApplicationId ?? 0,
-                            TopTxId = topTxId,
-                            Trader = trader.EncodeAsString(),
-                            TradeState = tradeState
-                        };
-                        return trade;
+                        AssetIdIn = inAssetTransferTx.XferAsset;
+                        AssetIdOut = 0;
+                        AssetAmountIn = inAssetTransferTx.AssetAmount;
+                        AssetAmountOut = 0;
                     }
                     else
                     {
@@ -62,78 +61,39 @@ namespace AVMTradeReporter.Processors.SWAP
                             if (inner.Tx is AssetTransferTransaction outAssetTransferTx)
                             {
                                 // to asa
-                                if (block != null) current.Tx.FillInParamsFromBlockHeader(block);
-                                if (txGroup != null) current.Tx.Group = txGroup;
-                                var trade = new Trade
-                                {
-                                    AssetIdIn = inAssetTransferTx.XferAsset,
-                                    AssetIdOut = outAssetTransferTx.XferAsset,
-                                    AssetAmountIn = inAssetTransferTx.AssetAmount,
-                                    AssetAmountOut = outAssetTransferTx.AssetAmount,
-                                    TxId = current.Tx.TxID(),
-                                    BlockId = block?.Round ?? 0,
-                                    TxGroup = Convert.ToBase64String(current.Tx.Group.Bytes),
-                                    Timestamp = DateTimeOffset.FromUnixTimeSeconds(Convert.ToInt64(block.Timestamp ?? 0)),
-                                    Protocol = DEXProtocol.Biatec,
-                                    PoolAddress = outAssetTransferTx.Sender.EncodeAsString(),
-                                    PoolAppId = appCallTx.ApplicationId ?? 0,
-                                    TopTxId = topTxId,
-                                    Trader = trader.EncodeAsString(),
-                                    TradeState = tradeState
-                                };
-                                return trade;
+
+
+                                AssetIdIn = inAssetTransferTx.XferAsset;
+                                AssetIdOut = outAssetTransferTx.XferAsset;
+                                AssetAmountIn = inAssetTransferTx.AssetAmount;
+                                AssetAmountOut = outAssetTransferTx.AssetAmount;
+
                             }
                             if (inner.Tx is PaymentTransaction outPaymentTx)
                             {
                                 // to native
-                                if (block != null) current.Tx.FillInParamsFromBlockHeader(block);
-                                if (txGroup != null) current.Tx.Group = txGroup;
-                                var trade = new Trade
-                                {
-                                    AssetIdIn = inAssetTransferTx.XferAsset,
-                                    AssetIdOut = 0,
-                                    AssetAmountIn = inAssetTransferTx.AssetAmount,
-                                    AssetAmountOut = outPaymentTx.Amount ?? 0,
-                                    TxId = current.Tx.TxID(),
-                                    BlockId = block?.Round ?? 0,
-                                    TxGroup = Convert.ToBase64String(current.Tx.Group.Bytes),
-                                    Timestamp = DateTimeOffset.FromUnixTimeSeconds(Convert.ToInt64(block.Timestamp ?? 0)),
-                                    Protocol = DEXProtocol.Biatec,
-                                    PoolAddress = outPaymentTx.Sender.EncodeAsString(),
-                                    PoolAppId = appCallTx.ApplicationId ?? 0,
-                                    TopTxId = topTxId,
-                                    Trader = trader.EncodeAsString(),
-                                    TradeState = tradeState
-                                };
-                                return trade;
+
+                                AssetIdIn = inAssetTransferTx.XferAsset;
+                                AssetIdOut = 0;
+                                AssetAmountIn = inAssetTransferTx.AssetAmount;
+                                AssetAmountOut = outPaymentTx.Amount ?? 0;
                             }
                         }
                     }
                 }
                 if (previous.Tx is PaymentTransaction inPayTx)
                 {
+                    poolAddress = inPayTx.Receiver;
                     // from native
                     if (current.Detail?.InnerTxns == null)
                     {
                         if (tradeState == TradeState.Confirmed) return null;
-                        var trade = new Trade
-                        {
-                            AssetIdIn = 0,
-                            AssetIdOut = 0,
-                            AssetAmountIn = inPayTx.Amount ?? 0,
-                            AssetAmountOut = 0,
-                            TxId = current.Tx.TxID(),
-                            BlockId = block?.Round ?? 0,
-                            TxGroup = Convert.ToBase64String(current.Tx.Group.Bytes),
-                            Timestamp = block == null ? DateTimeOffset.UtcNow : DateTimeOffset.FromUnixTimeSeconds(Convert.ToInt64(block?.Timestamp ?? 0)),
-                            Protocol = DEXProtocol.Biatec,
-                            PoolAddress = inPayTx.Receiver.EncodeAsString(),
-                            PoolAppId = appCallTx.ApplicationId ?? 0,
-                            TopTxId = topTxId,
-                            Trader = trader.EncodeAsString(),
-                            TradeState = tradeState
-                        };
-                        return trade;
+
+                        AssetIdIn = 0;
+                        AssetIdOut = 0;
+                        AssetAmountIn = inPayTx.Amount ?? 0;
+                        AssetAmountOut = 0;
+
                     }
                     else
                     {
@@ -143,30 +103,77 @@ namespace AVMTradeReporter.Processors.SWAP
                             if (inner.Tx is AssetTransferTransaction outAssetTransferTx)
                             {
                                 // to asa
-                                if (block != null) current.Tx.FillInParamsFromBlockHeader(block);
-                                if (txGroup != null) current.Tx.Group = txGroup;
-                                var trade = new Trade
-                                {
-                                    AssetIdIn = 0,
-                                    AssetIdOut = outAssetTransferTx.XferAsset,
-                                    AssetAmountIn = inPayTx.Amount ?? 0,
-                                    AssetAmountOut = outAssetTransferTx.AssetAmount,
-                                    TxId = current.Tx.TxID(),
-                                    BlockId = block?.Round ?? 0,
-                                    TxGroup = Convert.ToBase64String(current.Tx.Group.Bytes),
-                                    Timestamp = DateTimeOffset.FromUnixTimeSeconds(Convert.ToInt64(block.Timestamp ?? 0)),
-                                    Protocol = DEXProtocol.Tiny,
-                                    PoolAddress = outAssetTransferTx.Sender.EncodeAsString(),
-                                    PoolAppId = appCallTx.ApplicationId ?? 0,
-                                    TopTxId = topTxId,
-                                    Trader = trader.EncodeAsString(),
-                                    TradeState = tradeState
-                                };
-                                return trade;
+
+                                AssetIdIn = 0;
+                                AssetIdOut = outAssetTransferTx.XferAsset;
+                                AssetAmountIn = inPayTx.Amount ?? 0;
+                                AssetAmountOut = outAssetTransferTx.AssetAmount;
+                                break;
                             }
                         }
                     }
+
                 }
+                if (poolAddress == null) return null;
+
+                ulong A = 0, B = 0, L = 0;
+                var AItem = current.Detail?.GlobalDelta?.FirstOrDefault(kv => kv.Key.ToString() == "ab");
+                if (AItem != null)
+                {
+                    if (AItem.Value.Value.Bytes is string stringVal)
+                    {
+                        //var asciiBytes = Algorand.Utils.Encoder.DeltaValueStringToBytes(stringVal);
+                        //var longVal = Algorand.Utils.Encoder.UInt256ToUlong(asciiBytes);
+                        var asciiBytes = Model.Utils.DeltaValueStringToBytes(stringVal);
+                        var longVal = Model.Utils.UInt256ToUlong(asciiBytes);
+                        A = longVal;
+                    }
+                }
+                var BItem = current.Detail?.GlobalDelta?.FirstOrDefault(kv => kv.Key.ToString() == "bb");
+                if (BItem != null)
+                {
+                    if (BItem.Value.Value.Bytes is string stringVal)
+                    {
+                        //var asciiBytes = Algorand.Utils.Encoder.DeltaValueStringToBytes(stringVal);
+                        //var longVal = Algorand.Utils.Encoder.UInt256ToUlong(asciiBytes);
+                        var asciiBytes = Model.Utils.DeltaValueStringToBytes(stringVal);
+                        var longVal = Model.Utils.UInt256ToUlong(asciiBytes);
+                        B = longVal;
+                    }
+                }
+                var LItem = current.Detail?.GlobalDelta?.FirstOrDefault(kv => kv.Key.ToString() == "L");
+                if (LItem != null)
+                {
+                    if (LItem.Value.Value.Bytes is string stringVal)
+                    {
+                        //var asciiBytes = Algorand.Utils.Encoder.DeltaValueStringToBytes(stringVal);
+                        //var longVal = Algorand.Utils.Encoder.UInt256ToUlong(asciiBytes);
+                        var asciiBytes = Model.Utils.DeltaValueStringToBytes(stringVal);
+                        var longVal = Model.Utils.UInt256ToUlong(asciiBytes);
+                        L = longVal;
+                    }
+                }
+                var trade = new Trade
+                {
+                    AssetIdIn = AssetIdIn,
+                    AssetIdOut = AssetIdOut,
+                    AssetAmountIn = AssetAmountIn,
+                    AssetAmountOut = AssetAmountOut,
+                    TxId = current.Tx.TxID(),
+                    BlockId = block?.Round ?? 0,
+                    TxGroup = Convert.ToBase64String(current.Tx.Group.Bytes),
+                    Timestamp = block == null ? DateTimeOffset.UtcNow : DateTimeOffset.FromUnixTimeSeconds(Convert.ToInt64(block?.Timestamp ?? 0)),
+                    Protocol = DEXProtocol.Biatec,
+                    PoolAddress = poolAddress.EncodeAsString(),
+                    PoolAppId = appCallTx.ApplicationId ?? 0,
+                    TopTxId = topTxId,
+                    Trader = trader.EncodeAsString(),
+                    TradeState = tradeState,
+                    A = A,
+                    B = B,
+                    L = L
+                };
+                return trade;
             }
             return null;
         }
