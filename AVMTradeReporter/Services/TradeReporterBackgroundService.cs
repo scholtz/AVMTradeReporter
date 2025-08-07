@@ -20,6 +20,7 @@ namespace AVMTradeReporter.Services
         private readonly HttpClient _httpClient;
         private readonly IndexerRepository _indexerRepository;
         private readonly TradeRepository _tradeRepository;
+        private readonly LiquidityRepository _liquidityRepository;
         private readonly TransactionProcessor _transactionProcessor;
 
 
@@ -30,6 +31,7 @@ namespace AVMTradeReporter.Services
             IOptions<AppConfiguration> appConfig,
             IndexerRepository indexerRepository,
             TradeRepository tradeRepository,
+            LiquidityRepository liquidityRepository,
             TransactionProcessor transactionProcessor
             )
         {
@@ -37,6 +39,7 @@ namespace AVMTradeReporter.Services
             _appConfig = appConfig;
             _indexerRepository = indexerRepository;
             _tradeRepository = tradeRepository;
+            _liquidityRepository = liquidityRepository;
             _transactionProcessor = transactionProcessor;
 
             _httpClient = HttpClientConfigurator.ConfigureHttpClient(appConfig.Value.Algod.Host, appConfig.Value.Algod.ApiKey, appConfig.Value.Algod.Header);
@@ -141,12 +144,12 @@ namespace AVMTradeReporter.Services
 
 
         ConcurrentDictionary<string, Trade> _trades = new ConcurrentDictionary<string, Trade>();
+        ConcurrentDictionary<string, Liquidity> _liquidityUpdates = new ConcurrentDictionary<string, Liquidity>();
         private Task RegisterTrade(Trade trade, CancellationToken cancellationToken)
         {
             _trades[trade.TxId] = trade;
             return Task.CompletedTask;
         }
-        ConcurrentDictionary<string, Liquidity> _liquidityUpdates = new ConcurrentDictionary<string, Liquidity>();
 
         public Task RegisterLiquidity(Liquidity liquidityUpdate, CancellationToken cancellationToken)
         {
@@ -182,34 +185,16 @@ namespace AVMTradeReporter.Services
                 _logger.LogInformation("Found transactions: {txCount}", block.Block?.Transactions?.Count);
                 Algorand.Algod.Model.Transactions.SignedTransaction? prevTx = null;
                 await _transactionProcessor.ProcessBlock(block, this, this, cancellationToken);
-                //if (block.Block?.Transactions != null)
-                //{
-                //    ulong index = 0;
-                //    foreach (var currTx in block.Block.Transactions)
-                //    {
-                //        index++;
-                //        try
-                //        {
-                //            if (prevTx != null)
-                //            {
-                //                currTx.Tx.FillInParamsFromBlockHeader(block.Block);
-                //                var txId = currTx.Tx.TxID();
-                //                await _transactionProcessor.ProcessTransaction(currTx, prevTx, block.Block, currTx.Tx.Group, txId, currTx.Tx.Sender, TradeState.Confirmed, this, cancellationToken);
-                //            }
-                //        }
-                //        catch (Exception exc)
-                //        {
-                //            _logger.LogInformation("Error processing transaction {index} in block {block}: {error}", index, block.Block.Round, exc.Message);
-                //        }
-                //        prevTx = currTx;
-                //    }
-                //}
-                //var tx = block.Block.Transactions.FirstOrDefault();
-                //var id = tx?.Tx.TxID();
+               
                 var result = await _tradeRepository.StoreTradesAsync(_trades.Values.ToArray(), cancellationToken);
                 if (result)
                 {
                     _trades.Clear();
+                }
+                result = await _liquidityRepository.StoreLiquidityUpdatesAsync(_liquidityUpdates.Values.ToArray(), cancellationToken);
+                if (result)
+                {
+                    _liquidityUpdates.Clear();
                 }
                 await Task.CompletedTask; // Placeholder for actual work
             }

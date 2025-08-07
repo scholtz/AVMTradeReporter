@@ -129,7 +129,5 @@ namespace AVMTradeReporter.Repository
                 _logger.LogError(ex, "Failed to publish trades to SignalR hub");
             }
         }
-
-        
     }
 }

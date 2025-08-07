@@ -17,6 +17,7 @@ namespace AVMTradeReporter.Services
         private readonly ILoggerFactory _loggerFactory;
         private readonly IOptions<AppConfiguration> _appConfig;
         private readonly TradeRepository _tradeRepository;
+        private readonly LiquidityRepository _liquidityRepository;
         private readonly MemoryCache _tx_cache = new MemoryCache(new MemoryCacheOptions());
         private readonly MemoryCache _tx_group = new MemoryCache(new MemoryCacheOptions());
         private readonly TransactionProcessor _transactionProcessor;
@@ -24,24 +25,52 @@ namespace AVMTradeReporter.Services
             ILoggerFactory loggerFactory,
             IOptions<AppConfiguration> appConfig,
             TradeRepository tradeRepository,
+            LiquidityRepository liquidityRepository,
             TransactionProcessor transactionProcessor
             )
         {
             _logger = loggerFactory.CreateLogger<GossipBackgroundService>();
             _loggerFactory = loggerFactory;
             _tradeRepository = tradeRepository;
+            _liquidityRepository = liquidityRepository;
             _transactionProcessor = transactionProcessor;
             _appConfig = appConfig;
         }
 
-        public async Task RegisterTrade(Trade trade, CancellationToken cancellationToken)
+        ConcurrentDictionary<string, Trade> _trades = new ConcurrentDictionary<string, Trade>();
+        ConcurrentDictionary<string, Liquidity> _liquidityUpdates = new ConcurrentDictionary<string, Liquidity>();
+        public Task RegisterTrade(Trade trade, CancellationToken cancellationToken)
         {
-            await _tradeRepository.StoreTradesAsync([trade], cancellationToken);
+            _trades[trade.TxId] = trade;
+            return Task.CompletedTask;
         }
+
         public Task RegisterLiquidity(Liquidity liquidityUpdate, CancellationToken cancellationToken)
         {
-            //throw new NotImplementedException();
+            _liquidityUpdates[liquidityUpdate.TxId] = liquidityUpdate;
             return Task.CompletedTask;
+        }
+
+        private async Task FinalizeAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                var result = await _tradeRepository.StoreTradesAsync(_trades.Values.ToArray(), cancellationToken);
+                if (result)
+                {
+                    _trades.Clear();
+                }
+                result = await _liquidityRepository.StoreLiquidityUpdatesAsync(_liquidityUpdates.Values.ToArray(), cancellationToken);
+                if (result)
+                {
+                    _liquidityUpdates.Clear();
+                }
+                await Task.CompletedTask; // Placeholder for actual work
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, ex.Message);
+            }
         }
         ConcurrentBag<GossipWebsocketClient> _clients = new ConcurrentBag<GossipWebsocketClient>();
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -72,6 +101,7 @@ namespace AVMTradeReporter.Services
                 return;
             }
             _tx_cache.Set(txId, tx, TimeSpan.FromMinutes(10));
+            var cancellationTokenSource = new CancellationTokenSource();
             if (tx.Tx.Group != null && tx.Tx.Group.Bytes.Length > 0)
             {
                 List<SignedTransaction> txsGroup = txs.ToList();
@@ -79,7 +109,6 @@ namespace AVMTradeReporter.Services
 
                 Algorand.Algod.Model.Transactions.SignedTransaction? prevTx1 = null;
                 Algorand.Algod.Model.Transactions.SignedTransaction? prevTx2 = null;
-                var cancellationTokenSource = new CancellationTokenSource();
                 if (txsGroup != null)
                 {
                     ulong index = 0;
@@ -102,6 +131,7 @@ namespace AVMTradeReporter.Services
                 }
 
             }
+            await FinalizeAsync(cancellationTokenSource.Token);
         }
 
     }

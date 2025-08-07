@@ -29,6 +29,7 @@ namespace AVMTradeReporter
 
             builder.Services.AddSingleton<IndexerRepository>();
             builder.Services.AddSingleton<TradeRepository>();
+            builder.Services.AddSingleton<LiquidityRepository>();
             builder.Services.AddSingleton<TransactionProcessor>();
 
             // Register the background service
@@ -176,6 +177,8 @@ namespace AVMTradeReporter
 
             var bw = app.Services.GetService<TradeReporterBackgroundService>();
             bw?.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
+            var bwG = app.Services.GetService<GossipBackgroundService>();
+            bwG?.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
 
             app.Run();
         }
