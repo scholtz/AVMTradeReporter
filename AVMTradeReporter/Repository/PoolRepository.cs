@@ -1,6 +1,6 @@
 using AVMTradeReporter.Hubs;
-using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Model.Configuration;
+using AVMTradeReporter.Model.Data;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Core.Bulk;
 using Elastic.Clients.Elasticsearch.IndexManagement;
@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text.Json;
 
 namespace AVMTradeReporter.Repository
@@ -20,7 +21,7 @@ namespace AVMTradeReporter.Repository
         private readonly IHubContext<BiatecScanHub> _hubContext;
         private readonly IDatabase? _redisDatabase;
         private readonly AppConfiguration _appConfig;
-        
+
         // In-memory cache for pools
         private readonly ConcurrentDictionary<string, Pool> _poolsCache = new();
         private readonly SemaphoreSlim _initializationSemaphore = new(1, 1);
@@ -39,7 +40,7 @@ namespace AVMTradeReporter.Repository
             _hubContext = hubContext;
             _redisDatabase = redisDatabase;
             _appConfig = appConfig.Value;
-            
+
             CreatePoolIndexTemplateAsync().Wait();
         }
 
@@ -62,7 +63,7 @@ namespace AVMTradeReporter.Repository
                 {
                     var elasticLoadCount = await LoadPoolsFromElasticsearch(cancellationToken);
                     _logger.LogInformation("Loaded {count} pools from Elasticsearch", elasticLoadCount);
-                    
+
                     // Save to Redis for future starts
                     if (elasticLoadCount > 0 && _redisDatabase != null && _appConfig.Redis.Enabled)
                     {
@@ -128,7 +129,7 @@ namespace AVMTradeReporter.Repository
             try
             {
                 var searchResponse = await _elasticClient.SearchAsync<Pool>(s => s
-                    .Index("pools")
+                    .Indices("pools")
                     .Size(10000), cancellationToken);
 
                 if (searchResponse.IsValidResponse)
@@ -215,7 +216,7 @@ namespace AVMTradeReporter.Repository
         public async Task<Pool?> GetPoolAsync(string poolAddress, ulong poolAppId, DEXProtocol protocol, CancellationToken cancellationToken)
         {
             await EnsureInitialized(cancellationToken);
-            
+
             var poolId = GeneratePoolId(poolAddress, poolAppId, protocol);
             return _poolsCache.TryGetValue(poolId, out var pool) ? pool : null;
         }
@@ -223,14 +224,14 @@ namespace AVMTradeReporter.Repository
         public async Task<bool> StorePoolAsync(Pool pool, CancellationToken cancellationToken)
         {
             await EnsureInitialized(cancellationToken);
-            
+
             try
             {
                 var poolId = GeneratePoolId(pool.PoolAddress, pool.PoolAppId, pool.Protocol);
-                
+
                 // Update in-memory cache
                 _poolsCache.AddOrUpdate(poolId, pool, (key, oldValue) => pool);
-                
+
                 // Save to Redis asynchronously
                 _ = Task.Run(async () =>
                 {
@@ -270,10 +271,10 @@ namespace AVMTradeReporter.Repository
                 }, cancellationToken);
 
                 _logger.LogDebug("Pool updated in memory: {poolId}", poolId);
-                
+
                 // Publish pool update to SignalR hub
                 await PublishPoolUpdateToHub(pool, cancellationToken);
-                
+
                 return true;
             }
             catch (Exception ex)
@@ -298,47 +299,35 @@ namespace AVMTradeReporter.Repository
             {
                 var poolId = GeneratePoolId(trade.PoolAddress, trade.PoolAppId, trade.Protocol);
                 var existingPool = _poolsCache.TryGetValue(poolId, out var pool) ? pool : null;
-                
+
                 // If pool doesn't exist, create a new one from trade data
                 if (existingPool == null)
                 {
                     var newPool = CreatePoolFromTrade(trade);
                     await StorePoolAsync(newPool, cancellationToken);
-                    _logger.LogInformation("Created new pool from trade: {poolAddress}_{poolAppId}_{protocol}", 
+                    _logger.LogInformation("Created new pool from trade: {poolAddress}_{poolAppId}_{protocol}",
                         trade.PoolAddress, trade.PoolAppId, trade.Protocol);
                     return;
                 }
 
                 // Only update if timestamp is equal or larger
-                if (trade.Timestamp.HasValue && existingPool.Timestamp.HasValue && 
+                if (trade.Timestamp.HasValue && existingPool.Timestamp.HasValue &&
                     trade.Timestamp.Value < existingPool.Timestamp.Value)
                 {
-                    _logger.LogDebug("Skipping pool update - trade timestamp {tradeTime} is older than pool timestamp {poolTime}", 
+                    _logger.LogDebug("Skipping pool update - trade timestamp {tradeTime} is older than pool timestamp {poolTime}",
                         trade.Timestamp.Value, existingPool.Timestamp.Value);
                     return;
                 }
 
-                // Create updated pool
-                var updatedPool = new Pool
-                {
-                    PoolAddress = existingPool.PoolAddress,
-                    PoolAppId = existingPool.PoolAppId,
-                    AssetIdA = existingPool.AssetIdA == 0 ? trade.AssetIdIn : existingPool.AssetIdA,
-                    AssetIdB = existingPool.AssetIdB == 0 ? trade.AssetIdOut : existingPool.AssetIdB,
-                    AssetIdLP = existingPool.AssetIdLP,
-                    AssetAmountA = existingPool.AssetAmountA,
-                    AssetAmountB = existingPool.AssetAmountB,
-                    AssetAmountLP = existingPool.AssetAmountLP,
-                    A = trade.A,
-                    B = trade.B,
-                    L = trade.L,
-                    Protocol = existingPool.Protocol,
-                    Timestamp = trade.Timestamp
-                };
+                existingPool.A = trade.A;
+                existingPool.B = trade.B;
+                if (trade.L > 0)
+                    existingPool.L = trade.L;
+                existingPool.Timestamp = trade.Timestamp;
 
-                await StorePoolAsync(updatedPool, cancellationToken);
-                
-                _logger.LogDebug("Updated pool from trade: {poolAddress}_{poolAppId}_{protocol}", 
+                await StorePoolAsync(existingPool, cancellationToken);
+
+                _logger.LogDebug("Updated pool from trade: {poolAddress}_{poolAppId}_{protocol}",
                     trade.PoolAddress, trade.PoolAppId, trade.Protocol);
             }
             catch (Exception ex)
@@ -362,47 +351,35 @@ namespace AVMTradeReporter.Repository
             {
                 var poolId = GeneratePoolId(liquidity.PoolAddress, liquidity.PoolAppId, liquidity.Protocol);
                 var existingPool = _poolsCache.TryGetValue(poolId, out var pool) ? pool : null;
-                
+
                 // If pool doesn't exist, create a new one from liquidity data
                 if (existingPool == null)
                 {
                     var newPool = CreatePoolFromLiquidity(liquidity);
                     await StorePoolAsync(newPool, cancellationToken);
-                    _logger.LogInformation("Created new pool from liquidity: {poolAddress}_{poolAppId}_{protocol}", 
+                    _logger.LogInformation("Created new pool from liquidity: {poolAddress}_{poolAppId}_{protocol}",
                         liquidity.PoolAddress, liquidity.PoolAppId, liquidity.Protocol);
                     return;
                 }
 
                 // Only update if timestamp is equal or larger
-                if (liquidity.Timestamp.HasValue && existingPool.Timestamp.HasValue && 
+                if (liquidity.Timestamp.HasValue && existingPool.Timestamp.HasValue &&
                     liquidity.Timestamp.Value < existingPool.Timestamp.Value)
                 {
-                    _logger.LogDebug("Skipping pool update - liquidity timestamp {liquidityTime} is older than pool timestamp {poolTime}", 
+                    _logger.LogDebug("Skipping pool update - liquidity timestamp {liquidityTime} is older than pool timestamp {poolTime}",
                         liquidity.Timestamp.Value, existingPool.Timestamp.Value);
                     return;
                 }
 
-                // Create updated pool
-                var updatedPool = new Pool
-                {
-                    PoolAddress = existingPool.PoolAddress,
-                    PoolAppId = existingPool.PoolAppId,
-                    AssetIdA = liquidity.AssetIdA,
-                    AssetIdB = liquidity.AssetIdB,
-                    AssetIdLP = liquidity.AssetIdLP,
-                    AssetAmountA = liquidity.AssetAmountA,
-                    AssetAmountB = liquidity.AssetAmountB,
-                    AssetAmountLP = liquidity.AssetAmountLP,
-                    A = liquidity.A,
-                    B = liquidity.B,
-                    L = liquidity.L,
-                    Protocol = existingPool.Protocol,
-                    Timestamp = liquidity.Timestamp
-                };
+                existingPool.A = liquidity.A;
+                existingPool.B = liquidity.B;
+                if (liquidity.L > 0)
+                    existingPool.L = liquidity.L;
+                existingPool.Timestamp = liquidity.Timestamp;
 
-                await StorePoolAsync(updatedPool, cancellationToken);
-                
-                _logger.LogDebug("Updated pool from liquidity: {poolAddress}_{poolAppId}_{protocol}", 
+                await StorePoolAsync(existingPool, cancellationToken);
+
+                _logger.LogDebug("Updated pool from liquidity: {poolAddress}_{poolAppId}_{protocol}",
                     liquidity.PoolAddress, liquidity.PoolAppId, liquidity.Protocol);
             }
             catch (Exception ex)
@@ -414,20 +391,20 @@ namespace AVMTradeReporter.Repository
         public async Task<List<Pool>> GetPoolsAsync(DEXProtocol? protocol = null, int size = 100, CancellationToken cancellationToken = default)
         {
             await EnsureInitialized(cancellationToken);
-            
+
             var pools = _poolsCache.Values.AsEnumerable();
-            
+
             // Filter by protocol if specified
             if (protocol.HasValue)
             {
                 pools = pools.Where(p => p.Protocol == protocol.Value);
             }
-            
+
             // Sort by timestamp descending and limit size
             pools = pools
                 .OrderByDescending(p => p.Timestamp ?? DateTimeOffset.MinValue)
                 .Take(size);
-            
+
             return pools.ToList();
         }
 
@@ -457,12 +434,6 @@ namespace AVMTradeReporter.Repository
             {
                 PoolAddress = trade.PoolAddress,
                 PoolAppId = trade.PoolAppId,
-                AssetIdA = trade.AssetIdIn,  // Assuming AssetIdIn is AssetA
-                AssetIdB = trade.AssetIdOut, // Assuming AssetIdOut is AssetB
-                AssetIdLP = 0,  // Not available in trade data
-                AssetAmountA = 0,  // Pool reserves not directly available from trade
-                AssetAmountB = 0,  // Pool reserves not directly available from trade
-                AssetAmountLP = 0, // Not available in trade data
                 A = trade.A,
                 B = trade.B,
                 L = trade.L,
@@ -480,9 +451,6 @@ namespace AVMTradeReporter.Repository
                 AssetIdA = liquidity.AssetIdA,
                 AssetIdB = liquidity.AssetIdB,
                 AssetIdLP = liquidity.AssetIdLP,
-                AssetAmountA = liquidity.AssetAmountA,
-                AssetAmountB = liquidity.AssetAmountB,
-                AssetAmountLP = liquidity.AssetAmountLP,
                 A = liquidity.A,
                 B = liquidity.B,
                 L = liquidity.L,
@@ -496,7 +464,7 @@ namespace AVMTradeReporter.Repository
             try
             {
                 await _hubContext.Clients.All.SendAsync("PoolUpdated", pool, cancellationToken);
-                _logger.LogDebug("Published pool update to SignalR hub: {poolAddress}_{poolAppId}_{protocol}", 
+                _logger.LogDebug("Published pool update to SignalR hub: {poolAddress}_{poolAppId}_{protocol}",
                     pool.PoolAddress, pool.PoolAppId, pool.Protocol);
             }
             catch (Exception ex)

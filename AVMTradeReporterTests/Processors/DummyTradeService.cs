@@ -1,10 +1,5 @@
 ﻿using AVMTradeReporter.Model;
 using AVMTradeReporter.Model.Data;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace AVMTradeReporterTests.Processors
 {
@@ -14,6 +9,7 @@ namespace AVMTradeReporterTests.Processors
         public async Task RegisterTrade(Trade trade, CancellationToken cancellationToken)
         {
             trades.Add(trade);
+            await Task.Delay(1);
         }
     }
 }

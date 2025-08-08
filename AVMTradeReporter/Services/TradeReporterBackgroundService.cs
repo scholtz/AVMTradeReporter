@@ -176,8 +176,9 @@ namespace AVMTradeReporter.Services
         private async Task IncrementIndexer(CancellationToken cancellationToken)
         {
 #if DEBUG
+            await Task.Delay(1);
             return;
-#endif
+#else
             if (Indexer == null) return;
             if (_appConfig.Value.Direction == "-")
             {
@@ -188,7 +189,8 @@ namespace AVMTradeReporter.Services
                 Indexer.Round = Indexer.Round + 1;
             }
             Indexer.Updated = DateTimeOffset.Now;
-            _indexerRepository.StoreIndexerAsync(Indexer, cancellationToken).Wait(cancellationToken);
+            await _indexerRepository.StoreIndexerAsync(Indexer, cancellationToken);
+#endif
         }
         private async Task ProcessBlockWorkAsync(ulong blockId, CancellationToken cancellationToken)
         {
@@ -199,7 +201,6 @@ namespace AVMTradeReporter.Services
                 _logger.LogInformation("Loading block {blockId}", blockId);
                 var block = await _algod.GetBlockAsync(blockId, Format.Json, false);
                 _logger.LogInformation("Found transactions: {txCount}", block.Block?.Transactions?.Count);
-                Algorand.Algod.Model.Transactions.SignedTransaction? prevTx = null;
                 await _transactionProcessor.ProcessBlock(block, this, this, cancellationToken);
                
                 var result = await _tradeRepository.StoreTradesAsync(_trades.Values.ToArray(), cancellationToken);

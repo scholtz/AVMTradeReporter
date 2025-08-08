@@ -2,13 +2,10 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Security.Claims;
-using System.Threading;
 
 namespace AVMTradeReporter.Hubs
 {
-    [Authorize]
     public class BiatecScanHub : Hub
     {
         private static readonly ConcurrentDictionary<string, string> User2Subscription = new ConcurrentDictionary<string, string>();
@@ -25,7 +22,7 @@ namespace AVMTradeReporter.Hubs
                 var connectionInfo = new
                 {
                     UserId = userId,
-                    ConnectionId = Context.ConnectionId,
+                    ConnectionId = Context?.ConnectionId,
                     IsAuthenticated = isAuthenticated,
                     IdentityName = Context?.User?.Identity?.Name,
                     UserIdentifier = Context?.UserIdentifier,
@@ -43,6 +40,7 @@ namespace AVMTradeReporter.Hubs
             }
         }
 
+        [Authorize]
         public async Task Subscribe(string filter)
         {
             try
@@ -51,8 +49,8 @@ namespace AVMTradeReporter.Hubs
                 var userId = GetUserId();
                 Console.WriteLine($"Subscribe attempt - UserId: '{userId}', Filter: '{filter}'");
                 Console.WriteLine($"User.Identity.Name: '{Context?.User?.Identity?.Name}'");
-                Console.WriteLine($"UserIdentifier: '{Context.UserIdentifier}'");
-                Console.WriteLine($"ConnectionId: '{Context.ConnectionId}'");
+                Console.WriteLine($"UserIdentifier: '{Context?.UserIdentifier}'");
+                Console.WriteLine($"ConnectionId: '{Context?.ConnectionId}'");
                 Console.WriteLine($"User.Identity.IsAuthenticated: {Context?.User?.Identity?.IsAuthenticated}");
                 Console.WriteLine($"User.Identity.AuthenticationType: '{Context?.User?.Identity?.AuthenticationType}'");
 
@@ -102,6 +100,7 @@ namespace AVMTradeReporter.Hubs
             }
         }
 
+        [Authorize]
         public async Task Unsubscribe()
         {
             try
@@ -131,7 +130,7 @@ namespace AVMTradeReporter.Hubs
             // Log connection for debugging - no [Authorize] needed here
             var userId = GetUserId();
             var isAuthenticated = Context?.User?.Identity?.IsAuthenticated ?? false;
-            Console.WriteLine($"SignalR client connected - UserId: '{userId}', ConnectionId: '{Context.ConnectionId}', Authenticated: {isAuthenticated}");
+            Console.WriteLine($"SignalR client connected - UserId: '{userId}', ConnectionId: '{Context?.ConnectionId}', Authenticated: {isAuthenticated}");
 
             if (isAuthenticated && Context?.User?.Claims != null)
             {
@@ -253,7 +252,7 @@ namespace AVMTradeReporter.Hubs
                     _ => true // Unknown filter type, send all
                 };
             }
-            catch (Exception ex)
+            catch
             {
                 return true; // On error, send the trade
             }
@@ -294,7 +293,7 @@ namespace AVMTradeReporter.Hubs
                     _ => true // Unknown filter type, send all
                 };
             }
-            catch (Exception ex)
+            catch
             {
                 return true; // On error, send the trade
             }

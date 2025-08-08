@@ -64,7 +64,7 @@ namespace AVMTradeReporter.Processors.Liqudity
                 }
 
                 if (block != null) current.Tx.FillInParamsFromBlockHeader(block);
-                var inner2 = current.Detail.InnerTxns.Skip(1).FirstOrDefault()?.Tx;
+                var inner2 =current.Detail?.InnerTxns?.Skip(1).FirstOrDefault()?.Tx;
                 if (inner2 is AssetTransferTransaction outAssetTransferTx2)
                 {
                     assetBId = outAssetTransferTx2.XferAsset;

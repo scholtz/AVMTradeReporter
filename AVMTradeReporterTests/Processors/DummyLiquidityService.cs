@@ -15,6 +15,7 @@ namespace AVMTradeReporterTests.Processors
         public async Task RegisterLiquidity(Liquidity liquidityUpdate, CancellationToken cancellationToken)
         {
             list.Add(liquidityUpdate);
+            await Task.Delay(1);
         }
     }
 }
