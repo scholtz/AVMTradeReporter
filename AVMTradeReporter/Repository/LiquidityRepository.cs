@@ -11,17 +11,21 @@ namespace AVMTradeReporter.Repository
         private readonly ElasticsearchClient _elasticClient;
         private readonly ILogger<LiquidityRepository> _logger;
         private readonly IHubContext<BiatecScanHub> _hubContext;
+        private readonly PoolRepository _poolRepository;
 
         public LiquidityRepository(
             ElasticsearchClient elasticClient,
             ILogger<LiquidityRepository> logger,
-            IHubContext<BiatecScanHub> hubContext
+            IHubContext<BiatecScanHub> hubContext,
+            PoolRepository poolRepository
             )
         {
             _elasticClient = elasticClient;
             _logger = logger;
             _hubContext = hubContext;
+            _poolRepository = poolRepository;
         }
+        
         public async Task<bool> StoreLiquidityUpdatesAsync(Liquidity[] items, CancellationToken cancellationToken)
         {
             if (!items.Any())
@@ -76,6 +80,31 @@ namespace AVMTradeReporter.Repository
                                 failedItem.Id, failedItem.Error?.Reason ?? "Unknown error");
                         }
                     }
+
+                    // Update pools for successfully stored liquidity updates
+                    if (successCount > 0)
+                    {
+                        var successfulLiquidityUpdates = new List<Liquidity>();
+                        var bulkResponseItems = bulkResponse.Items.ToList();
+                        
+                        for (int i = 0; i < items.Length && i < bulkResponseItems.Count; i++)
+                        {
+                            if (bulkResponseItems[i].IsValid)
+                            {
+                                successfulLiquidityUpdates.Add(items[i]);
+                            }
+                        }
+
+                        // Update pools from confirmed liquidity updates in background
+                        _ = Task.Run(async () =>
+                        {
+                            foreach (var liquidity in successfulLiquidityUpdates)
+                            {
+                                await _poolRepository.UpdatePoolFromLiquidity(liquidity, cancellationToken);
+                            }
+                        }, cancellationToken);
+                    }
+
                     return true;
                 }
                 else
@@ -83,7 +112,6 @@ namespace AVMTradeReporter.Repository
                     _logger.LogError("LP Bulk indexing failed: {error}", bulkResponse.DebugInformation);
                     return false;
                 }
-
             }
             catch (Exception ex)
             {
@@ -92,7 +120,7 @@ namespace AVMTradeReporter.Repository
             }
         }
 
-        private async Task PublishLiquidityUpdatesToHub(Liquidity[] items, CancellationToken cancellationToken)
+        private async Task PublishLiquidityUpdatesToHub(Liquidity[] liquidityUpdates, CancellationToken cancellationToken)
         {
             try
             {
@@ -100,33 +128,33 @@ namespace AVMTradeReporter.Repository
 
                 if (!subscriptions.Any())
                 {
-                    _logger.LogDebug("No active subscriptions, skipping trade publication");
+                    _logger.LogDebug("No active subscriptions, skipping liquidity update publication");
                     return;
                 }
 
-                foreach (var item in items)
+                foreach (var liquidityUpdate in liquidityUpdates)
                 {
                     // Publish to all clients by default
-                    await _hubContext.Clients.All.SendAsync("LiquidityUpdated", item, cancellationToken);
+                    await _hubContext.Clients.All.SendAsync("LiquidityUpdated", liquidityUpdate, cancellationToken);
 
-                    // Also send filtered trades to specific users based on their subscriptions
+                    // Also send filtered liquidity updates to specific users based on their subscriptions
                     foreach (var subscription in subscriptions)
                     {
                         var userId = subscription.Key;
                         var filter = subscription.Value;
 
-                        if (BiatecScanHub.ShouldSendLiquidityToUser(item, filter))
+                        if (BiatecScanHub.ShouldSendLiquidityToUser(liquidityUpdate, filter))
                         {
-                            await _hubContext.Clients.User(userId).SendAsync("FilteredLiquidityUpdated", item, cancellationToken);
+                            await _hubContext.Clients.User(userId).SendAsync("FilteredLiquidityUpdated", liquidityUpdate, cancellationToken);
                         }
                     }
                 }
 
-                _logger.LogInformation("Published {tradeCount} trades to SignalR hub", items.Length);
+                _logger.LogInformation("Published {liquidityCount} liquidity updates to SignalR hub", liquidityUpdates.Length);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to publish trades to SignalR hub");
+                _logger.LogError(ex, "Failed to publish liquidity updates to SignalR hub");
             }
         }
     }

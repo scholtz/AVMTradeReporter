@@ -28,6 +28,7 @@ namespace AVMTradeReporter
                 builder.Configuration.GetSection("AppConfiguration"));
 
             builder.Services.AddSingleton<IndexerRepository>();
+            builder.Services.AddSingleton<PoolRepository>();
             builder.Services.AddSingleton<TradeRepository>();
             builder.Services.AddSingleton<LiquidityRepository>();
             builder.Services.AddSingleton<TransactionProcessor>();
@@ -53,6 +54,9 @@ namespace AVMTradeReporter
                 .DefaultMappingFor<Model.Data.Liquidity>(m => m
                     .IndexName("liquidity")
                     .IdProperty(t => t.TxId))
+                .DefaultMappingFor<Model.Data.Pool>(m => m
+                    .IndexName("pools")
+                    .IdProperty(t => t.PoolAddress))
                 .DefaultMappingFor<Model.Data.Indexer>(m => m
                     .IndexName("indexers")
                     .IdProperty(t => t.Id))

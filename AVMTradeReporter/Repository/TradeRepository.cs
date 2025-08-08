@@ -13,16 +13,19 @@ namespace AVMTradeReporter.Repository
         private readonly ElasticsearchClient _elasticClient;
         private readonly ILogger<TradeRepository> _logger;
         private readonly IHubContext<BiatecScanHub> _hubContext;
+        private readonly PoolRepository _poolRepository;
 
         public TradeRepository(
             ElasticsearchClient elasticClient,
             ILogger<TradeRepository> logger,
-            IHubContext<BiatecScanHub> hubContext
+            IHubContext<BiatecScanHub> hubContext,
+            PoolRepository poolRepository
             )
         {
             _elasticClient = elasticClient;
             _logger = logger;
             _hubContext = hubContext;
+            _poolRepository = poolRepository;
             CreateTradeIndexTemplateAsync().Wait();
         }
 
@@ -115,6 +118,30 @@ namespace AVMTradeReporter.Repository
                             _logger.LogWarning("Failed to index trade {id}: {error}",
                                 failedItem.Id, failedItem.Error?.Reason ?? "Unknown error");
                         }
+                    }
+
+                    // Update pools for successfully stored trades
+                    if (successCount > 0)
+                    {
+                        var successfulTrades = new List<Trade>();
+                        var bulkResponseItems = bulkResponse.Items.ToList();
+                        
+                        for (int i = 0; i < trades.Length && i < bulkResponseItems.Count; i++)
+                        {
+                            if (bulkResponseItems[i].IsValid)
+                            {
+                                successfulTrades.Add(trades[i]);
+                            }
+                        }
+
+                        // Update pools from confirmed trades in background
+                        _ = Task.Run(async () =>
+                        {
+                            foreach (var trade in successfulTrades)
+                            {
+                                await _poolRepository.UpdatePoolFromTrade(trade, cancellationToken);
+                            }
+                        }, cancellationToken);
                     }
 
                     return true;
