@@ -46,7 +46,7 @@ namespace AVMTradeReporter.Controllers
         /// <param name="poolAppId">Pool app ID</param>
         /// <param name="protocol">Protocol (Pact, Tiny, Biatec)</param>
         /// <returns>Pool details if found</returns>
-        [HttpGet("{poolAddress}/{poolAppId}/{protocol}")]
+        [HttpGet("{poolAddress}")]
         public async Task<ActionResult<Pool>> GetPool(string poolAddress)
         {
             try
