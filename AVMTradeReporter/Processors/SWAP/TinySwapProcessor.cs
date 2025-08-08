@@ -36,6 +36,27 @@ namespace AVMTradeReporter.Processors.SWAP
                 if (block != null) current.Tx.FillInParamsFromBlockHeader(block);
                 if (txGroup != null) current.Tx.Group = txGroup;
 
+                ulong A = 0, B = 0, L = 0;
+
+                var AItem = current.Detail?.LocalDelta?.SelectMany(k => k.Value)?.FirstOrDefault(kv => kv.Key.ToString() == "asset_1_reserves");
+                if (AItem != null)
+                {
+                    A = Convert.ToUInt64(AItem.Value.Value.Uint64);
+                }
+                else
+                {
+                    return null;// tiny swap has always the local delta change
+                }
+                var BItem = current.Detail?.LocalDelta?.SelectMany(k => k.Value)?.FirstOrDefault(kv => kv.Key.ToString() == "asset_2_reserves");
+                if (BItem != null)
+                {
+                    B = Convert.ToUInt64(BItem.Value.Value.Uint64);
+                }
+                else
+                {
+                    return null; // tiny swap has always the local delta change
+                }
+
                 if (previous.Tx is AssetTransferTransaction inAssetTransferTx)
                 {
                     // from asa
@@ -101,18 +122,6 @@ namespace AVMTradeReporter.Processors.SWAP
                 }
                 if (poolAddress == null) return null;
 
-                ulong A = 0, B = 0, L = 0;
-
-                var AItem = current.Detail?.LocalDelta?.SelectMany(k => k.Value)?.FirstOrDefault(kv => kv.Key.ToString() == "asset_1_reserves");
-                if (AItem != null)
-                {
-                    A = Convert.ToUInt64(AItem.Value.Value.Uint64);
-                }
-                var BItem = current.Detail?.LocalDelta?.SelectMany(k => k.Value)?.FirstOrDefault(kv => kv.Key.ToString() == "asset_2_reserves");
-                if (BItem != null)
-                {
-                    B = Convert.ToUInt64(BItem.Value.Value.Uint64);
-                }
                 var trade = new Trade
                 {
                     AssetIdIn = AssetIdIn,

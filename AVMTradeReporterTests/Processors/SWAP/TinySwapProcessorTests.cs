@@ -27,5 +27,22 @@ namespace AVMTradeReporterTests.Processors.LiquidityAdd
             json = Algorand.Utils.Encoder.EncodeToJson(dummyTradeService.trades.Skip(2).First());
             Assert.That(json, Is.EqualTo("{\r\n  \"AssetIdIn\": 760037151,\r\n  \"AssetAmountIn\": 1763080,\r\n  \"AssetAmountOut\": 6572399,\r\n  \"TxId\": \"BEXZIPDZEBRJOQC53LX3UECF3E7WQP2QUPZXMYUVL2KZUHNNFPVQ\",\r\n  \"BlockId\": 52530303,\r\n  \"TxGroup\": \"Il36Z8mzQPADsKard0OxiAP2swtDf0htbtqJqlSKFQA=\",\r\n  \"Timestamp\": \"2025-08-07T21:23:31+00:00\",\r\n  \"Trader\": \"LY2HOSDHZDTHF6A5BYOVOLTHXVJT4UHRZA4F7TKYK5NSRDSLV4E3DQWGLA\",\r\n  \"PoolAddress\": \"5U2V3U4RM5NXUBX7RNKHIPXSNXNB76PMK2DISR3BCLR366XQTGO7ZTZALA\",\r\n  \"PoolAppId\": 2967083464,\r\n  \"TopTxId\": \"FEJHOIK2XEYCNB6CFD3WN4VZHMJWUVF3Y64BCWWCZYPKD2SKIXBQ\",\r\n  \"TradeState\": 1,\r\n  \"A\": 34209732909,\r\n  \"B\": 9151163560\r\n}"));
         }
+        [Test]
+        public async Task TinySwapProcessorTestFakeSwapArg()
+        {
+            var client = new Algorand.Gossip.GossipHttpClient(Algorand.Gossip.GossipHttpConfiguration.MainNetArchival);
+            var block = await client.FetchBlockAsync(52542928);
+
+            ILogger<TransactionProcessor> logger = new LoggerFactory().CreateLogger<TransactionProcessor>();
+            var txProcessor = new TransactionProcessor(logger);
+            var dummyLiquidityService = new DummyLiquidityService();
+            var dummyTradeService = new DummyTradeService();
+            var cancelationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            await txProcessor.ProcessBlock(block, dummyTradeService, dummyLiquidityService, cancelationTokenSource.Token);
+
+            Assert.That(dummyTradeService.trades.Count, Is.EqualTo(2));
+            var trade = dummyTradeService.trades.Where(tx => tx.TxId == "3P3UG2IDF4XXLIVSJQJFJDPTQDY23LWKRQOCGEPLSEQYAV2E36YQ").FirstOrDefault();
+            Assert.That(trade, Is.Null);
+        }
     }
 }
