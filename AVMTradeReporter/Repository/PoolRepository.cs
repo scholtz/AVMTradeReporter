@@ -371,6 +371,9 @@ namespace AVMTradeReporter.Repository
                     return;
                 }
 
+                existingPool.AssetIdA = liquidity.AssetIdA;
+                existingPool.AssetIdB = liquidity.AssetIdB;
+                existingPool.AssetIdLP = liquidity.AssetIdLP;
                 existingPool.A = liquidity.A;
                 existingPool.B = liquidity.B;
                 if (liquidity.L > 0)
