@@ -43,8 +43,6 @@ namespace AVMTradeReporter.Controllers
         /// Get a specific pool by address, app ID, and protocol
         /// </summary>
         /// <param name="poolAddress">Pool address</param>
-        /// <param name="poolAppId">Pool app ID</param>
-        /// <param name="protocol">Protocol (Pact, Tiny, Biatec)</param>
         /// <returns>Pool details if found</returns>
         [HttpGet("{poolAddress}")]
         public async Task<ActionResult<Pool>> GetPool(string poolAddress)
