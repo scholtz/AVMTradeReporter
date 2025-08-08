@@ -8,6 +8,7 @@ using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Security;
 using Elastic.Transport;
 using Microsoft.Extensions.Options;
+using StackExchange.Redis;
 
 namespace AVMTradeReporter
 {
@@ -27,7 +28,25 @@ namespace AVMTradeReporter
             builder.Services.Configure<AppConfiguration>(
                 builder.Configuration.GetSection("AppConfiguration"));
 
+            // Add Redis
+            var appConfig = builder.Configuration.GetSection("AppConfiguration").Get<AppConfiguration>();
+            if (appConfig?.Redis?.Enabled == true)
+            {
+                builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
+                {
+                    var configuration = appConfig.Redis.ConnectionString;
+                    return ConnectionMultiplexer.Connect(configuration);
+                });
+                
+                builder.Services.AddSingleton<IDatabase>(sp =>
+                {
+                    var connectionMultiplexer = sp.GetRequiredService<IConnectionMultiplexer>();
+                    return connectionMultiplexer.GetDatabase(appConfig.Redis.DatabaseId);
+                });
+            }
+
             builder.Services.AddSingleton<IndexerRepository>();
+            builder.Services.AddSingleton<IPoolRepository, PoolRepository>();
             builder.Services.AddSingleton<PoolRepository>();
             builder.Services.AddSingleton<TradeRepository>();
             builder.Services.AddSingleton<LiquidityRepository>();

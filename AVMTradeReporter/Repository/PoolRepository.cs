@@ -1,10 +1,15 @@
 using AVMTradeReporter.Hubs;
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Model.Configuration;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Core.Bulk;
 using Elastic.Clients.Elasticsearch.IndexManagement;
 using Elastic.Clients.Elasticsearch.Mapping;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Options;
+using StackExchange.Redis;
+using System.Collections.Concurrent;
+using System.Text.Json;
 
 namespace AVMTradeReporter.Repository
 {
@@ -13,17 +18,163 @@ namespace AVMTradeReporter.Repository
         private readonly ElasticsearchClient _elasticClient;
         private readonly ILogger<PoolRepository> _logger;
         private readonly IHubContext<BiatecScanHub> _hubContext;
+        private readonly IDatabase? _redisDatabase;
+        private readonly AppConfiguration _appConfig;
+        
+        // In-memory cache for pools
+        private readonly ConcurrentDictionary<string, Pool> _poolsCache = new();
+        private readonly SemaphoreSlim _initializationSemaphore = new(1, 1);
+        private bool _isInitialized = false;
 
         public PoolRepository(
             ElasticsearchClient elasticClient,
             ILogger<PoolRepository> logger,
-            IHubContext<BiatecScanHub> hubContext
+            IHubContext<BiatecScanHub> hubContext,
+            IOptions<AppConfiguration> appConfig,
+            IDatabase? redisDatabase = null
             )
         {
             _elasticClient = elasticClient;
             _logger = logger;
             _hubContext = hubContext;
+            _redisDatabase = redisDatabase;
+            _appConfig = appConfig.Value;
+            
             CreatePoolIndexTemplateAsync().Wait();
+        }
+
+        public async Task InitializeAsync(CancellationToken cancellationToken = default)
+        {
+            await _initializationSemaphore.WaitAsync(cancellationToken);
+            try
+            {
+                if (_isInitialized)
+                    return;
+
+                _logger.LogInformation("Initializing PoolRepository - loading pools from Redis and Elasticsearch");
+
+                // First try to load from Redis
+                var redisLoadCount = await LoadPoolsFromRedis(cancellationToken);
+                _logger.LogInformation("Loaded {count} pools from Redis", redisLoadCount);
+
+                // If Redis is empty or disabled, load from Elasticsearch
+                if (redisLoadCount == 0)
+                {
+                    var elasticLoadCount = await LoadPoolsFromElasticsearch(cancellationToken);
+                    _logger.LogInformation("Loaded {count} pools from Elasticsearch", elasticLoadCount);
+                    
+                    // Save to Redis for future starts
+                    if (elasticLoadCount > 0 && _redisDatabase != null && _appConfig.Redis.Enabled)
+                    {
+                        await SaveAllPoolsToRedis(cancellationToken);
+                        _logger.LogInformation("Saved {count} pools to Redis", elasticLoadCount);
+                    }
+                }
+
+                _isInitialized = true;
+                _logger.LogInformation("PoolRepository initialization completed. Total pools in memory: {count}", _poolsCache.Count);
+            }
+            finally
+            {
+                _initializationSemaphore.Release();
+            }
+        }
+
+        private async Task<int> LoadPoolsFromRedis(CancellationToken cancellationToken)
+        {
+            if (_redisDatabase == null || !_appConfig.Redis.Enabled)
+                return 0;
+
+            try
+            {
+                var pattern = $"{_appConfig.Redis.KeyPrefix}*";
+                var server = _redisDatabase.Multiplexer.GetServer(_redisDatabase.Multiplexer.GetEndPoints().First());
+                var keys = server.Keys(pattern: pattern);
+
+                int loadedCount = 0;
+                foreach (var key in keys)
+                {
+                    try
+                    {
+                        var poolJson = await _redisDatabase.StringGetAsync(key);
+                        if (poolJson.HasValue)
+                        {
+                            var pool = JsonSerializer.Deserialize<Pool>(poolJson!);
+                            if (pool != null)
+                            {
+                                var poolId = GeneratePoolId(pool.PoolAddress, pool.PoolAppId, pool.Protocol);
+                                _poolsCache.TryAdd(poolId, pool);
+                                loadedCount++;
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to deserialize pool from Redis key: {key}", key);
+                    }
+                }
+
+                return loadedCount;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to load pools from Redis");
+                return 0;
+            }
+        }
+
+        private async Task<int> LoadPoolsFromElasticsearch(CancellationToken cancellationToken)
+        {
+            try
+            {
+                var searchResponse = await _elasticClient.SearchAsync<Pool>(s => s
+                    .Index("pools")
+                    .Size(10000), cancellationToken);
+
+                if (searchResponse.IsValidResponse)
+                {
+                    int loadedCount = 0;
+                    foreach (var pool in searchResponse.Documents)
+                    {
+                        var poolId = GeneratePoolId(pool.PoolAddress, pool.PoolAppId, pool.Protocol);
+                        _poolsCache.TryAdd(poolId, pool);
+                        loadedCount++;
+                    }
+
+                    return loadedCount;
+                }
+
+                _logger.LogError("Failed to load pools from Elasticsearch: {error}", searchResponse.DebugInformation);
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to load pools from Elasticsearch");
+                return 0;
+            }
+        }
+
+        private async Task SaveAllPoolsToRedis(CancellationToken cancellationToken)
+        {
+            if (_redisDatabase == null || !_appConfig.Redis.Enabled)
+                return;
+
+            try
+            {
+                var tasks = _poolsCache.Values.Select(async pool =>
+                {
+                    var poolId = GeneratePoolId(pool.PoolAddress, pool.PoolAppId, pool.Protocol);
+                    var redisKey = $"{_appConfig.Redis.KeyPrefix}{poolId}";
+                    var poolJson = JsonSerializer.Serialize(pool);
+                    await _redisDatabase.StringSetAsync(redisKey, poolJson);
+                });
+
+                await Task.WhenAll(tasks);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to save pools to Redis");
+            }
         }
 
         async Task CreatePoolIndexTemplateAsync()
@@ -63,51 +214,67 @@ namespace AVMTradeReporter.Repository
 
         public async Task<Pool?> GetPoolAsync(string poolAddress, ulong poolAppId, DEXProtocol protocol, CancellationToken cancellationToken)
         {
-            try
-            {
-                // Create a unique pool identifier combining address, app ID, and protocol
-                var poolId = $"{poolAddress}_{poolAppId}_{protocol}";
-                
-                var response = await _elasticClient.GetAsync<Pool>(poolId, idx => idx.Index("pools"), cancellationToken);
-                
-                if (response.IsValidResponse && response.Found)
-                {
-                    return response.Source;
-                }
-                
-                return null;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to get pool {poolAddress}_{poolAppId}_{protocol}", poolAddress, poolAppId, protocol);
-                return null;
-            }
+            await EnsureInitialized(cancellationToken);
+            
+            var poolId = GeneratePoolId(poolAddress, poolAppId, protocol);
+            return _poolsCache.TryGetValue(poolId, out var pool) ? pool : null;
         }
 
         public async Task<bool> StorePoolAsync(Pool pool, CancellationToken cancellationToken)
         {
+            await EnsureInitialized(cancellationToken);
+            
             try
             {
-                var poolId = $"{pool.PoolAddress}_{pool.PoolAppId}_{pool.Protocol}";
+                var poolId = GeneratePoolId(pool.PoolAddress, pool.PoolAppId, pool.Protocol);
                 
-                var response = await _elasticClient.IndexAsync(pool, idx => idx
-                    .Index("pools")
-                    .Id(poolId), cancellationToken);
+                // Update in-memory cache
+                _poolsCache.AddOrUpdate(poolId, pool, (key, oldValue) => pool);
+                
+                // Save to Redis asynchronously
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        if (_redisDatabase != null && _appConfig.Redis.Enabled)
+                        {
+                            var redisKey = $"{_appConfig.Redis.KeyPrefix}{poolId}";
+                            var poolJson = JsonSerializer.Serialize(pool);
+                            await _redisDatabase.StringSetAsync(redisKey, poolJson);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to save pool to Redis: {poolId}", poolId);
+                    }
+                }, cancellationToken);
 
-                if (response.IsValidResponse)
+                // Save to Elasticsearch asynchronously
+                _ = Task.Run(async () =>
                 {
-                    _logger.LogDebug("Pool updated: {poolId}", poolId);
-                    
-                    // Publish pool update to SignalR hub
-                    await PublishPoolUpdateToHub(pool, cancellationToken);
-                    
-                    return true;
-                }
-                else
-                {
-                    _logger.LogError("Failed to store pool {poolId}: {error}", poolId, response.DebugInformation);
-                    return false;
-                }
+                    try
+                    {
+                        var response = await _elasticClient.IndexAsync(pool, idx => idx
+                            .Index("pools")
+                            .Id(poolId), cancellationToken);
+
+                        if (!response.IsValidResponse)
+                        {
+                            _logger.LogError("Failed to store pool in Elasticsearch {poolId}: {error}", poolId, response.DebugInformation);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to store pool in Elasticsearch: {poolId}", poolId);
+                    }
+                }, cancellationToken);
+
+                _logger.LogDebug("Pool updated in memory: {poolId}", poolId);
+                
+                // Publish pool update to SignalR hub
+                await PublishPoolUpdateToHub(pool, cancellationToken);
+                
+                return true;
             }
             catch (Exception ex)
             {
@@ -125,9 +292,12 @@ namespace AVMTradeReporter.Repository
                 return;
             }
 
+            await EnsureInitialized(cancellationToken);
+
             try
             {
-                var existingPool = await GetPoolAsync(trade.PoolAddress, trade.PoolAppId, trade.Protocol, cancellationToken);
+                var poolId = GeneratePoolId(trade.PoolAddress, trade.PoolAppId, trade.Protocol);
+                var existingPool = _poolsCache.TryGetValue(poolId, out var pool) ? pool : null;
                 
                 // If pool doesn't exist, create a new one from trade data
                 if (existingPool == null)
@@ -148,9 +318,25 @@ namespace AVMTradeReporter.Repository
                     return;
                 }
 
-                // Update pool with trade data
-                UpdatePoolWithTradeData(existingPool, trade);
-                await StorePoolAsync(existingPool, cancellationToken);
+                // Create updated pool
+                var updatedPool = new Pool
+                {
+                    PoolAddress = existingPool.PoolAddress,
+                    PoolAppId = existingPool.PoolAppId,
+                    AssetIdA = existingPool.AssetIdA == 0 ? trade.AssetIdIn : existingPool.AssetIdA,
+                    AssetIdB = existingPool.AssetIdB == 0 ? trade.AssetIdOut : existingPool.AssetIdB,
+                    AssetIdLP = existingPool.AssetIdLP,
+                    AssetAmountA = existingPool.AssetAmountA,
+                    AssetAmountB = existingPool.AssetAmountB,
+                    AssetAmountLP = existingPool.AssetAmountLP,
+                    A = trade.A,
+                    B = trade.B,
+                    L = trade.L,
+                    Protocol = existingPool.Protocol,
+                    Timestamp = trade.Timestamp
+                };
+
+                await StorePoolAsync(updatedPool, cancellationToken);
                 
                 _logger.LogDebug("Updated pool from trade: {poolAddress}_{poolAppId}_{protocol}", 
                     trade.PoolAddress, trade.PoolAppId, trade.Protocol);
@@ -170,9 +356,12 @@ namespace AVMTradeReporter.Repository
                 return;
             }
 
+            await EnsureInitialized(cancellationToken);
+
             try
             {
-                var existingPool = await GetPoolAsync(liquidity.PoolAddress, liquidity.PoolAppId, liquidity.Protocol, cancellationToken);
+                var poolId = GeneratePoolId(liquidity.PoolAddress, liquidity.PoolAppId, liquidity.Protocol);
+                var existingPool = _poolsCache.TryGetValue(poolId, out var pool) ? pool : null;
                 
                 // If pool doesn't exist, create a new one from liquidity data
                 if (existingPool == null)
@@ -193,9 +382,25 @@ namespace AVMTradeReporter.Repository
                     return;
                 }
 
-                // Update pool with liquidity data
-                UpdatePoolWithLiquidityData(existingPool, liquidity);
-                await StorePoolAsync(existingPool, cancellationToken);
+                // Create updated pool
+                var updatedPool = new Pool
+                {
+                    PoolAddress = existingPool.PoolAddress,
+                    PoolAppId = existingPool.PoolAppId,
+                    AssetIdA = liquidity.AssetIdA,
+                    AssetIdB = liquidity.AssetIdB,
+                    AssetIdLP = liquidity.AssetIdLP,
+                    AssetAmountA = liquidity.AssetAmountA,
+                    AssetAmountB = liquidity.AssetAmountB,
+                    AssetAmountLP = liquidity.AssetAmountLP,
+                    A = liquidity.A,
+                    B = liquidity.B,
+                    L = liquidity.L,
+                    Protocol = existingPool.Protocol,
+                    Timestamp = liquidity.Timestamp
+                };
+
+                await StorePoolAsync(updatedPool, cancellationToken);
                 
                 _logger.LogDebug("Updated pool from liquidity: {poolAddress}_{poolAppId}_{protocol}", 
                     liquidity.PoolAddress, liquidity.PoolAppId, liquidity.Protocol);
@@ -204,6 +409,46 @@ namespace AVMTradeReporter.Repository
             {
                 _logger.LogError(ex, "Failed to update pool from liquidity {txId}", liquidity.TxId);
             }
+        }
+
+        public async Task<List<Pool>> GetPoolsAsync(DEXProtocol? protocol = null, int size = 100, CancellationToken cancellationToken = default)
+        {
+            await EnsureInitialized(cancellationToken);
+            
+            var pools = _poolsCache.Values.AsEnumerable();
+            
+            // Filter by protocol if specified
+            if (protocol.HasValue)
+            {
+                pools = pools.Where(p => p.Protocol == protocol.Value);
+            }
+            
+            // Sort by timestamp descending and limit size
+            pools = pools
+                .OrderByDescending(p => p.Timestamp ?? DateTimeOffset.MinValue)
+                .Take(size);
+            
+            return pools.ToList();
+        }
+
+        public async Task<int> GetPoolCountAsync(CancellationToken cancellationToken = default)
+        {
+            await EnsureInitialized(cancellationToken);
+            return _poolsCache.Count;
+        }
+
+        private async Task EnsureInitialized(CancellationToken cancellationToken)
+        {
+            if (!_isInitialized)
+            {
+                await InitializeAsync(cancellationToken);
+            }
+        }
+
+        private string GeneratePoolId(string poolAddress, ulong poolAppId, DEXProtocol protocol)
+        {
+            return $"{poolAddress}";
+            //return $"{poolAddress}_{poolAppId}_{protocol}";
         }
 
         private Pool CreatePoolFromTrade(Trade trade)
@@ -246,34 +491,6 @@ namespace AVMTradeReporter.Repository
             };
         }
 
-        private void UpdatePoolWithTradeData(Pool pool, Trade trade)
-        {
-            // Update the pool state with the latest trade information
-            pool.A = trade.A;
-            pool.B = trade.B;
-            pool.L = trade.L;
-            pool.Timestamp = trade.Timestamp;
-            
-            // Update asset IDs if they weren't set before
-            if (pool.AssetIdA == 0) pool.AssetIdA = trade.AssetIdIn;
-            if (pool.AssetIdB == 0) pool.AssetIdB = trade.AssetIdOut;
-        }
-
-        private void UpdatePoolWithLiquidityData(Pool pool, Liquidity liquidity)
-        {
-            // Update the pool state with the latest liquidity information
-            pool.AssetIdA = liquidity.AssetIdA;
-            pool.AssetIdB = liquidity.AssetIdB;
-            pool.AssetIdLP = liquidity.AssetIdLP;
-            pool.AssetAmountA = liquidity.AssetAmountA;
-            pool.AssetAmountB = liquidity.AssetAmountB;
-            pool.AssetAmountLP = liquidity.AssetAmountLP;
-            pool.A = liquidity.A;
-            pool.B = liquidity.B;
-            pool.L = liquidity.L;
-            pool.Timestamp = liquidity.Timestamp;
-        }
-
         private async Task PublishPoolUpdateToHub(Pool pool, CancellationToken cancellationToken)
         {
             try
@@ -285,42 +502,6 @@ namespace AVMTradeReporter.Repository
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to publish pool update to SignalR hub");
-            }
-        }
-
-        public async Task<List<Pool>> GetPoolsAsync(DEXProtocol? protocol = null, int size = 100, CancellationToken cancellationToken = default)
-        {
-            try
-            {
-                // For now, use a simple approach - we can enhance this later with proper search
-                // This is a simplified implementation that gets all documents
-                var searchResponse = await _elasticClient.SearchAsync<Pool>(s => s
-                    .Index("pools")
-                    .Size(size), cancellationToken);
-
-                if (searchResponse.IsValidResponse)
-                {
-                    var pools = searchResponse.Documents.ToList();
-                    
-                    // Filter by protocol if specified
-                    if (protocol.HasValue)
-                    {
-                        pools = pools.Where(p => p.Protocol == protocol.Value).ToList();
-                    }
-                    
-                    // Sort by timestamp descending
-                    pools = pools.OrderByDescending(p => p.Timestamp ?? DateTimeOffset.MinValue).ToList();
-                    
-                    return pools;
-                }
-
-                _logger.LogError("Failed to search pools: {error}", searchResponse.DebugInformation);
-                return new List<Pool>();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to get pools");
-                return new List<Pool>();
             }
         }
     }

@@ -1,5 +1,6 @@
 ﻿using Algorand.Gossip;
 using Elastic.Clients.Elasticsearch.Inference;
+using AVMTradeReporter.Model.Configuration;
 
 namespace AVMTradeReporter.Model.Configuration
 {
@@ -30,5 +31,15 @@ namespace AVMTradeReporter.Model.Configuration
         /// Config of the gossip algod nodes
         /// </summary>
         public List<GossipWebsocketClientConfiguration> GossipWebsocketClientConfigurations { get; set; } = new();
+
+        public RedisConfiguration Redis { get; set; } = new RedisConfiguration();
+    }
+
+    public class RedisConfiguration
+    {
+        public string ConnectionString { get; set; } = "localhost:6379";
+        public string KeyPrefix { get; set; } = "avmtrade:pools:";
+        public bool Enabled { get; set; } = true;
+        public int DatabaseId { get; set; } = 0;
     }
 }

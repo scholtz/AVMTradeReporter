@@ -9,10 +9,10 @@ namespace AVMTradeReporter.Controllers
     [Route("api/[controller]")]
     public class PoolController : ControllerBase
     {
-        private readonly PoolRepository _poolRepository;
+        private readonly IPoolRepository _poolRepository;
         private readonly ILogger<PoolController> _logger;
 
-        public PoolController(PoolRepository poolRepository, ILogger<PoolController> logger)
+        public PoolController(IPoolRepository poolRepository, ILogger<PoolController> logger)
         {
             _poolRepository = poolRepository;
             _logger = logger;
@@ -85,6 +85,38 @@ namespace AVMTradeReporter.Controllers
             {
                 _logger.LogError(ex, "Failed to get pools for protocol {protocol}", protocol);
                 return StatusCode(500, new { error = "Failed to retrieve pools" });
+            }
+        }
+
+        /// <summary>
+        /// Get pool statistics
+        /// </summary>
+        /// <returns>Pool statistics</returns>
+        [HttpGet("stats")]
+        public async Task<ActionResult<object>> GetPoolStats()
+        {
+            try
+            {
+                var totalCount = await _poolRepository.GetPoolCountAsync(HttpContext.RequestAborted);
+                var allPools = await _poolRepository.GetPoolsAsync(size: int.MaxValue, cancellationToken: HttpContext.RequestAborted);
+                
+                var stats = new
+                {
+                    TotalPools = totalCount,
+                    ProtocolStats = allPools
+                        .GroupBy(p => p.Protocol)
+                        .ToDictionary(g => g.Key.ToString(), g => g.Count()),
+                    LastUpdated = allPools
+                        .Where(p => p.Timestamp.HasValue)
+                        .Max(p => p.Timestamp)
+                };
+
+                return Ok(stats);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to get pool statistics");
+                return StatusCode(500, new { error = "Failed to retrieve pool statistics" });
             }
         }
     }

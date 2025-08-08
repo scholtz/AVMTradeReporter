@@ -21,6 +21,7 @@ namespace AVMTradeReporter.Services
         private readonly IndexerRepository _indexerRepository;
         private readonly TradeRepository _tradeRepository;
         private readonly LiquidityRepository _liquidityRepository;
+        private readonly PoolRepository _poolRepository;
         private readonly TransactionProcessor _transactionProcessor;
 
 
@@ -32,6 +33,7 @@ namespace AVMTradeReporter.Services
             IndexerRepository indexerRepository,
             TradeRepository tradeRepository,
             LiquidityRepository liquidityRepository,
+            PoolRepository poolRepository,
             TransactionProcessor transactionProcessor
             )
         {
@@ -40,6 +42,7 @@ namespace AVMTradeReporter.Services
             _indexerRepository = indexerRepository;
             _tradeRepository = tradeRepository;
             _liquidityRepository = liquidityRepository;
+            _poolRepository = poolRepository;
             _transactionProcessor = transactionProcessor;
 
             _httpClient = HttpClientConfigurator.ConfigureHttpClient(appConfig.Value.Algod.Host, appConfig.Value.Algod.ApiKey, appConfig.Value.Algod.Header);
@@ -83,6 +86,19 @@ namespace AVMTradeReporter.Services
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             _logger.LogInformation("Trade Reporter Background Service starting...");
+
+            // Initialize PoolRepository first
+            try
+            {
+                _logger.LogInformation("Initializing PoolRepository...");
+                await _poolRepository.InitializeAsync(stoppingToken);
+                var poolCount = await _poolRepository.GetPoolCountAsync(stoppingToken);
+                _logger.LogInformation("PoolRepository initialized successfully with {poolCount} pools", poolCount);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to initialize PoolRepository. Continuing without pool cache.");
+            }
 
             while (!stoppingToken.IsCancellationRequested)
             {
