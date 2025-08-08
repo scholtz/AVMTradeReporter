@@ -103,7 +103,7 @@ namespace AVMTradeReporter.Repository
                             var pool = JsonSerializer.Deserialize<Pool>(poolJson!);
                             if (pool != null)
                             {
-                                var poolId = GeneratePoolId(pool.PoolAddress, pool.PoolAppId, pool.Protocol);
+                                var poolId = GeneratePoolId(pool.PoolAddress);
                                 _poolsCache.TryAdd(poolId, pool);
                                 loadedCount++;
                             }
@@ -137,7 +137,7 @@ namespace AVMTradeReporter.Repository
                     int loadedCount = 0;
                     foreach (var pool in searchResponse.Documents)
                     {
-                        var poolId = GeneratePoolId(pool.PoolAddress, pool.PoolAppId, pool.Protocol);
+                        var poolId = GeneratePoolId(pool.PoolAddress);
                         _poolsCache.TryAdd(poolId, pool);
                         loadedCount++;
                     }
@@ -164,7 +164,7 @@ namespace AVMTradeReporter.Repository
             {
                 var tasks = _poolsCache.Values.Select(async pool =>
                 {
-                    var poolId = GeneratePoolId(pool.PoolAddress, pool.PoolAppId, pool.Protocol);
+                    var poolId = GeneratePoolId(pool.PoolAddress);
                     var redisKey = $"{_appConfig.Redis.KeyPrefix}{poolId}";
                     var poolJson = JsonSerializer.Serialize(pool);
                     await _redisDatabase.StringSetAsync(redisKey, poolJson);
@@ -213,12 +213,10 @@ namespace AVMTradeReporter.Repository
             Console.WriteLine($"Pool template created: {response.IsValidResponse}");
         }
 
-        public async Task<Pool?> GetPoolAsync(string poolAddress, ulong poolAppId, DEXProtocol protocol, CancellationToken cancellationToken)
+        public async Task<Pool?> GetPoolAsync(string poolAddress, CancellationToken cancellationToken)
         {
             await EnsureInitialized(cancellationToken);
-
-            var poolId = GeneratePoolId(poolAddress, poolAppId, protocol);
-            return _poolsCache.TryGetValue(poolId, out var pool) ? pool : null;
+            return _poolsCache.TryGetValue(poolAddress, out var pool) ? pool : null;
         }
 
         public async Task<bool> StorePoolAsync(Pool pool, CancellationToken cancellationToken)
@@ -227,7 +225,7 @@ namespace AVMTradeReporter.Repository
 
             try
             {
-                var poolId = GeneratePoolId(pool.PoolAddress, pool.PoolAppId, pool.Protocol);
+                var poolId = GeneratePoolId(pool.PoolAddress);
 
                 // Update in-memory cache
                 _poolsCache.AddOrUpdate(poolId, pool, (key, oldValue) => pool);
@@ -297,7 +295,7 @@ namespace AVMTradeReporter.Repository
 
             try
             {
-                var poolId = GeneratePoolId(trade.PoolAddress, trade.PoolAppId, trade.Protocol);
+                var poolId = GeneratePoolId(trade.PoolAddress);
                 var existingPool = _poolsCache.TryGetValue(poolId, out var pool) ? pool : null;
 
                 // If pool doesn't exist, create a new one from trade data
@@ -349,7 +347,7 @@ namespace AVMTradeReporter.Repository
 
             try
             {
-                var poolId = GeneratePoolId(liquidity.PoolAddress, liquidity.PoolAppId, liquidity.Protocol);
+                var poolId = GeneratePoolId(liquidity.PoolAddress);
                 var existingPool = _poolsCache.TryGetValue(poolId, out var pool) ? pool : null;
 
                 // If pool doesn't exist, create a new one from liquidity data
@@ -425,7 +423,7 @@ namespace AVMTradeReporter.Repository
             }
         }
 
-        private string GeneratePoolId(string poolAddress, ulong poolAppId, DEXProtocol protocol)
+        private string GeneratePoolId(string poolAddress)
         {
             return $"{poolAddress}";
             //return $"{poolAddress}_{poolAppId}_{protocol}";

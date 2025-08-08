@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace AVMTradeReporter.Controllers
 {
     [ApiController]
-    [Route("api/[controller]")]
+    [Route("api/pool")]
     public class PoolController : ControllerBase
     {
         private readonly IPoolRepository _poolRepository;
@@ -47,11 +47,11 @@ namespace AVMTradeReporter.Controllers
         /// <param name="protocol">Protocol (Pact, Tiny, Biatec)</param>
         /// <returns>Pool details if found</returns>
         [HttpGet("{poolAddress}/{poolAppId}/{protocol}")]
-        public async Task<ActionResult<Pool>> GetPool(string poolAddress, ulong poolAppId, DEXProtocol protocol)
+        public async Task<ActionResult<Pool>> GetPool(string poolAddress)
         {
             try
             {
-                var pool = await _poolRepository.GetPoolAsync(poolAddress, poolAppId, protocol, HttpContext.RequestAborted);
+                var pool = await _poolRepository.GetPoolAsync(poolAddress, HttpContext.RequestAborted);
                 
                 if (pool == null)
                 {
@@ -62,7 +62,7 @@ namespace AVMTradeReporter.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to get pool {poolAddress}_{poolAppId}_{protocol}", poolAddress, poolAppId, protocol);
+                _logger.LogError(ex, "Failed to get pool {poolAddress}", poolAddress);
                 return StatusCode(500, new { error = "Failed to retrieve pool" });
             }
         }
