@@ -39,7 +39,7 @@ namespace AVMTradeReporter.Processors.SWAP
                 ulong A = 0, B = 0, L = 0;
 
                 var AItem = current.Detail?.LocalDelta?.SelectMany(k => k.Value)?.FirstOrDefault(kv => kv.Key.ToString() == "asset_1_reserves");
-                if (AItem != null)
+                if (AItem != null && AItem.Value.Value != null)
                 {
                     A = Convert.ToUInt64(AItem.Value.Value.Uint64);
                 }
@@ -48,7 +48,7 @@ namespace AVMTradeReporter.Processors.SWAP
                     return null;// tiny swap has always the local delta change
                 }
                 var BItem = current.Detail?.LocalDelta?.SelectMany(k => k.Value)?.FirstOrDefault(kv => kv.Key.ToString() == "asset_2_reserves");
-                if (BItem != null)
+                if (BItem != null && BItem.Value.Value != null)
                 {
                     B = Convert.ToUInt64(BItem.Value.Value.Uint64);
                 }
@@ -57,67 +57,80 @@ namespace AVMTradeReporter.Processors.SWAP
                     return null; // tiny swap has always the local delta change
                 }
 
+                if (block != null) current.Tx.FillInParamsFromBlockHeader(block);
+                if (txGroup != null) current.Tx.Group = txGroup;
+
                 if (previous.Tx is AssetTransferTransaction inAssetTransferTx)
                 {
-                    // from asa
+                    AssetIdIn = inAssetTransferTx.XferAsset;
+                    AssetAmountIn = inAssetTransferTx.AssetAmount;
                     poolAddress = inAssetTransferTx.AssetReceiver;
+                    // from asa
                     if (current.Detail?.InnerTxns == null)
                     {
                         if (tradeState == TradeState.Confirmed) return null;
 
-                        AssetIdIn = inAssetTransferTx.XferAsset;
                         AssetIdOut = 0;
-                        AssetAmountIn = inAssetTransferTx.AssetAmount;
                         AssetAmountOut = 0;
                     }
                     else
                     {
-                        var inner = current.Detail.InnerTxns.FirstOrDefault()?.Tx;
-                        if (inner is AssetTransferTransaction outAssetTransferTx)
+
+                        var inner1 = current.Detail.InnerTxns.FirstOrDefault()?.Tx;
+                        if (current.Detail.InnerTxns.Count == 2 && inner1 is AssetTransferTransaction outPayTransferTx && inAssetTransferTx.XferAsset == outPayTransferTx.XferAsset)
+                        {
+                            // first tx is return tx to the deposit
+                            // to asa
+                            AssetAmountIn = inAssetTransferTx.AssetAmount - outPayTransferTx.AssetAmount;
+                        }
+
+                        var inner2 = current.Detail.InnerTxns.LastOrDefault()?.Tx;
+                        if (inner2 is AssetTransferTransaction outAssetTransferTx)
                         {
                             // to asa
-
-                            AssetIdIn = inAssetTransferTx.XferAsset;
                             AssetIdOut = outAssetTransferTx.XferAsset;
-                            AssetAmountIn = inAssetTransferTx.AssetAmount;
                             AssetAmountOut = outAssetTransferTx.AssetAmount;
                         }
-                        if (inner is PaymentTransaction outPaymentTx)
+
+                        if (inner2 is PaymentTransaction outPaymentTx)
                         {
                             // to native
 
-                            AssetIdIn = inAssetTransferTx.XferAsset;
                             AssetIdOut = 0;
-                            AssetAmountIn = inAssetTransferTx.AssetAmount;
                             AssetAmountOut = outPaymentTx.Amount ?? 0;
                         }
                     }
                 }
                 if (previous.Tx is PaymentTransaction inPayTx)
                 {
+                    AssetIdIn = 0;
+                    AssetAmountIn = inPayTx.Amount ?? 0;
                     poolAddress = inPayTx.Receiver;
                     // from native
                     if (current.Detail?.InnerTxns == null)
                     {
                         if (tradeState == TradeState.Confirmed) return null;
-
-                        AssetIdIn = 0;
                         AssetIdOut = 0;
-                        AssetAmountIn = inPayTx.Amount ?? 0;
                         AssetAmountOut = 0;
                     }
                     else
                     {
-                        var inner = current.Detail.InnerTxns.FirstOrDefault()?.Tx;
-                        if (inner is AssetTransferTransaction outAssetTransferTx)
+                        var inner1 = current.Detail.InnerTxns.FirstOrDefault()?.Tx;
+                        if (current.Detail.InnerTxns.Count == 2 && inner1 is PaymentTransaction outPayTransferTx)
+                        {
+                            // first tx is return tx to the deposit
+                            // to asa
+                            AssetAmountIn = inPayTx.Amount ?? 0 - outPayTransferTx.Amount ?? 0;
+                        }
+
+                        var inner2 = current.Detail.InnerTxns.LastOrDefault()?.Tx;
+                        if (inner2 is AssetTransferTransaction outAssetTransferTx)
                         {
                             // to asa
-
-                            AssetIdIn = 0;
                             AssetIdOut = outAssetTransferTx.XferAsset;
-                            AssetAmountIn = inPayTx.Amount ?? 0;
                             AssetAmountOut = outAssetTransferTx.AssetAmount;
                         }
+
                     }
                 }
                 if (poolAddress == null) return null;
@@ -132,7 +145,7 @@ namespace AVMTradeReporter.Processors.SWAP
                     BlockId = block?.Round ?? 0,
                     TxGroup = Convert.ToBase64String(current.Tx.Group.Bytes),
                     Timestamp = block == null ? DateTimeOffset.UtcNow : DateTimeOffset.FromUnixTimeSeconds(Convert.ToInt64(block?.Timestamp ?? 0)),
-                    Protocol = DEXProtocol.Pact,
+                    Protocol = DEXProtocol.Tiny,
                     PoolAddress = poolAddress.EncodeAsString(),
                     PoolAppId = appCallTx.ApplicationId ?? 0,
                     TopTxId = topTxId,

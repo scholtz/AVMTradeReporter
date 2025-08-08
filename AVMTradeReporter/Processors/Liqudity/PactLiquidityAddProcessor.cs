@@ -37,7 +37,7 @@ namespace AVMTradeReporter.Processors.Liqudity
                 }
                 ulong assetAId = 0;
                 ulong assetAAmount = 0;
-                Address poolAddress = null;
+                Address? poolAddress = null;
                 if (previous2.Tx is AssetTransferTransaction inAssetTransferTxA)
                 {
                     assetAId = inAssetTransferTxA.XferAsset;
@@ -120,7 +120,7 @@ namespace AVMTradeReporter.Processors.Liqudity
                 {
                     L = Convert.ToUInt64(LItem.Value.Value.Uint64);
                 }
-
+                if (poolAddress == null) return null;
                 return new Liquidity
                 {
                     Direction = LiqudityDirection.DepositLiquidity,

@@ -32,7 +32,7 @@ namespace AVMTradeReporter.Processors.Liqudity
                 }
                 ulong assetAId = 0;
                 ulong assetAAmount = 0;
-                Address poolAddress = null;
+                Address? poolAddress = null;
 
                 ulong assetBId = 0;
                 ulong assetBAmount = 0;
@@ -83,15 +83,16 @@ namespace AVMTradeReporter.Processors.Liqudity
                 ulong A = 0, B = 0, L = 0;
 
                 var AItem = current.Detail?.LocalDelta?.SelectMany(k => k.Value)?.FirstOrDefault(kv => kv.Key.ToString() == "asset_1_reserves");
-                if (AItem != null)
+                if (AItem != null && AItem.Value.Value != null)
                 {
                     A = Convert.ToUInt64(AItem.Value.Value.Uint64);
                 }
                 var BItem = current.Detail?.LocalDelta?.SelectMany(k => k.Value)?.FirstOrDefault(kv => kv.Key.ToString() == "asset_2_reserves");
-                if (BItem != null)
+                if (BItem != null && BItem.Value.Value != null)
                 {
                     B = Convert.ToUInt64(BItem.Value.Value.Uint64);
                 }
+                if (poolAddress == null) return null;
                 return new Liquidity
                 {
                     Direction = LiqudityDirection.WithdrawLiquidity,

@@ -32,7 +32,7 @@ namespace AVMTradeReporter.Processors.Liqudity
                 }
                 ulong assetAId = 0;
                 ulong assetAAmount = 0;
-                Address poolAddress = null;
+                Address? poolAddress = null;
 
                 ulong assetBId = 0;
                 ulong assetBAmount = 0;
@@ -96,6 +96,7 @@ namespace AVMTradeReporter.Processors.Liqudity
                 {
                     L = Convert.ToUInt64(LItem.Value.Value.Uint64);
                 }
+                if (poolAddress == null) return null;
                 return new Liquidity
                 {
                     Direction = LiqudityDirection.WithdrawLiquidity,

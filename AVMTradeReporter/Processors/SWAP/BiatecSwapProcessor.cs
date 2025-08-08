@@ -118,7 +118,7 @@ namespace AVMTradeReporter.Processors.SWAP
 
                 ulong A = 0, B = 0, L = 0;
                 var AItem = current.Detail?.GlobalDelta?.FirstOrDefault(kv => kv.Key.ToString() == "ab");
-                if (AItem != null)
+                if (AItem != null && AItem.Value.Value != null)
                 {
                     if (AItem.Value.Value.Bytes is string stringVal)
                     {
@@ -130,7 +130,7 @@ namespace AVMTradeReporter.Processors.SWAP
                     }
                 }
                 var BItem = current.Detail?.GlobalDelta?.FirstOrDefault(kv => kv.Key.ToString() == "bb");
-                if (BItem != null)
+                if (BItem != null && BItem.Value.Value != null)
                 {
                     if (BItem.Value.Value.Bytes is string stringVal)
                     {
@@ -142,7 +142,7 @@ namespace AVMTradeReporter.Processors.SWAP
                     }
                 }
                 var LItem = current.Detail?.GlobalDelta?.FirstOrDefault(kv => kv.Key.ToString() == "L");
-                if (LItem != null)
+                if (LItem != null && LItem.Value.Value != null)
                 {
                     if (LItem.Value.Value.Bytes is string stringVal)
                     {
