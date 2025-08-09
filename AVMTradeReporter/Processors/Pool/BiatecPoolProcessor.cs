@@ -5,7 +5,7 @@ using System.Text;
 
 namespace AVMTradeReporter.Processors.Pool
 {
-    public class BiatecPoolProcessor
+    public class BiatecPoolProcessor : IPoolProcessor
     {
         private IDefaultApi _algod;
         private IPoolRepository _poolRepository;

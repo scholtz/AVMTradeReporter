@@ -33,6 +33,11 @@ namespace AVMTradeReporter.Model.Configuration
         public List<GossipWebsocketClientConfiguration> GossipWebsocketClientConfigurations { get; set; } = new();
 
         public RedisConfiguration Redis { get; set; } = new RedisConfiguration();
+
+        /// <summary>
+        /// Pool refresh background service configuration
+        /// </summary>
+        public PoolRefreshConfiguration PoolRefresh { get; set; } = new PoolRefreshConfiguration();
     }
 
     public class RedisConfiguration
@@ -41,5 +46,28 @@ namespace AVMTradeReporter.Model.Configuration
         public string KeyPrefix { get; set; } = "avmtrade:pools:";
         public bool Enabled { get; set; } = true;
         public int DatabaseId { get; set; } = 0;
+    }
+
+    public class PoolRefreshConfiguration
+    {
+        /// <summary>
+        /// Enables or disables the pool refresh background service
+        /// </summary>
+        public bool Enabled { get; set; } = true;
+
+        /// <summary>
+        /// How often to refresh all pools (in hours). Default is 24 hours (once per day).
+        /// </summary>
+        public int IntervalHours { get; set; } = 24;
+
+        /// <summary>
+        /// Delay between processing each pool (in seconds). Default is 5 seconds.
+        /// </summary>
+        public int DelayBetweenPoolsSeconds { get; set; } = 5;
+
+        /// <summary>
+        /// Initial delay before starting the first refresh (in minutes). Default is 1 minute.
+        /// </summary>
+        public int InitialDelayMinutes { get; set; } = 1;
     }
 }

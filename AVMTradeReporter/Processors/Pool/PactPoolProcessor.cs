@@ -5,7 +5,7 @@ using System.Text;
 
 namespace AVMTradeReporter.Processors.Pool
 {
-    public class PactPoolProcessor
+    public class PactPoolProcessor : IPoolProcessor
     {
         private IDefaultApi _algod;
         private IPoolRepository _poolRepository;

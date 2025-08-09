@@ -4,11 +4,14 @@ using AVMTradeReporter.Hubs;
 using AVMTradeReporter.Model.Configuration;
 using AVMTradeReporter.Repository;
 using AVMTradeReporter.Services;
+using AVMTradeReporter.Processors.Pool;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Security;
 using Elastic.Transport;
 using Microsoft.Extensions.Options;
 using StackExchange.Redis;
+using Algorand.Algod;
+using Algorand;
 
 namespace AVMTradeReporter
 {
@@ -45,6 +48,17 @@ namespace AVMTradeReporter
                 });
             }
 
+            // Add Algorand API client
+            builder.Services.AddSingleton<IDefaultApi>(sp =>
+            {
+                var config = sp.GetRequiredService<IOptions<AppConfiguration>>().Value;
+                var httpClient = HttpClientConfigurator.ConfigureHttpClient(
+                    config.Algod.Host, 
+                    config.Algod.ApiKey, 
+                    config.Algod.Header);
+                return new DefaultApi(httpClient);
+            });
+
             builder.Services.AddSingleton<IndexerRepository>();
             builder.Services.AddSingleton<IPoolRepository, PoolRepository>();
             builder.Services.AddSingleton<PoolRepository>();
@@ -52,9 +66,20 @@ namespace AVMTradeReporter
             builder.Services.AddSingleton<LiquidityRepository>();
             builder.Services.AddSingleton<TransactionProcessor>();
 
-            // Register the background service
+            // Add Pool Processors
+            builder.Services.AddSingleton<PactPoolProcessor>();
+            builder.Services.AddSingleton<TinyPoolProcessor>();
+            builder.Services.AddSingleton<BiatecPoolProcessor>();
+
+            // Register the background services
             builder.Services.AddHostedService<TradeReporterBackgroundService>();
             builder.Services.AddHostedService<GossipBackgroundService>();
+            
+            // Register Pool Refresh Background Service only if enabled
+            if (appConfig?.PoolRefresh?.Enabled == true)
+            {
+                builder.Services.AddHostedService<PoolRefreshBackgroundService>();
+            }
 
             builder.Services.AddSingleton<ElasticsearchClient>(sp =>
             {
