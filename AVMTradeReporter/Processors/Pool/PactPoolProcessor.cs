@@ -9,10 +9,15 @@ namespace AVMTradeReporter.Processors.Pool
     {
         private IDefaultApi _algod;
         private IPoolRepository _poolRepository;
-        public PactPoolProcessor(IDefaultApi algod, IPoolRepository poolRepository)
+        ILogger<PactPoolProcessor> _logger;
+        public PactPoolProcessor(
+            IDefaultApi algod, 
+            IPoolRepository poolRepository, 
+            ILogger<PactPoolProcessor> logger)
         {
             _algod = algod;
             _poolRepository = poolRepository;
+            _logger = logger;
         }
 
         public async Task<AVMTradeReporter.Model.Data.Pool> LoadPoolAsync(string address, ulong appId)
@@ -136,6 +141,7 @@ namespace AVMTradeReporter.Processors.Pool
             }
             if (updated)
             {
+                _logger.LogInformation("Pool {appId} {appAddress} updated with pool refresh", pool.PoolAppId, pool.PoolAddress);
                 await _poolRepository.StorePoolAsync(pool, cancelationTokenSource.Token);
             }
             return pool;

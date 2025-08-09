@@ -9,10 +9,15 @@ namespace AVMTradeReporter.Processors.Pool
     {
         private IDefaultApi _algod;
         private IPoolRepository _poolRepository;
-        public TinyPoolProcessor(IDefaultApi algod, IPoolRepository poolRepository)
+        private readonly ILogger<TinyPoolProcessor> _logger;
+        public TinyPoolProcessor(
+            IDefaultApi algod, 
+            IPoolRepository poolRepository,
+            ILogger<TinyPoolProcessor> logger)
         {
             _algod = algod;
             _poolRepository = poolRepository;
+            _logger = logger;
         }
         public static string Base64AssetAId = Convert.ToBase64String(Encoding.UTF8.GetBytes("asset_1_id"));
         public static string Base64A = Convert.ToBase64String(Encoding.UTF8.GetBytes("asset_1_reserves"));
@@ -138,6 +143,7 @@ namespace AVMTradeReporter.Processors.Pool
             }
             if (updated)
             {
+                _logger.LogInformation("Pool {appId} {appAddress} updated with pool refresh", pool.PoolAppId, pool.PoolAddress);
                 await _poolRepository.StorePoolAsync(pool, cancelationTokenSource.Token);
             }
             return pool;

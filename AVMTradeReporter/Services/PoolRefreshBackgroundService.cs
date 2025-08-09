@@ -14,11 +14,11 @@ namespace AVMTradeReporter.Services
         private readonly IDefaultApi _algod;
         private readonly AppConfiguration _appConfig;
         private readonly IServiceProvider _serviceProvider;
-        
+
         private readonly TimeSpan _refreshInterval;
         private readonly TimeSpan _delayBetweenPools;
         private readonly TimeSpan _initialDelay;
-        
+
         private DateTime _lastRun = DateTime.MinValue;
 
         public PoolRefreshBackgroundService(
@@ -60,7 +60,7 @@ namespace AVMTradeReporter.Services
                 try
                 {
                     var now = DateTime.UtcNow;
-                    
+
                     // Check if we should run
                     if (now - _lastRun >= _refreshInterval)
                     {
@@ -69,7 +69,7 @@ namespace AVMTradeReporter.Services
                         _lastRun = now;
                         _logger.LogInformation("Completed pool refresh at {time}", DateTime.UtcNow);
                     }
-                    
+
                     // Wait for 1 hour before checking again
                     await Task.Delay(TimeSpan.FromHours(1), stoppingToken);
                 }
@@ -81,7 +81,7 @@ namespace AVMTradeReporter.Services
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error in Pool Refresh Background Service");
-                    
+
                     // Wait before retrying
                     await Task.Delay(TimeSpan.FromMinutes(30), stoppingToken);
                 }
@@ -94,11 +94,11 @@ namespace AVMTradeReporter.Services
             {
                 // Initialize pool repository if needed
                 await _poolRepository.InitializeAsync(cancellationToken);
-                
+
                 // Get all pools from repository
                 var allPools = await _poolRepository.GetPoolsAsync(size: int.MaxValue, cancellationToken: cancellationToken);
                 _logger.LogInformation("Found {poolCount} pools to refresh", allPools.Count);
-                
+
                 if (allPools.Count == 0)
                 {
                     _logger.LogWarning("No pools found to refresh");
@@ -107,34 +107,34 @@ namespace AVMTradeReporter.Services
 
                 int processedCount = 0;
                 int errorCount = 0;
-                
+
                 foreach (var pool in allPools)
                 {
                     if (cancellationToken.IsCancellationRequested)
                         break;
-                        
+
                     try
                     {
                         await RefreshSinglePoolAsync(pool, cancellationToken);
                         processedCount++;
-                        
+
                         _logger.LogDebug("Refreshed pool {poolAddress} ({protocol}) - {processed}/{total}",
                             pool.PoolAddress, pool.Protocol, processedCount, allPools.Count);
                     }
                     catch (Exception ex)
                     {
                         errorCount++;
-                        _logger.LogWarning(ex, "Failed to refresh pool {poolAddress} ({protocol})", 
+                        _logger.LogWarning(ex, "Failed to refresh pool {poolAddress} ({protocol})",
                             pool.PoolAddress, pool.Protocol);
                     }
-                    
+
                     // Delay between pools (configurable)
                     if (processedCount < allPools.Count) // Don't delay after the last pool
                     {
                         await Task.Delay(_delayBetweenPools, cancellationToken);
                     }
                 }
-                
+
                 _logger.LogInformation("Pool refresh completed. Processed: {processed}, Errors: {errors}, Total: {total}",
                     processedCount, errorCount, allPools.Count);
             }
@@ -148,7 +148,7 @@ namespace AVMTradeReporter.Services
         private async Task RefreshSinglePoolAsync(Pool pool, CancellationToken cancellationToken)
         {
             IPoolProcessor? processor = null;
-            
+
             try
             {
                 // Get the appropriate processor for this pool's protocol
@@ -158,20 +158,50 @@ namespace AVMTradeReporter.Services
                     _logger.LogWarning("No processor found for protocol {protocol}", pool.Protocol);
                     return;
                 }
-                
+
                 // Load fresh pool data from blockchain
-                var refreshedPool = await processor.LoadPoolAsync(pool.PoolAddress, pool.PoolAppId);
-                
+                await processor.LoadPoolAsync(pool.PoolAddress, pool.PoolAppId);
+
                 // Store the refreshed pool data
-                await _poolRepository.StorePoolAsync(refreshedPool, cancellationToken);
-                
+                //await _poolRepository.StorePoolAsync(refreshedPool, cancellationToken);
+
                 _logger.LogDebug("Successfully refreshed pool {poolAddress} with protocol {protocol}",
                     pool.PoolAddress, pool.Protocol);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error refreshing pool {poolAddress} ({protocol}): {error}",
-                    pool.PoolAddress, pool.Protocol, ex.Message);
+                _logger.LogError(ex, "Error refreshing pool {appId} {poolAddress} ({protocol}): {error}",
+                    pool.PoolAppId, pool.PoolAddress, pool.Protocol, ex.Message);
+
+                if (pool.Protocol == DEXProtocol.Tiny)
+                {
+                    // try with pact
+                    try
+                    {
+                        processor = GetPoolProcessor(DEXProtocol.Pact);
+                        await processor?.LoadPoolAsync(pool.PoolAddress, pool.PoolAppId);
+                    }
+                    catch (Exception pactEx)
+                    {
+                        _logger.LogError(pactEx, "Failed to refresh pool {appId} {poolAddress} with Pact processor: {error}",
+                            pool.PoolAppId, pool.PoolAddress, pactEx.Message);
+                    }
+                }
+
+                if (pool.Protocol == DEXProtocol.Pact)
+                {
+                    // try with pact
+                    try
+                    {
+                        processor = GetPoolProcessor(DEXProtocol.Tiny);
+                        await processor?.LoadPoolAsync(pool.PoolAddress, pool.PoolAppId);
+                    }
+                    catch (Exception pactEx)
+                    {
+                        _logger.LogError(pactEx, "Failed to refresh pool {appId} {poolAddress} with Tiny processor: {error}",
+                            pool.PoolAppId, pool.PoolAddress, pactEx.Message);
+                    }
+                }
                 throw;
             }
         }

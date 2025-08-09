@@ -9,10 +9,15 @@ namespace AVMTradeReporter.Processors.Pool
     {
         private IDefaultApi _algod;
         private IPoolRepository _poolRepository;
-        public BiatecPoolProcessor(IDefaultApi algod, IPoolRepository poolRepository)
+        private readonly ILogger<BiatecPoolProcessor> _logger;
+        public BiatecPoolProcessor(
+            IDefaultApi algod, 
+            IPoolRepository poolRepository,
+            ILogger<BiatecPoolProcessor> logger)
         {
             _algod = algod;
             _poolRepository = poolRepository;
+            _logger = logger;
         }
 
         public static string Base64ConfigProvider = Convert.ToBase64String(Encoding.UTF8.GetBytes("bc"));
@@ -156,6 +161,7 @@ namespace AVMTradeReporter.Processors.Pool
             }
             if (updated)
             {
+                _logger.LogInformation("Pool {appId} {appAddress} updated with pool refresh", pool.PoolAppId, pool.PoolAddress);
                 await _poolRepository.StorePoolAsync(pool, cancelationTokenSource.Token);
             }
             return pool;

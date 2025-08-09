@@ -1,5 +1,8 @@
 ﻿using Algorand;
 using Algorand.Algod;
+using AVMTradeReporter.Processors.Pool;
+using AVMTradeReporter.Services;
+using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -18,9 +21,10 @@ namespace AVMTradeReporterTests.Processors.Pool
 
             using var httpClient = HttpClientConfigurator.ConfigureHttpClient(AlgodConfiguration.MainNet);
             DefaultApi algod = new DefaultApi(httpClient);
-            
+            var logger = new LoggerFactory().CreateLogger<BiatecPoolProcessor>();
+
             var poolRepository = new MockPoolRepository();
-            var processor = new AVMTradeReporter.Processors.Pool.BiatecPoolProcessor(algod, poolRepository);
+            var processor = new AVMTradeReporter.Processors.Pool.BiatecPoolProcessor(algod, poolRepository, logger);
             string address = "43KNWWESA43DEGHSRJVRU55V5IBOCJSPXH3OSBV4IDOGS6VYIDYAXYHDGU";
             ulong appId = 3131562380;
             // Act

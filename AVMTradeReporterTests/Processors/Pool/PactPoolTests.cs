@@ -1,5 +1,7 @@
 ﻿using Algorand;
 using Algorand.Algod;
+using AVMTradeReporter.Processors.Pool;
+using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -18,9 +20,10 @@ namespace AVMTradeReporterTests.Processors.Pool
 
             using var httpClient = HttpClientConfigurator.ConfigureHttpClient(AlgodConfiguration.MainNet);
             DefaultApi algod = new DefaultApi(httpClient);
-            
+            var logger = new LoggerFactory().CreateLogger<PactPoolProcessor>();
+
             var poolRepository = new MockPoolRepository();
-            var processor = new AVMTradeReporter.Processors.Pool.PactPoolProcessor(algod, poolRepository);
+            var processor = new AVMTradeReporter.Processors.Pool.PactPoolProcessor(algod, poolRepository, logger);
             string address = "M72TAR3CZLHFCC2JFIDCFDRICMDIB73FYMFETEKCEPGR5XO7ILFNUKEV34";
             ulong appId = 2_757_661_465; 
             // Act
