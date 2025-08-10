@@ -127,7 +127,7 @@ namespace AVMTradeReporter.Processors.Liqudity
                     BlockId = block?.Round ?? 0,
                     TxGroup = Convert.ToBase64String(current.Tx.Group.Bytes),
                     Timestamp = DateTimeOffset.FromUnixTimeSeconds(Convert.ToInt64(block?.Timestamp ?? 0)),
-                    Protocol = DEXProtocol.Pact,
+                    Protocol = DEXProtocol.Biatec,
                     PoolAddress = poolAddress.EncodeAsString(),
                     PoolAppId = appCallTx.ApplicationId ?? 0,
                     TopTxId = topTxId,

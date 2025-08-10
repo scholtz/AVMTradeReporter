@@ -288,7 +288,7 @@ namespace AVMTradeReporter.Repository
 
         public async Task UpdatePoolFromTrade(Trade trade, CancellationToken cancellationToken)
         {
-            // Only update from confirmed trades
+            // Only update from confirmed tradeError refreshing pools
             if (trade.TradeState != TradeState.Confirmed)
             {
                 _logger.LogDebug("Skipping pool update from unconfirmed trade {txId}", trade.TxId);
