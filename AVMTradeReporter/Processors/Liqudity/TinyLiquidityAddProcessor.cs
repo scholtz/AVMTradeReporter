@@ -117,6 +117,20 @@ namespace AVMTradeReporter.Processors.Liqudity
                     B = Convert.ToUInt64(BItem.Value.Value.Uint64);
                 }
 
+                ulong? AF = null;
+                var AFItem = current.Detail?.LocalDelta?.SelectMany(k => k.Value)?.FirstOrDefault(kv => kv.Key.ToString() == "asset_1_protocol_fees");
+                if (AFItem != null && AFItem.Value.Value != null)
+                {
+                    AF = Convert.ToUInt64(AFItem.Value.Value.Uint64);
+                }
+
+                ulong? BF = null;
+                var BFItem = current.Detail?.LocalDelta?.SelectMany(k => k.Value)?.FirstOrDefault(kv => kv.Key.ToString() == "asset_2_protocol_fees");
+                if (BFItem != null && BFItem.Value.Value != null)
+                {
+                    BF = Convert.ToUInt64(BFItem.Value.Value.Uint64);
+                }
+
                 if (poolAddress == null) return null;
                 return new Liquidity
                 {
@@ -139,7 +153,9 @@ namespace AVMTradeReporter.Processors.Liqudity
                     TxState = tradeState,
                     A = A,
                     B = B,
-                    L = L
+                    L = L,
+                    AF = AF,
+                    BF = BF,
                 };
             }
             return null;

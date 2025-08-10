@@ -339,6 +339,9 @@ namespace AVMTradeReporter.Repository
                 existingPool.Timestamp = trade.Timestamp;
                 existingPool.Protocol = trade.Protocol;
 
+                if (trade.AF.HasValue) existingPool.AF = trade.AF.Value;
+                if (trade.BF.HasValue) existingPool.BF = trade.BF.Value;
+
 
                 // Check if we need to enrich the pool with missing data
                 if (string.IsNullOrEmpty(existingPool.ApprovalProgramHash))
@@ -416,6 +419,8 @@ namespace AVMTradeReporter.Repository
                     existingPool.L = liquidity.L;
                 existingPool.Timestamp = liquidity.Timestamp;
                 existingPool.Protocol = liquidity.Protocol;
+                if(liquidity.AF.HasValue) existingPool.AF = liquidity.AF.Value;
+                if(liquidity.BF.HasValue) existingPool.BF = liquidity.BF.Value;
 
                 // Check if we need to enrich the pool with missing data
                 if (string.IsNullOrEmpty(existingPool.ApprovalProgramHash))

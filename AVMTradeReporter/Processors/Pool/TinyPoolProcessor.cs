@@ -29,6 +29,8 @@ namespace AVMTradeReporter.Processors.Pool
         public static string Base64FEE_BPS = Convert.ToBase64String(Encoding.UTF8.GetBytes("total_fee_share"));
         // protocol_fee_ratio
         public static string Base64Tiny_FEE_BPS = Convert.ToBase64String(Encoding.UTF8.GetBytes("protocol_fee_ratio"));
+        public static string AFKey = Convert.ToBase64String(Encoding.UTF8.GetBytes("asset_1_protocol_fees"));
+        public static string BFKey = Convert.ToBase64String(Encoding.UTF8.GetBytes("asset_2_protocol_fees"));
 
         public async Task<AVMTradeReporter.Model.Data.Pool> LoadPoolAsync(string address, ulong appId)
         {
@@ -53,6 +55,10 @@ namespace AVMTradeReporter.Processors.Pool
             if (TINY_FEE_BPS == null) throw new Exception("TINY_FEE_BPS is missing in local state");
             var assetAId = AssetAId.Value.Uint;
             var assetBId = AssetBId.Value.Uint;
+            var AF = localStateInfo.AppLocalState.KeyValue.FirstOrDefault(kv => kv.Key == AFKey);
+            if (AF == null) throw new Exception("AF is null");
+            var BF = localStateInfo.AppLocalState.KeyValue.FirstOrDefault(kv => kv.Key == BFKey);
+            if (BF == null) throw new Exception("BF is null");
 
 
 
@@ -77,7 +83,9 @@ namespace AVMTradeReporter.Processors.Pool
                     LPFee = FEE_BPS.Value.Uint / 10000m,
                     ProtocolFeePortion = Convert.ToDecimal(TINY_FEE_BPS.Value.Uint) / Convert.ToDecimal(FEE_BPS.Value.Uint),
                     AssetIdA = assetAId,
-                    AssetIdB = assetBId
+                    AssetIdB = assetBId,
+                    AF = AF.Value.Uint,
+                    BF = BF.Value.Uint,
                 };
                 updated = true;
             }

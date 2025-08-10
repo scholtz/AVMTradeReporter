@@ -19,6 +19,10 @@ namespace AVMTradeReporter.Model.Data
         public ulong AssetAmountLP { get; set; }
         public ulong A { get; set; }
         public ulong B { get; set; }
+        // protocol fees in A asset
+        public ulong? AF { get; set; }
+        // protocol fees in B asset
+        public ulong? BF { get; set; }
         public ulong L { get; set; }
         public string TxId { get; set; } = string.Empty;
         public ulong BlockId { get; set; }

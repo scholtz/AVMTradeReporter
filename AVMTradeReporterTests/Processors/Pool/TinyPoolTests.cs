@@ -35,6 +35,9 @@ namespace AVMTradeReporterTests.Processors.Pool
             Assert.That(pool.PoolAppId, Is.EqualTo(appId));
             Assert.That(pool.AssetIdA, Is.EqualTo(3032713424));
             Assert.That(pool.AssetIdB, Is.EqualTo(0));
+            var json = Algorand.Utils.Encoder.EncodeToJson(pool);
+            Assert.That(json, Is.EqualTo("{\r\n  \"PoolAddress\": \"2JPTIQWQEWFA6LIHCIXQ24LBDY7ZJ2DHKC3X5FPEITLMDB4C2BDIOXN6QE\",\r\n  \"PoolAppId\": 1002541853,\r\n  \"AssetIdA\": 3032713424,\r\n  \"AssetIdB\": 0,\r\n  \"AssetIdLP\": 3110834238,\r\n  \"A\": 440530209446717804,\r\n  \"B\": 23327203827,\r\n  \"AF\": 287918143022020,\r\n  \"BF\": 11262516,\r\n  \"Protocol\": 1,\r\n  \"Timestamp\": \"2025-08-10T22:52:15.1392537+02:00\",\r\n  \"AMMType\": 0,\r\n  \"ApprovalProgramHash\": \"dd63834ddcd51013ec0a22142497ad4c6d74e421e6c79149422c243346691f56\",\r\n  \"LPFee\": 0.003,\r\n  \"ProtocolFeePortion\": 0.2\r\n}"));
+
         }
         [Test]
         public async Task LoadTinyPoolTest1002541853TryFix()

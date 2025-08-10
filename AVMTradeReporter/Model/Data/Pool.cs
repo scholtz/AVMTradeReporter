@@ -16,6 +16,10 @@ namespace AVMTradeReporter.Model.Data
         public ulong? AssetIdLP { get; set; }
         public ulong? A { get; set; }
         public ulong? B { get; set; }
+        // protocol fees in A asset
+        public ulong? AF { get; set; }
+        // protocol fees in B asset
+        public ulong? BF { get; set; }
         public ulong? L { get; set; }
         /// <summary>
         /// Verification class at Biatec Identity service.. Some pools allows swapping only between verified persons
