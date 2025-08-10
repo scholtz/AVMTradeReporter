@@ -1,6 +1,7 @@
 using AVMTradeReporter.Hubs;
 using AVMTradeReporter.Model.Configuration;
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Processors.Pool;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Core.Bulk;
 using Elastic.Clients.Elasticsearch.IndexManagement;
@@ -21,6 +22,7 @@ namespace AVMTradeReporter.Repository
         private readonly IHubContext<BiatecScanHub> _hubContext;
         private readonly IDatabase? _redisDatabase;
         private readonly AppConfiguration _appConfig;
+        private readonly IServiceProvider _serviceProvider;
 
         // In-memory cache for pools
         private readonly ConcurrentDictionary<string, Pool> _poolsCache = new();
@@ -32,6 +34,7 @@ namespace AVMTradeReporter.Repository
             ILogger<PoolRepository> logger,
             IHubContext<BiatecScanHub> hubContext,
             IOptions<AppConfiguration> appConfig,
+            IServiceProvider serviceProvider,
             IDatabase? redisDatabase = null
             )
         {
@@ -40,6 +43,7 @@ namespace AVMTradeReporter.Repository
             _hubContext = hubContext;
             _redisDatabase = redisDatabase;
             _appConfig = appConfig.Value;
+            _serviceProvider = serviceProvider;
 
             CreatePoolIndexTemplateAsync().Wait();
         }
@@ -302,6 +306,17 @@ namespace AVMTradeReporter.Repository
                 if (existingPool == null)
                 {
                     var newPool = CreatePoolFromTrade(trade);
+                    
+                    // Check if we need to load full pool data using pool processor
+                    if (string.IsNullOrEmpty(newPool.ApprovalProgramHash))
+                    {
+                        var enrichedPool = await TryEnrichPoolWithProcessor(newPool, cancellationToken);
+                        if (enrichedPool != null)
+                        {
+                            newPool = enrichedPool;
+                        }
+                    }
+                    
                     await StorePoolAsync(newPool, cancellationToken);
                     _logger.LogInformation("Created new pool from trade: {poolAddress}_{poolAppId}_{protocol}",
                         trade.PoolAddress, trade.PoolAppId, trade.Protocol);
@@ -322,6 +337,16 @@ namespace AVMTradeReporter.Repository
                 if (trade.L > 0)
                     existingPool.L = trade.L;
                 existingPool.Timestamp = trade.Timestamp;
+
+                // Check if we need to enrich the pool with missing data
+                if (string.IsNullOrEmpty(existingPool.ApprovalProgramHash))
+                {
+                    var enrichedPool = await TryEnrichPoolWithProcessor(existingPool, cancellationToken);
+                    if (enrichedPool != null)
+                    {
+                        existingPool = enrichedPool;
+                    }
+                }
 
                 await StorePoolAsync(existingPool, cancellationToken);
 
@@ -354,6 +379,17 @@ namespace AVMTradeReporter.Repository
                 if (existingPool == null)
                 {
                     var newPool = CreatePoolFromLiquidity(liquidity);
+                    
+                    // Check if we need to load full pool data using pool processor
+                    if (string.IsNullOrEmpty(newPool.ApprovalProgramHash))
+                    {
+                        var enrichedPool = await TryEnrichPoolWithProcessor(newPool, cancellationToken);
+                        if (enrichedPool != null)
+                        {
+                            newPool = enrichedPool;
+                        }
+                    }
+                    
                     await StorePoolAsync(newPool, cancellationToken);
                     _logger.LogInformation("Created new pool from liquidity: {poolAddress}_{poolAppId}_{protocol}",
                         liquidity.PoolAddress, liquidity.PoolAppId, liquidity.Protocol);
@@ -377,6 +413,16 @@ namespace AVMTradeReporter.Repository
                 if (liquidity.L > 0)
                     existingPool.L = liquidity.L;
                 existingPool.Timestamp = liquidity.Timestamp;
+
+                // Check if we need to enrich the pool with missing data
+                if (string.IsNullOrEmpty(existingPool.ApprovalProgramHash))
+                {
+                    var enrichedPool = await TryEnrichPoolWithProcessor(existingPool, cancellationToken);
+                    if (enrichedPool != null)
+                    {
+                        existingPool = enrichedPool;
+                    }
+                }
 
                 await StorePoolAsync(existingPool, cancellationToken);
 
@@ -472,6 +518,106 @@ namespace AVMTradeReporter.Repository
             {
                 _logger.LogError(ex, "Failed to publish pool update to SignalR hub");
             }
+        }
+
+        /// <summary>
+        /// Tries to enrich a pool with missing data by running the appropriate pool processor
+        /// </summary>
+        private async Task<Pool?> TryEnrichPoolWithProcessor(Pool pool, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var processor = GetPoolProcessor(pool.Protocol);
+                if (processor == null)
+                {
+                    _logger.LogWarning("No pool processor found for protocol {protocol}", pool.Protocol);
+                    return null;
+                }
+
+                _logger.LogInformation("Enriching pool {poolAddress}_{poolAppId}_{protocol} using pool processor",
+                    pool.PoolAddress, pool.PoolAppId, pool.Protocol);
+
+                // Use the pool processor to load complete pool data
+                var enrichedPool = await processor.LoadPoolAsync(pool.PoolAddress, pool.PoolAppId);
+                
+                _logger.LogInformation("Successfully enriched pool {poolAddress}_{poolAppId}_{protocol} with approvalProgramHash: {hash}",
+                    pool.PoolAddress, pool.PoolAppId, pool.Protocol, enrichedPool?.ApprovalProgramHash);
+                
+                return enrichedPool;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to enrich pool {poolAddress}_{poolAppId}_{protocol} using pool processor: {error}",
+                    pool.PoolAddress, pool.PoolAppId, pool.Protocol, ex.Message);
+
+                // Try with alternative processors if the main one fails
+                if (pool.Protocol == DEXProtocol.Tiny)
+                {
+                    try
+                    {
+                        var pactProcessor = GetPoolProcessor(DEXProtocol.Pact);
+                        if (pactProcessor != null)
+                        {
+                            _logger.LogInformation("Trying to enrich Tiny pool {poolAddress}_{poolAppId} with Pact processor",
+                                pool.PoolAddress, pool.PoolAppId);
+                            
+                            var enrichedPool = await pactProcessor.LoadPoolAsync(pool.PoolAddress, pool.PoolAppId);
+                            // Update protocol to reflect actual processor used
+                            if (enrichedPool != null)
+                            {
+                                enrichedPool.Protocol = DEXProtocol.Pact;
+                            }
+                            return enrichedPool;
+                        }
+                    }
+                    catch (Exception pactEx)
+                    {
+                        _logger.LogWarning(pactEx, "Failed to enrich pool {poolAddress}_{poolAppId} with Pact processor: {error}",
+                            pool.PoolAddress, pool.PoolAppId, pactEx.Message);
+                    }
+                }
+                else if (pool.Protocol == DEXProtocol.Pact)
+                {
+                    try
+                    {
+                        var tinyProcessor = GetPoolProcessor(DEXProtocol.Tiny);
+                        if (tinyProcessor != null)
+                        {
+                            _logger.LogInformation("Trying to enrich Pact pool {poolAddress}_{poolAppId} with Tiny processor",
+                                pool.PoolAddress, pool.PoolAppId);
+                            
+                            var enrichedPool = await tinyProcessor.LoadPoolAsync(pool.PoolAddress, pool.PoolAppId);
+                            // Update protocol to reflect actual processor used
+                            if (enrichedPool != null)
+                            {
+                                enrichedPool.Protocol = DEXProtocol.Tiny;
+                            }
+                            return enrichedPool;
+                        }
+                    }
+                    catch (Exception tinyEx)
+                    {
+                        _logger.LogWarning(tinyEx, "Failed to enrich pool {poolAddress}_{poolAppId} with Tiny processor: {error}",
+                            pool.PoolAddress, pool.PoolAppId, tinyEx.Message);
+                    }
+                }
+
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Gets the appropriate pool processor for the specified protocol
+        /// </summary>
+        private IPoolProcessor? GetPoolProcessor(DEXProtocol protocol)
+        {
+            return protocol switch
+            {
+                DEXProtocol.Pact => _serviceProvider.GetService<PactPoolProcessor>(),
+                DEXProtocol.Tiny => _serviceProvider.GetService<TinyPoolProcessor>(),
+                DEXProtocol.Biatec => _serviceProvider.GetService<BiatecPoolProcessor>(),
+                _ => null
+            };
         }
     }
 }
