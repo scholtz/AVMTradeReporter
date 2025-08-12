@@ -58,7 +58,7 @@ namespace AVMTradeReporter
                     config.Algod.Header);
                 return new DefaultApi(httpClient);
             });
-
+            builder.Services.AddSingleton<IAssetRepository, AssetRepository>();
             builder.Services.AddSingleton<IndexerRepository>();
             builder.Services.AddSingleton<IPoolRepository, PoolRepository>();
             builder.Services.AddSingleton<PoolRepository>();

@@ -327,7 +327,7 @@ namespace AVMTradeReporter.Repository
                 // If pool doesn't exist, create a new one from trade data
                 if (existingPool == null)
                 {
-                    var newPool = CreatePoolFromTrade(trade);
+                    var newPool = await CreatePoolFromTrade(trade);
 
                     // Check if we need to load full pool data using pool processor
                     if (string.IsNullOrEmpty(newPool.ApprovalProgramHash))
@@ -405,7 +405,7 @@ namespace AVMTradeReporter.Repository
                 // If pool doesn't exist, create a new one from liquidity data
                 if (existingPool == null)
                 {
-                    var newPool = CreatePoolFromLiquidity(liquidity);
+                    var newPool = await CreatePoolFromLiquidity(liquidity);
 
                     // Check if we need to load full pool data using pool processor
                     if (string.IsNullOrEmpty(newPool.ApprovalProgramHash))
@@ -505,8 +505,20 @@ namespace AVMTradeReporter.Repository
             //return $"{poolAddress}_{poolAppId}_{protocol}";
         }
 
-        private Pool CreatePoolFromTrade(Trade trade)
+        private async Task<Pool> CreatePoolFromTrade(Trade trade)
         {
+            var processor = GetPoolProcessor(trade.Protocol);
+            if (processor != null)
+            {
+                var pool = await processor.LoadPoolAsync(trade.PoolAddress, trade.PoolAppId);
+                if (pool != null)
+                {
+                    _poolsCache[pool.PoolAddress] = pool; // Update cache
+                    var cancellationTokenSource = new CancellationTokenSource();
+                    await UpdatePoolFromTrade(trade, cancellationTokenSource.Token);
+                    return _poolsCache[pool.PoolAddress];
+                }
+            }
             return new Pool
             {
                 PoolAddress = trade.PoolAddress,
@@ -519,8 +531,20 @@ namespace AVMTradeReporter.Repository
             };
         }
 
-        private Pool CreatePoolFromLiquidity(Liquidity liquidity)
+        private async Task<Pool> CreatePoolFromLiquidity(Liquidity liquidity)
         {
+            var processor = GetPoolProcessor(liquidity.Protocol);
+            if (processor != null)
+            {
+                var pool = await processor.LoadPoolAsync(liquidity.PoolAddress, liquidity.PoolAppId);
+                if (pool != null)
+                {
+                    _poolsCache[pool.PoolAddress] = pool; // Update cache
+                    var cancellationTokenSource = new CancellationTokenSource();
+                    await UpdatePoolFromLiquidity(liquidity, cancellationTokenSource.Token);
+                    return _poolsCache[pool.PoolAddress];
+                }
+            }
             return new Pool
             {
                 PoolAddress = liquidity.PoolAddress,

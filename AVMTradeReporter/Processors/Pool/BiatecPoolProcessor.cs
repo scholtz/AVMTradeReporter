@@ -10,14 +10,17 @@ namespace AVMTradeReporter.Processors.Pool
         private IDefaultApi _algod;
         private IPoolRepository _poolRepository;
         private readonly ILogger<BiatecPoolProcessor> _logger;
+        private readonly IAssetRepository _assetRepository;
         public BiatecPoolProcessor(
             IDefaultApi algod,
             IPoolRepository poolRepository,
-            ILogger<BiatecPoolProcessor> logger)
+            ILogger<BiatecPoolProcessor> logger,
+             IAssetRepository assetRepository)
         {
             _algod = algod;
             _poolRepository = poolRepository;
             _logger = logger;
+            _assetRepository = assetRepository;
         }
 
         public static string Base64ConfigProvider = Convert.ToBase64String(Encoding.UTF8.GetBytes("bc"));
@@ -37,6 +40,7 @@ namespace AVMTradeReporter.Processors.Pool
         {
             using var cancelationTokenSource = new CancellationTokenSource();
             var pool = await _poolRepository.GetPoolAsync(address, cancelationTokenSource.Token);
+
             var app = await _algod.GetApplicationByIDAsync(appId);
 
             var config = app.Params.GlobalState.FirstOrDefault(p => p.Key == Base64ConfigProvider);
@@ -87,6 +91,9 @@ namespace AVMTradeReporter.Processors.Pool
             var pMaxValue = Convert.ToDecimal(pMax.Value.Uint) / scaleDecimal;
             var pMinValue = Convert.ToDecimal(pMin.Value.Uint) / scaleDecimal;
 
+            var assetADecimals = (await _assetRepository.GetAssetAsync(assetAId, cancelationTokenSource.Token))?.Params?.Decimals;
+            var assetBDecimals = (await _assetRepository.GetAssetAsync(assetBId, cancelationTokenSource.Token))?.Params?.Decimals;
+
             if (pool == null)
             {
                 pool = new AVMTradeReporter.Model.Data.Pool
@@ -107,6 +114,8 @@ namespace AVMTradeReporter.Processors.Pool
                     AssetIdB = assetBId,
                     PMax = pMaxValue,
                     PMin = pMinValue,
+                    AssetADecimals = assetADecimals,
+                    AssetBDecimals = assetBDecimals,
                 };
                 updated = true;
             }
@@ -171,6 +180,16 @@ namespace AVMTradeReporter.Processors.Pool
                 if (pool.PMin != pMinValue)
                 {
                     pool.PMin = pMinValue;
+                    updated = true;
+                }
+                if (pool.AssetADecimals != assetADecimals)
+                {
+                    pool.AssetADecimals = assetADecimals;
+                    updated = true;
+                }
+                if (pool.AssetBDecimals != assetBDecimals)
+                {
+                    pool.AssetBDecimals = assetBDecimals;
                     updated = true;
                 }
 

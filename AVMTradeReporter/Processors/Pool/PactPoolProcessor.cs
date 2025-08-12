@@ -10,21 +10,25 @@ namespace AVMTradeReporter.Processors.Pool
         private IDefaultApi _algod;
         private IPoolRepository _poolRepository;
         ILogger<PactPoolProcessor> _logger;
+        private readonly IAssetRepository _assetRepository;
+
         public PactPoolProcessor(
-            IDefaultApi algod, 
-            IPoolRepository poolRepository, 
-            ILogger<PactPoolProcessor> logger)
+            IDefaultApi algod,
+            IPoolRepository poolRepository,
+            ILogger<PactPoolProcessor> logger,
+            IAssetRepository assetRepository)
         {
             _algod = algod;
             _poolRepository = poolRepository;
             _logger = logger;
+            _assetRepository = assetRepository;
         }
 
         public async Task<AVMTradeReporter.Model.Data.Pool> LoadPoolAsync(string address, ulong appId)
         {
             using var cancelationTokenSource = new CancellationTokenSource();
             var pool = await _poolRepository.GetPoolAsync(address, cancelationTokenSource.Token);
-            var app  = await _algod.GetApplicationByIDAsync(appId);
+            var app = await _algod.GetApplicationByIDAsync(appId);
 
             var A = app.Params.GlobalState.FirstOrDefault(p => p.Key == Convert.ToBase64String(Encoding.ASCII.GetBytes("A")));
             if (A == null) throw new Exception("A is missing in global params");
@@ -48,13 +52,16 @@ namespace AVMTradeReporter.Processors.Pool
             var assetAIdBytes = configBytes.Take(8).ToArray();
             // convert big endian to ulong
             var assetAId = BitConverter.ToUInt64(assetAIdBytes.Reverse().ToArray(), 0);
-            
+
             var assetBIdBytes = configBytes.Skip(8).Take(8).ToArray();
             // convert big endian to ulong
             var assetBId = BitConverter.ToUInt64(assetBIdBytes.Reverse().ToArray(), 0);
 
+            var assetADecimals = (await _assetRepository.GetAssetAsync(assetAId, cancelationTokenSource.Token))?.Params?.Decimals;
+            var assetBDecimals = (await _assetRepository.GetAssetAsync(assetBId, cancelationTokenSource.Token))?.Params?.Decimals;
+
             var updated = false;
-            if(pool == null)
+            if (pool == null)
             {
                 pool = new AVMTradeReporter.Model.Data.Pool
                 {
@@ -71,17 +78,20 @@ namespace AVMTradeReporter.Processors.Pool
                     LPFee = FEE_BPS.Value.Uint / 10000m,
                     ProtocolFeePortion = Convert.ToDecimal(PACT_FEE_BPS.Value.Uint) / Convert.ToDecimal(FEE_BPS.Value.Uint),
                     AssetIdA = assetAId,
-                    AssetIdB = assetBId
+                    AssetIdB = assetBId,
+                    AssetADecimals = assetADecimals,
+                    AssetBDecimals = assetBDecimals,
                 };
                 updated = true;
             }
             else
             {
-                if(pool.Protocol != Model.Data.DEXProtocol.Pact) { 
+                if (pool.Protocol != Model.Data.DEXProtocol.Pact)
+                {
                     pool.Protocol = Model.Data.DEXProtocol.Pact;
                     updated = true;
                 }
-                if(pool.A != A.Value.Uint)
+                if (pool.A != A.Value.Uint)
                 {
                     pool.A = A.Value.Uint;
                     updated = true;
@@ -124,6 +134,16 @@ namespace AVMTradeReporter.Processors.Pool
                 if (pool.AssetIdB != assetBId)
                 {
                     pool.AssetIdB = assetBId;
+                    updated = true;
+                }
+                if (pool.AssetADecimals != assetADecimals)
+                {
+                    pool.AssetADecimals = assetADecimals;
+                    updated = true;
+                }
+                if (pool.AssetBDecimals != assetBDecimals)
+                {
+                    pool.AssetBDecimals = assetBDecimals;
                     updated = true;
                 }
                 if (pool.AMMType != Model.Data.AMMType.OldAMM)

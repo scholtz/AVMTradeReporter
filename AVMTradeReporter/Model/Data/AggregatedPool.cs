@@ -33,6 +33,14 @@ namespace AVMTradeReporter.Model.Data
         /// Total aggregated amount of asset B across all pools with this pair.
         /// </summary>
         public decimal B { get; set; }
+        /// <summary>
+        /// Sum of locked asset A across all pools with this pair.
+        /// </summary>
+        public ulong TVL_A { get; set; }
+        /// <summary>
+        /// Sum of locked asset B across all pools with this pair.
+        /// </summary>
+        public ulong TVL_B { get; set; }
 
         /// <summary>
         /// Number of pools aggregated into this result.
@@ -66,6 +74,8 @@ namespace AVMTradeReporter.Model.Data
                     AssetIdB = g.Key.B,
                     A = (ulong)g.Sum(p => p.VirualAmountA),
                     B = (ulong)g.Sum(p => p.VirualAmountB),
+                    TVL_A = (ulong)g.Sum(p => Convert.ToDecimal(p.RealAmountA)),
+                    TVL_B = (ulong)g.Sum(p => Convert.ToDecimal(p.RealAmountB)),
                     PoolCount = g.Count(),
                     LastUpdated = g.Max(p => p.Timestamp)
                 };

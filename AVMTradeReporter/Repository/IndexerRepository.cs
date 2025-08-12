@@ -1,6 +1,7 @@
 ﻿using AVMTradeReporter.Model.Data;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Core.Bulk;
+using StackExchange.Redis;
 
 namespace AVMIndexReporter.Repository
 {

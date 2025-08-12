@@ -12,7 +12,9 @@ namespace AVMTradeReporter.Model.Data
         public string PoolAddress { get; set; } = string.Empty;
         public ulong PoolAppId { get; set; }
         public ulong? AssetIdA { get; set; }
+        public ulong? AssetADecimals { get; set; }
         public ulong? AssetIdB { get; set; }
+        public ulong? AssetBDecimals { get; set; }
         public ulong? AssetIdLP { get; set; }
         public ulong? A { get; set; }
         public ulong? B { get; set; }
@@ -71,8 +73,15 @@ namespace AVMTradeReporter.Model.Data
                 }
                 else
                 {
-                    return A ?? 0 + AF ?? 0;
+                    return RealAmountA;
                 }
+            }
+        }
+        public decimal RealAmountA
+        {
+            get
+            {
+                return Convert.ToDecimal(A) / Convert.ToDecimal(Math.Pow(10, Convert.ToDouble(AssetADecimals ?? 0))) + Convert.ToDecimal(AF) / Convert.ToDecimal(Math.Pow(10, Convert.ToDouble(AssetADecimals ?? 0)));
             }
         }
         public decimal VirualAmountB
@@ -102,8 +111,15 @@ namespace AVMTradeReporter.Model.Data
                 }
                 else
                 {
-                    return B ?? 0 + BF ?? 0;
+                    return RealAmountB;
                 }
+            }
+        }
+        public decimal RealAmountB
+        {
+            get
+            {
+                return Convert.ToDecimal(B) / Convert.ToDecimal(Math.Pow(10, Convert.ToDouble(AssetBDecimals ?? 0))) + Convert.ToDecimal(BF) / Convert.ToDecimal(Math.Pow(10, Convert.ToDouble(AssetBDecimals ?? 0)));
             }
         }
     }

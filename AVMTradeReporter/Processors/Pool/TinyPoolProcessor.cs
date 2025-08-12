@@ -10,14 +10,18 @@ namespace AVMTradeReporter.Processors.Pool
         private IDefaultApi _algod;
         private IPoolRepository _poolRepository;
         private readonly ILogger<TinyPoolProcessor> _logger;
+        private readonly IAssetRepository _assetRepository;
+
         public TinyPoolProcessor(
-            IDefaultApi algod, 
+            IDefaultApi algod,
             IPoolRepository poolRepository,
-            ILogger<TinyPoolProcessor> logger)
+            ILogger<TinyPoolProcessor> logger,
+            IAssetRepository assetRepository)
         {
             _algod = algod;
             _poolRepository = poolRepository;
             _logger = logger;
+            _assetRepository = assetRepository;
         }
         public static string Base64AssetAId = Convert.ToBase64String(Encoding.UTF8.GetBytes("asset_1_id"));
         public static string Base64A = Convert.ToBase64String(Encoding.UTF8.GetBytes("asset_1_reserves"));
@@ -36,13 +40,13 @@ namespace AVMTradeReporter.Processors.Pool
         {
             using var cancelationTokenSource = new CancellationTokenSource();
             var pool = await _poolRepository.GetPoolAsync(address, cancelationTokenSource.Token);
-            var app  = await _algod.GetApplicationByIDAsync(appId);
+            var app = await _algod.GetApplicationByIDAsync(appId);
             var localStateInfo = await _algod.AccountApplicationInformationAsync(address, appId, null);
 
             var A = localStateInfo.AppLocalState.KeyValue.FirstOrDefault(kv => kv.Key == Base64A);
-            if(A == null) throw new Exception("A is missing in local state");
+            if (A == null) throw new Exception("A is missing in local state");
             var B = localStateInfo.AppLocalState.KeyValue.FirstOrDefault(kv => kv.Key == Base64B);
-            if(B == null) throw new Exception("B is missing in local state");
+            if (B == null) throw new Exception("B is missing in local state");
             var AssetAId = localStateInfo.AppLocalState.KeyValue.FirstOrDefault(kv => kv.Key == Base64AssetAId);
             if (AssetAId == null) throw new Exception("AssetAId is missing in local state");
             var AssetBId = localStateInfo.AppLocalState.KeyValue.FirstOrDefault(kv => kv.Key == Base64AssetBId);
@@ -61,6 +65,9 @@ namespace AVMTradeReporter.Processors.Pool
             if (BF == null) throw new Exception("BF is null");
 
 
+
+            var assetADecimals = (await _assetRepository.GetAssetAsync(assetAId, cancelationTokenSource.Token))?.Params?.Decimals;
+            var assetBDecimals = (await _assetRepository.GetAssetAsync(assetBId, cancelationTokenSource.Token))?.Params?.Decimals;
 
 
             //app.Params.GlobalState
@@ -139,6 +146,17 @@ namespace AVMTradeReporter.Processors.Pool
                 if (pool.AMMType != Model.Data.AMMType.OldAMM)
                 {
                     pool.AMMType = Model.Data.AMMType.OldAMM;
+                    updated = true;
+                }
+
+                if (pool.AssetADecimals != assetADecimals)
+                {
+                    pool.AssetADecimals = assetADecimals;
+                    updated = true;
+                }
+                if (pool.AssetBDecimals != assetBDecimals)
+                {
+                    pool.AssetBDecimals = assetBDecimals;
                     updated = true;
                 }
 
