@@ -10,7 +10,7 @@ namespace AVMTradeReporterTests
 {
     public class MockPoolRepository : IPoolRepository
     {
-        private List<Pool> pools = new List<Pool>();
+        private List<AVMTradeReporter.Model.Data.Pool> pools = new List<AVMTradeReporter.Model.Data.Pool>();
 
         public Task InitializeAsync(CancellationToken cancellationToken = default)
         {
@@ -18,13 +18,13 @@ namespace AVMTradeReporterTests
             return Task.CompletedTask;
         }
 
-        public Task<Pool?> GetPoolAsync(string poolAddress, CancellationToken cancellationToken)
+        public Task<AVMTradeReporter.Model.Data.Pool?> GetPoolAsync(string poolAddress, CancellationToken cancellationToken)
         {
             var pool = pools.FirstOrDefault(p => p.PoolAddress == poolAddress);
-            return Task.FromResult<Pool?>(pool);
+            return Task.FromResult<AVMTradeReporter.Model.Data.Pool?>(pool);
         }
 
-        public Task<bool> StorePoolAsync(Pool pool, CancellationToken cancellationToken)
+        public Task<bool> StorePoolAsync(AVMTradeReporter.Model.Data.Pool pool, CancellationToken cancellationToken)
         {
             var existing = pools.FirstOrDefault(p => p.PoolAddress == pool.PoolAddress);
             if (existing != null)
@@ -47,7 +47,7 @@ namespace AVMTradeReporterTests
             return Task.CompletedTask;
         }
 
-        public Task<List<Pool>> GetPoolsAsync(DEXProtocol? protocol = null, int size = 100, CancellationToken cancellationToken = default)
+        public Task<List<AVMTradeReporter.Model.Data.Pool>> GetPoolsAsync(DEXProtocol? protocol = null, int size = 100, CancellationToken cancellationToken = default)
         {
             var result = protocol.HasValue
                 ? pools.Where(p => p.Protocol == protocol.Value).Take(size).ToList()

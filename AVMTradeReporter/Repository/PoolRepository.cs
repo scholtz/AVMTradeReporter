@@ -20,6 +20,7 @@ namespace AVMTradeReporter.Repository
         private readonly ElasticsearchClient _elasticClient;
         private readonly ILogger<PoolRepository> _logger;
         private readonly IHubContext<BiatecScanHub> _hubContext;
+        private readonly AggregatedPoolRepository _aggregatedPoolRepository;
         private readonly IDatabase? _redisDatabase;
         private readonly AppConfiguration _appConfig;
         private readonly IServiceProvider _serviceProvider;
@@ -33,6 +34,7 @@ namespace AVMTradeReporter.Repository
             ElasticsearchClient elasticClient,
             ILogger<PoolRepository> logger,
             IHubContext<BiatecScanHub> hubContext,
+            AggregatedPoolRepository aggregatedPoolRepository,
             IOptions<AppConfiguration> appConfig,
             IServiceProvider serviceProvider,
             IDatabase? redisDatabase = null
@@ -41,6 +43,7 @@ namespace AVMTradeReporter.Repository
             _elasticClient = elasticClient;
             _logger = logger;
             _hubContext = hubContext;
+            _aggregatedPoolRepository = aggregatedPoolRepository;
             _redisDatabase = redisDatabase;
             _appConfig = appConfig.Value;
             _serviceProvider = serviceProvider;
@@ -78,6 +81,16 @@ namespace AVMTradeReporter.Repository
 
                 _isInitialized = true;
                 _logger.LogInformation("PoolRepository initialization completed. Total pools in memory: {count}", _poolsCache.Count);
+
+                // Initialize aggregated pools from currently loaded pools
+                try
+                {
+                    await _aggregatedPoolRepository.InitializeFromExistingPoolsAsync(_poolsCache.Values, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to initialize AggregatedPoolRepository from existing pools");
+                }
             }
             finally
             {
@@ -277,6 +290,15 @@ namespace AVMTradeReporter.Repository
                 // Publish pool update to SignalR hub
                 await PublishPoolUpdateToHub(pool, cancellationToken);
 
+                // Update aggregated view for this asset pair if asset ids are present
+                if (pool.AssetIdA.HasValue && pool.AssetIdB.HasValue)
+                {
+                    var aId = pool.AssetIdA.Value;
+                    var bId = pool.AssetIdB.Value;
+                    var poolsForPair = _poolsCache.Values.Where(p => p.AssetIdA == aId && p.AssetIdB == bId).ToList();
+                    await _aggregatedPoolRepository.UpdateForPairAsync(aId, bId, poolsForPair, cancellationToken);
+                }
+
                 return true;
             }
             catch (Exception ex)
@@ -306,7 +328,7 @@ namespace AVMTradeReporter.Repository
                 if (existingPool == null)
                 {
                     var newPool = CreatePoolFromTrade(trade);
-                    
+
                     // Check if we need to load full pool data using pool processor
                     if (string.IsNullOrEmpty(newPool.ApprovalProgramHash))
                     {
@@ -316,7 +338,7 @@ namespace AVMTradeReporter.Repository
                             newPool = enrichedPool;
                         }
                     }
-                    
+
                     await StorePoolAsync(newPool, cancellationToken);
                     _logger.LogInformation("Created new pool from trade: {poolAddress}_{poolAppId}_{protocol}",
                         trade.PoolAddress, trade.PoolAppId, trade.Protocol);
@@ -384,7 +406,7 @@ namespace AVMTradeReporter.Repository
                 if (existingPool == null)
                 {
                     var newPool = CreatePoolFromLiquidity(liquidity);
-                    
+
                     // Check if we need to load full pool data using pool processor
                     if (string.IsNullOrEmpty(newPool.ApprovalProgramHash))
                     {
@@ -394,7 +416,7 @@ namespace AVMTradeReporter.Repository
                             newPool = enrichedPool;
                         }
                     }
-                    
+
                     await StorePoolAsync(newPool, cancellationToken);
                     _logger.LogInformation("Created new pool from liquidity: {poolAddress}_{poolAppId}_{protocol}",
                         liquidity.PoolAddress, liquidity.PoolAppId, liquidity.Protocol);
@@ -419,8 +441,8 @@ namespace AVMTradeReporter.Repository
                     existingPool.L = liquidity.L;
                 existingPool.Timestamp = liquidity.Timestamp;
                 existingPool.Protocol = liquidity.Protocol;
-                if(liquidity.AF.HasValue) existingPool.AF = liquidity.AF.Value;
-                if(liquidity.BF.HasValue) existingPool.BF = liquidity.BF.Value;
+                if (liquidity.AF.HasValue) existingPool.AF = liquidity.AF.Value;
+                if (liquidity.BF.HasValue) existingPool.BF = liquidity.BF.Value;
 
                 // Check if we need to enrich the pool with missing data
                 if (string.IsNullOrEmpty(existingPool.ApprovalProgramHash))
@@ -547,10 +569,10 @@ namespace AVMTradeReporter.Repository
 
                 // Use the pool processor to load complete pool data
                 var enrichedPool = await processor.LoadPoolAsync(pool.PoolAddress, pool.PoolAppId);
-                
+
                 _logger.LogInformation("Successfully enriched pool {poolAddress}_{poolAppId}_{protocol} with approvalProgramHash: {hash}",
                     pool.PoolAddress, pool.PoolAppId, pool.Protocol, enrichedPool?.ApprovalProgramHash);
-                
+
                 return enrichedPool;
             }
             catch (Exception ex)
@@ -568,7 +590,7 @@ namespace AVMTradeReporter.Repository
                         {
                             _logger.LogInformation("Trying to enrich Tiny pool {poolAddress}_{poolAppId} with Pact processor",
                                 pool.PoolAddress, pool.PoolAppId);
-                            
+
                             var enrichedPool = await pactProcessor.LoadPoolAsync(pool.PoolAddress, pool.PoolAppId);
                             // Update protocol to reflect actual processor used
                             if (enrichedPool != null)
@@ -593,7 +615,7 @@ namespace AVMTradeReporter.Repository
                         {
                             _logger.LogInformation("Trying to enrich Pact pool {poolAddress}_{poolAppId} with Tiny processor",
                                 pool.PoolAddress, pool.PoolAppId);
-                            
+
                             var enrichedPool = await tinyProcessor.LoadPoolAsync(pool.PoolAddress, pool.PoolAppId);
                             // Update protocol to reflect actual processor used
                             if (enrichedPool != null)

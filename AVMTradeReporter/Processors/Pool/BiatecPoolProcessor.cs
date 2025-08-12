@@ -11,7 +11,7 @@ namespace AVMTradeReporter.Processors.Pool
         private IPoolRepository _poolRepository;
         private readonly ILogger<BiatecPoolProcessor> _logger;
         public BiatecPoolProcessor(
-            IDefaultApi algod, 
+            IDefaultApi algod,
             IPoolRepository poolRepository,
             ILogger<BiatecPoolProcessor> logger)
         {
@@ -30,17 +30,19 @@ namespace AVMTradeReporter.Processors.Pool
         public static string Base64FeeScale = Convert.ToBase64String(Encoding.UTF8.GetBytes("f"));
         public static string Base64VerificationClass = Convert.ToBase64String(Encoding.UTF8.GetBytes("c"));
         public static string Base64Scale = Convert.ToBase64String(Encoding.UTF8.GetBytes("scale"));
+        public static string BasepMin = Convert.ToBase64String(Encoding.UTF8.GetBytes("pMin"));
+        public static string BasepMax = Convert.ToBase64String(Encoding.UTF8.GetBytes("pMax"));
 
         public async Task<AVMTradeReporter.Model.Data.Pool> LoadPoolAsync(string address, ulong appId)
         {
             using var cancelationTokenSource = new CancellationTokenSource();
             var pool = await _poolRepository.GetPoolAsync(address, cancelationTokenSource.Token);
-            var app  = await _algod.GetApplicationByIDAsync(appId);
+            var app = await _algod.GetApplicationByIDAsync(appId);
 
             var config = app.Params.GlobalState.FirstOrDefault(p => p.Key == Base64ConfigProvider);
             if (config == null) throw new Exception("Config is missing in global params");
             var configApp = await _algod.GetApplicationByIDAsync(config.Value.Uint);
-            if(configApp == null) throw new Exception("Config application not found");
+            if (configApp == null) throw new Exception("Config application not found");
 
             var SCALE = app.Params.GlobalState.FirstOrDefault(p => p.Key == Base64Scale);
             if (SCALE == null) throw new Exception("SCALE is missing in config application");
@@ -60,11 +62,19 @@ namespace AVMTradeReporter.Processors.Pool
             if (FEE_SCALE == null) throw new Exception("FEE_SCALE is missing in config application");
 
             var FEE_Protocol = configApp.Params.GlobalState.FirstOrDefault(p => p.Key == Base64FeeScale);
-            if(FEE_Protocol == null) throw new Exception("FEE_Protocol is missing in config application");
+            if (FEE_Protocol == null) throw new Exception("FEE_Protocol is missing in config application");
             var FEE_Protocol_Scale = 1_000_000_000m;
 
             var VerificationClass = app.Params.GlobalState.FirstOrDefault(p => p.Key == Base64VerificationClass);
             if (VerificationClass == null) throw new Exception("VerificationClass is missing in config application");
+
+            var pMin = app.Params.GlobalState.FirstOrDefault(p => p.Key == BasepMin);
+            if (pMin == null) throw new Exception("pMin is missing in config application");
+
+            var pMax = app.Params.GlobalState.FirstOrDefault(p => p.Key == BasepMax);
+            if (pMax == null) throw new Exception("pMax is missing in config application");
+
+
             var assetAId = assetA.Value.Uint;
             var assetBId = assetB.Value.Uint;
             var lpFee = FEE_SCALE.Value.Uint / SCALE.Value.Uint;
@@ -73,8 +83,11 @@ namespace AVMTradeReporter.Processors.Pool
             var hash = app.Params.ApprovalProgram.Bytes.ToSha256Hex();
 
             var updated = false;
+            var scaleDecimal = Convert.ToDecimal(SCALE.Value.Uint);
+            var pMaxValue = Convert.ToDecimal(pMax.Value.Uint) / scaleDecimal;
+            var pMinValue = Convert.ToDecimal(pMin.Value.Uint) / scaleDecimal;
 
-            if(pool == null)
+            if (pool == null)
             {
                 pool = new AVMTradeReporter.Model.Data.Pool
                 {
@@ -91,17 +104,20 @@ namespace AVMTradeReporter.Processors.Pool
                     LPFee = lpFee,
                     ProtocolFeePortion = protocolFeePortion,
                     AssetIdA = assetAId,
-                    AssetIdB = assetBId
+                    AssetIdB = assetBId,
+                    PMax = pMaxValue,
+                    PMin = pMinValue,
                 };
                 updated = true;
             }
             else
             {
-                if(pool.Protocol != Model.Data.DEXProtocol.Biatec) { 
+                if (pool.Protocol != Model.Data.DEXProtocol.Biatec)
+                {
                     pool.Protocol = Model.Data.DEXProtocol.Biatec;
                     updated = true;
                 }
-                if(pool.A != A.Value.Uint)
+                if (pool.A != A.Value.Uint)
                 {
                     pool.A = A.Value.Uint;
                     updated = true;
@@ -146,6 +162,18 @@ namespace AVMTradeReporter.Processors.Pool
                     pool.AssetIdB = assetBId;
                     updated = true;
                 }
+
+                if (pool.PMax != pMaxValue)
+                {
+                    pool.PMax = pMaxValue;
+                    updated = true;
+                }
+                if (pool.PMin != pMinValue)
+                {
+                    pool.PMin = pMinValue;
+                    updated = true;
+                }
+
                 if (pool.AMMType != Model.Data.AMMType.OldAMM)
                 {
                     pool.AMMType = Model.Data.AMMType.OldAMM;

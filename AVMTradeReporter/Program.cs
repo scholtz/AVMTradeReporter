@@ -40,7 +40,7 @@ namespace AVMTradeReporter
                     var configuration = appConfig.Redis.ConnectionString;
                     return ConnectionMultiplexer.Connect(configuration);
                 });
-                
+
                 builder.Services.AddSingleton<IDatabase>(sp =>
                 {
                     var connectionMultiplexer = sp.GetRequiredService<IConnectionMultiplexer>();
@@ -53,8 +53,8 @@ namespace AVMTradeReporter
             {
                 var config = sp.GetRequiredService<IOptions<AppConfiguration>>().Value;
                 var httpClient = HttpClientConfigurator.ConfigureHttpClient(
-                    config.Algod.Host, 
-                    config.Algod.ApiKey, 
+                    config.Algod.Host,
+                    config.Algod.ApiKey,
                     config.Algod.Header);
                 return new DefaultApi(httpClient);
             });
@@ -62,6 +62,7 @@ namespace AVMTradeReporter
             builder.Services.AddSingleton<IndexerRepository>();
             builder.Services.AddSingleton<IPoolRepository, PoolRepository>();
             builder.Services.AddSingleton<PoolRepository>();
+            builder.Services.AddSingleton<AggregatedPoolRepository>();
             builder.Services.AddSingleton<TradeRepository>();
             builder.Services.AddSingleton<LiquidityRepository>();
             builder.Services.AddSingleton<TransactionProcessor>();
@@ -74,7 +75,7 @@ namespace AVMTradeReporter
             // Register the background services
             builder.Services.AddHostedService<TradeReporterBackgroundService>();
             builder.Services.AddHostedService<GossipBackgroundService>();
-            
+
             // Register Pool Refresh Background Service only if enabled
             if (appConfig?.PoolRefresh?.Enabled == true)
             {
@@ -98,6 +99,9 @@ namespace AVMTradeReporter
                 .DefaultMappingFor<Model.Data.Liquidity>(m => m
                     .IndexName("liquidity")
                     .IdProperty(t => t.TxId))
+                .DefaultMappingFor<Model.Data.AggregatedPool>(m => m
+                    .IndexName("liquidity")
+                    .IdProperty(t => t.Id))
                 .DefaultMappingFor<Model.Data.Pool>(m => m
                     .IndexName("pools")
                     .IdProperty(t => t.PoolAddress))
@@ -112,7 +116,7 @@ namespace AVMTradeReporter
             // Add CORS policy - must be before SignalR and authentication
             var corsConfig = builder.Configuration.GetSection("Cors").AsEnumerable().Select(k => k.Value ?? "").Where(k => !string.IsNullOrEmpty(k)).ToArray();
             if (!(corsConfig?.Length > 0)) throw new Exception("Cors not defined");
-            Console.WriteLine($"Cors: {string.Join(",",corsConfig)}");
+            Console.WriteLine($"Cors: {string.Join(",", corsConfig)}");
             builder.Services.AddCors(options =>
             {
                 options.AddDefaultPolicy(
@@ -128,9 +132,9 @@ namespace AVMTradeReporter
             // Configure authentication
             var authOptions = builder.Configuration.GetSection("AlgorandAuthentication").Get<AlgorandAuthenticationOptionsV2>();
             if (authOptions == null) throw new Exception("Config for the authentication is missing");
-            
+
             Console.WriteLine($"Auth Config: Realm={authOptions.Realm}, AllowEmptyAccounts={authOptions.AllowEmptyAccounts}, Debug={authOptions.Debug}");
-            
+
             builder.Services.AddAuthentication(AlgorandAuthenticationHandlerV2.ID).AddAlgorand(a =>
             {
                 a.Realm = authOptions.Realm;
@@ -140,7 +144,7 @@ namespace AVMTradeReporter
                 a.AllowedNetworks = authOptions.AllowedNetworks;
                 a.Debug = authOptions.Debug;
             });
-            
+
             builder.Services.AddAuthorization();
 
             // Add SignalR after CORS and authentication
@@ -158,13 +162,13 @@ namespace AVMTradeReporter
             // Configure the HTTP request pipeline
             // CORS must be before authentication/authorization
             app.UseCors();
-            
+
             app.UseSwagger();
             app.UseSwaggerUI();
-            
+
             // WebSockets must be before authentication for SignalR
             app.UseWebSockets();
-            
+
             // Add middleware for SignalR authentication - move access_token from query to header
             app.Use(async (context, next) =>
             {
@@ -172,13 +176,13 @@ namespace AVMTradeReporter
                 {
                     Console.WriteLine($"SignalR request: {context.Request.Method} {context.Request.Path}");
                     Console.WriteLine($"Query: {context.Request.QueryString}");
-                    
+
                     // Check for access_token in query and move to Authorization header
                     if (context.Request.Query.ContainsKey("access_token"))
                     {
                         var accessToken = context.Request.Query["access_token"].ToString();
                         Console.WriteLine($"Access token in query: {accessToken.Substring(0, Math.Min(30, accessToken.Length))}...");
-                        
+
                         // Move to Authorization header for our authentication handler
                         if (!context.Request.Headers.ContainsKey("Authorization"))
                         {
@@ -188,7 +192,7 @@ namespace AVMTradeReporter
                             Console.WriteLine($"Moved and decoded access_token to Authorization header: {decodedToken.Substring(0, Math.Min(30, decodedToken.Length))}...");
                         }
                     }
-                    
+
                     // Debug: Show all headers
                     Console.WriteLine("Request Headers:");
                     foreach (var header in context.Request.Headers)
@@ -196,9 +200,9 @@ namespace AVMTradeReporter
                         Console.WriteLine($"  {header.Key}: {header.Value}");
                     }
                 }
-                
+
                 await next();
-                
+
                 if (context.Request.Path.StartsWithSegments("/biatecScanHub"))
                 {
                     Console.WriteLine($"Response status: {context.Response.StatusCode}");
@@ -216,7 +220,7 @@ namespace AVMTradeReporter
                     }
                 }
             });
-            
+
             app.UseAuthentication();
             app.UseAuthorization();
 
