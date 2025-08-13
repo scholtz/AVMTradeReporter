@@ -139,7 +139,7 @@ namespace AVMTradeReporter.Repository
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to publish AggregatedPoolUpdated for {a}-{b}", send.AssetIdA, send.AssetIdB);
+                _logger.LogError(ex, "Failed to publish AggregatedPoolUpdated for {a}-{b}", agg.AssetIdA, agg.AssetIdB);
             }
         }
     }
