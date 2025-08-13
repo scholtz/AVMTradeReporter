@@ -1,8 +1,10 @@
+using AVM.ClientGenerator.ABI.ARC4.Types;
 using AVMTradeReporter.Hubs;
 using AVMTradeReporter.Model.Data;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.IndexManagement;
 using Elastic.Clients.Elasticsearch.Mapping;
+using Elastic.Clients.Elasticsearch.Nodes;
 using Microsoft.AspNetCore.SignalR;
 using System.Collections.Concurrent;
 
@@ -135,6 +137,17 @@ namespace AVMTradeReporter.Repository
                     // Ensure consistent order for the pair
                     send = agg.Reverse();
                 }
+
+                BiatecScanHub.RecentAggregatedPoolUpdates.Enqueue(send);
+                if (BiatecScanHub.RecentAggregatedPoolUpdates.Count > 100)
+                {
+                    BiatecScanHub.RecentAggregatedPoolUpdates.TryDequeue(out _);
+                }
+                if(send.AssetIdA == 0 && send.AssetIdB == 31566704)
+                {
+                    BiatecScanHub.ALGOUSD = send;
+                }
+
                 await _hubContext.Clients.All.SendAsync("AggregatedPoolUpdated", send, cancellationToken);
             }
             catch (Exception ex)

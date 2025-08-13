@@ -8,6 +8,7 @@ using Elastic.Clients.Elasticsearch.IndexManagement;
 using Elastic.Clients.Elasticsearch.Mapping;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
+using Org.BouncyCastle.Utilities;
 using StackExchange.Redis;
 using System.Collections.Concurrent;
 using System.Diagnostics;
@@ -242,10 +243,17 @@ namespace AVMTradeReporter.Repository
 
             try
             {
+
                 var poolId = GeneratePoolId(pool.PoolAddress);
 
                 // Update in-memory cache
                 _poolsCache.AddOrUpdate(poolId, pool, (key, oldValue) => pool);
+
+                BiatecScanHub.RecentPoolUpdates.Enqueue(pool);
+                if (BiatecScanHub.RecentPoolUpdates.Count > 100)
+                {
+                    BiatecScanHub.RecentPoolUpdates.TryDequeue(out _);
+                }
 
                 // Save to Redis asynchronously
                 _ = Task.Run(async () =>
