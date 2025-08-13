@@ -129,11 +129,17 @@ namespace AVMTradeReporter.Repository
             try
             {
                 // Publish to hub (simple broadcast like other repos)
-                await _hubContext.Clients.All.SendAsync("AggregatedPoolUpdated", agg, cancellationToken);
+                var send = agg;
+                if(agg.AssetIdA > agg.AssetIdB)
+                {
+                    // Ensure consistent order for the pair
+                    send = agg.Reverse();
+                }
+                await _hubContext.Clients.All.SendAsync("AggregatedPoolUpdated", send, cancellationToken);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to publish AggregatedPoolUpdated for {a}-{b}", agg.AssetIdA, agg.AssetIdB);
+                _logger.LogError(ex, "Failed to publish AggregatedPoolUpdated for {a}-{b}", send.AssetIdA, send.AssetIdB);
             }
         }
     }

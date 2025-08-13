@@ -295,7 +295,7 @@ namespace AVMTradeReporter.Repository
                 {
                     var aId = pool.AssetIdA.Value;
                     var bId = pool.AssetIdB.Value;
-                    var poolsForPair = _poolsCache.Values.Where(p => p.AssetIdA == aId && p.AssetIdB == bId).ToList();
+                    var poolsForPair = _poolsCache.Values.Where(p => (p.AssetIdA == aId && p.AssetIdB == bId) || (p.AssetIdA == bId && p.AssetIdB == aId)).ToList();
                     await _aggregatedPoolRepository.UpdateForPairAsync(aId, bId, poolsForPair, cancellationToken);
                 }
 

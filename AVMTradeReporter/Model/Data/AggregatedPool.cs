@@ -64,6 +64,7 @@ namespace AVMTradeReporter.Model.Data
 
             var grouped = pools
                 .Where(p => p.AssetIdA.HasValue && p.AssetIdB.HasValue && p.A.HasValue && p.B.HasValue)
+                .Union(pools.Select(p=>p.Reverse()).Where(p => p.AssetIdA.HasValue && p.AssetIdB.HasValue && p.A.HasValue && p.B.HasValue))
                 .GroupBy(p => new { A = p.AssetIdA!.Value, B = p.AssetIdB!.Value });
 
             foreach (var g in grouped)
@@ -80,6 +81,24 @@ namespace AVMTradeReporter.Model.Data
                     LastUpdated = g.Max(p => p.Timestamp)
                 };
             }
+        }
+        /// <summary>
+        /// Reverse the asset pair in this aggregated pool.
+        /// </summary>
+        /// <returns></returns>
+        public AggregatedPool Reverse()
+        {
+            return new AggregatedPool
+            {
+                AssetIdA = AssetIdB,
+                AssetIdB = AssetIdA,
+                A = B,
+                B = A,
+                TVL_A = TVL_B,
+                TVL_B = TVL_A,
+                PoolCount = PoolCount,
+                LastUpdated = LastUpdated
+            };
         }
     }
 }

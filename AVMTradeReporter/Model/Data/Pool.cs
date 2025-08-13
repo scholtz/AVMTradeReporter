@@ -122,5 +122,32 @@ namespace AVMTradeReporter.Model.Data
                 return Convert.ToDecimal(B) / Convert.ToDecimal(Math.Pow(10, Convert.ToDouble(AssetBDecimals ?? 0))) + Convert.ToDecimal(BF) / Convert.ToDecimal(Math.Pow(10, Convert.ToDouble(AssetBDecimals ?? 0)));
             }
         }
+        public Pool Reverse()
+        {
+            return new Pool
+            {
+                PoolAddress = PoolAddress,
+                PoolAppId = PoolAppId,
+                AssetIdA = AssetIdB,
+                AssetADecimals = AssetBDecimals,
+                AssetIdB = AssetIdA,
+                AssetBDecimals = AssetADecimals,
+                AssetIdLP = AssetIdLP,
+                A = B,
+                B = A,
+                AF = BF,
+                BF = AF,
+                L = L,
+                PMin = PMin == null ? null : 1 / PMin,
+                PMax = PMax == null ? null : 1 /PMax,
+                VerificationClass = VerificationClass,
+                Protocol = Protocol,
+                Timestamp = Timestamp,
+                AMMType = AMMType,
+                ApprovalProgramHash = ApprovalProgramHash,
+                LPFee = LPFee,
+                ProtocolFeePortion = ProtocolFeePortion
+            };
+        }
     }
 }
