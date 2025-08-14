@@ -76,6 +76,7 @@ namespace AVMTradeReporter.Hubs
                 User2Subscription[userId] = filter;
 
                 await Clients.Caller.SendAsync("Subscribed", filter);
+                await Clients.User(userId).SendAsync("AggregatedPoolUpdated", ALGOUSD);
 
                 foreach (var trade in RecentTrades.OrderBy(t => t.Timestamp))
                 {
@@ -109,7 +110,6 @@ namespace AVMTradeReporter.Hubs
                         await Clients.User(userId).SendAsync("AggregatedPoolUpdated", item);
                     }
                 }
-                await Clients.User(userId).SendAsync("AggregatedPoolUpdated", ALGOUSD);
 
                 Console.WriteLine($"Successfully subscribed user '{userId}' with filter '{filter}'");
             }

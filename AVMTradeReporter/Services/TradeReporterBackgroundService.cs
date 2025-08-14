@@ -23,6 +23,7 @@ namespace AVMTradeReporter.Services
         private readonly LiquidityRepository _liquidityRepository;
         private readonly PoolRepository _poolRepository;
         private readonly TransactionProcessor _transactionProcessor;
+        private readonly BlockRepository _blockRepository;
 
 
         public static Indexer? Indexer { get; set; }
@@ -34,7 +35,8 @@ namespace AVMTradeReporter.Services
             TradeRepository tradeRepository,
             LiquidityRepository liquidityRepository,
             PoolRepository poolRepository,
-            TransactionProcessor transactionProcessor
+            TransactionProcessor transactionProcessor,
+            BlockRepository blockRepository
             )
         {
             _logger = logger;
@@ -44,6 +46,7 @@ namespace AVMTradeReporter.Services
             _liquidityRepository = liquidityRepository;
             _poolRepository = poolRepository;
             _transactionProcessor = transactionProcessor;
+            _blockRepository = blockRepository;
 
             _httpClient = HttpClientConfigurator.ConfigureHttpClient(appConfig.Value.Algod.Host, appConfig.Value.Algod.ApiKey, appConfig.Value.Algod.Header);
             _algod = new DefaultApi(_httpClient);
@@ -200,9 +203,10 @@ namespace AVMTradeReporter.Services
 
                 _logger.LogInformation("Loading block {blockId}", blockId);
                 var block = await _algod.GetBlockAsync(blockId, Format.Json, false);
+
                 _logger.LogInformation("Found transactions: {txCount}", block.Block?.Transactions?.Count);
                 await _transactionProcessor.ProcessBlock(block, this, this, cancellationToken);
-               
+
                 var result = await _tradeRepository.StoreTradesAsync(_trades.Values.ToArray(), cancellationToken);
                 if (result)
                 {
@@ -213,6 +217,13 @@ namespace AVMTradeReporter.Services
                 {
                     _liquidityUpdates.Clear();
                 }
+
+
+                if (block.Block != null)
+                {
+                    await _blockRepository.PublishToHub(Model.Data.Block.FromAlgorandBlock(block.Block), cancellationToken);
+                }
+
                 await Task.CompletedTask; // Placeholder for actual work
             }
             catch (Exception ex)
