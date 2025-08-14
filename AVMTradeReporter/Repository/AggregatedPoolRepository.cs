@@ -1,4 +1,3 @@
-using AVM.ClientGenerator.ABI.ARC4.Types;
 using AVMTradeReporter.Hubs;
 using AVMTradeReporter.Model.Data;
 using Elastic.Clients.Elasticsearch;
@@ -58,7 +57,7 @@ namespace AVMTradeReporter.Repository
             _logger.LogInformation("AggregatedPool index template created: {ok}", response.IsValidResponse);
         }
 
-        public Task InitializeFromExistingPoolsAsync(IEnumerable<Pool> pools, CancellationToken cancellationToken = default)
+        public Task InitializeFromExistingPoolsAsync(IEnumerable<Model.Data.Pool> pools, CancellationToken cancellationToken = default)
         {
             try
             {
@@ -85,7 +84,7 @@ namespace AVMTradeReporter.Repository
             return Task.CompletedTask;
         }
 
-        public async Task UpdateForPairAsync(ulong assetIdA, ulong assetIdB, IEnumerable<Pool> poolsForPair, CancellationToken cancellationToken = default)
+        public async Task UpdateForPairAsync(ulong assetIdA, ulong assetIdB, IEnumerable<Model.Data.Pool> poolsForPair, CancellationToken cancellationToken = default)
         {
             try
             {
@@ -132,7 +131,7 @@ namespace AVMTradeReporter.Repository
             {
                 // Publish to hub (simple broadcast like other repos)
                 var send = agg;
-                if(agg.AssetIdA > agg.AssetIdB)
+                if (agg.AssetIdA > agg.AssetIdB)
                 {
                     // Ensure consistent order for the pair
                     send = agg.Reverse();
@@ -143,7 +142,7 @@ namespace AVMTradeReporter.Repository
                 {
                     BiatecScanHub.RecentAggregatedPoolUpdates.TryDequeue(out _);
                 }
-                if(send.AssetIdA == 0 && send.AssetIdB == 31566704)
+                if (send.AssetIdA == 0 && send.AssetIdB == 31566704)
                 {
                     BiatecScanHub.ALGOUSD = send;
                 }
