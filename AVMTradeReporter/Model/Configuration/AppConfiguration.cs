@@ -22,6 +22,14 @@ namespace AVMTradeReporter.Model.Configuration
         /// AVM Algod configuration
         /// </summary>
         public AlgodConfiguration Algod { get; set; } = new AlgodConfiguration();
+        /// <summary>
+        /// Fallback algod configuration
+        /// </summary>
+        public AlgodConfiguration Algod2 { get; set; } = new AlgodConfiguration();
+        /// <summary>
+        /// Fallback algod configuration
+        /// </summary>
+        public AlgodConfiguration Algod3 { get; set; } = new AlgodConfiguration();
 
         /// <summary>
         /// Elasticsearch configuration

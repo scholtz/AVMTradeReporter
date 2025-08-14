@@ -17,7 +17,11 @@ namespace AVMTradeReporter.Services
         private readonly ILogger<TradeReporterBackgroundService> _logger;
         private readonly IOptions<AppConfiguration> _appConfig;
         private readonly Algorand.Algod.IDefaultApi _algod;
+        private readonly Algorand.Algod.IDefaultApi? _algod2;
+        private readonly Algorand.Algod.IDefaultApi? _algod3;
         private readonly HttpClient _httpClient;
+        private readonly HttpClient? _httpClient2;
+        private readonly HttpClient? _httpClient3;
         private readonly IndexerRepository _indexerRepository;
         private readonly TradeRepository _tradeRepository;
         private readonly LiquidityRepository _liquidityRepository;
@@ -50,6 +54,17 @@ namespace AVMTradeReporter.Services
 
             _httpClient = HttpClientConfigurator.ConfigureHttpClient(appConfig.Value.Algod.Host, appConfig.Value.Algod.ApiKey, appConfig.Value.Algod.Header);
             _algod = new DefaultApi(_httpClient);
+
+            if (!string.IsNullOrEmpty(appConfig.Value.Algod2?.Host))
+            {
+                _httpClient2 = HttpClientConfigurator.ConfigureHttpClient(appConfig.Value.Algod2.Host, appConfig.Value.Algod2.ApiKey, appConfig.Value.Algod2.Header);
+                _algod2 = new DefaultApi(_httpClient2);
+            }
+            if (!string.IsNullOrEmpty(appConfig.Value.Algod3?.Host))
+            {
+                _httpClient3 = HttpClientConfigurator.ConfigureHttpClient(appConfig.Value.Algod3.Host, appConfig.Value.Algod3.ApiKey, appConfig.Value.Algod3.Header);
+                _algod3 = new DefaultApi(_httpClient3);
+            }
 
 
 #if DEBUG
@@ -130,7 +145,30 @@ namespace AVMTradeReporter.Services
                     }
 
 #if !DEBUG
-                    var blockStatus = await _algod.WaitForBlockAsync(stoppingToken, Indexer?.Round ?? throw new Exception("Rund not defined"));
+                    try
+                    {
+                        var blockStatus = await _algod.WaitForBlockAsync(stoppingToken, Indexer?.Round ?? throw new Exception("Rund not defined"));
+                    }
+                    catch
+                    {
+                        if (_algod2 != null)
+                        {
+                            try
+                            {
+
+                                var blockStatus = await _algod2.WaitForBlockAsync(stoppingToken, Indexer?.Round ?? throw new Exception("Rund not defined"));
+                            }
+                            catch
+                            {
+                                if (_algod3 != null)
+                                {
+                                    _logger.LogWarning("Algod2 failed, trying Algod3");
+                                    // Try algod3
+                                    var blockStatus = await _algod3.WaitForBlockAsync(stoppingToken, Indexer?.Round ?? throw new Exception("Rund not defined"));
+                                }
+                            }
+                        }
+                    }
 #endif
                     await ProcessBlockWorkAsync(Indexer.Round, stoppingToken);
                     await IncrementIndexer(stoppingToken);
@@ -202,7 +240,35 @@ namespace AVMTradeReporter.Services
                 var algodConfig = _appConfig.Value.Algod;
 
                 _logger.LogInformation("Loading block {blockId}", blockId);
-                var block = await _algod.GetBlockAsync(blockId, Format.Json, false);
+                CertifiedBlock? block = null;
+                try
+                {
+                    block = await _algod.GetBlockAsync(blockId, Format.Json, false);
+                }
+                catch
+                {
+                    if (_algod2 != null)
+                    {
+                        _logger.LogWarning("Algod failed, trying Algod2");
+                        try
+                        {
+                            block = await _algod2.GetBlockAsync(blockId, Format.Json, false);
+                        }
+                        catch
+                        {
+                            if (_algod3 != null)
+                            {
+                                _logger.LogWarning("Algod2 failed, trying Algod3");
+                                block = await _algod3.GetBlockAsync(blockId, Format.Json, false);
+                            }
+                        }
+                    }
+                }
+                if (block == null || block.Block == null)
+                {
+                    _logger.LogWarning("Block {blockId} not found", blockId);
+                    return;
+                }
 
                 _logger.LogInformation("Found transactions: {txCount}", block.Block?.Transactions?.Count);
                 await _transactionProcessor.ProcessBlock(block, this, this, cancellationToken);
