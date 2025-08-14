@@ -1,4 +1,5 @@
 ﻿using AVMTradeReporter.Model.Data;
+using Elastic.Clients.Elasticsearch.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using System.Collections.Concurrent;
@@ -13,6 +14,7 @@ namespace AVMTradeReporter.Hubs
         public static readonly ConcurrentQueue<Liquidity> RecentLiquidityUpdates = new ConcurrentQueue<Liquidity>();
         public static readonly ConcurrentQueue<Pool> RecentPoolUpdates = new ConcurrentQueue<Pool>();
         public static readonly ConcurrentQueue<AggregatedPool> RecentAggregatedPoolUpdates = new ConcurrentQueue<AggregatedPool>();
+        public static readonly ConcurrentQueue<Model.Data.Block> RecentBlockUpdates = new ConcurrentQueue<Model.Data.Block>();
         public static AggregatedPool? ALGOUSD = null;
 
         // Test method without authorization for debugging
@@ -50,12 +52,12 @@ namespace AVMTradeReporter.Hubs
             {
                 // Enhanced user identification with debugging
                 var userId = GetUserId();
-                Console.WriteLine($"Subscribe attempt - UserId: '{userId}', Filter: '{filter}'");
-                Console.WriteLine($"User.Identity.Name: '{Context?.User?.Identity?.Name}'");
-                Console.WriteLine($"UserIdentifier: '{Context?.UserIdentifier}'");
-                Console.WriteLine($"ConnectionId: '{Context?.ConnectionId}'");
-                Console.WriteLine($"User.Identity.IsAuthenticated: {Context?.User?.Identity?.IsAuthenticated}");
-                Console.WriteLine($"User.Identity.AuthenticationType: '{Context?.User?.Identity?.AuthenticationType}'");
+                //Console.WriteLine($"Subscribe attempt - UserId: '{userId}', Filter: '{filter}'");
+                //Console.WriteLine($"User.Identity.Name: '{Context?.User?.Identity?.Name}'");
+                //Console.WriteLine($"UserIdentifier: '{Context?.UserIdentifier}'");
+                //Console.WriteLine($"ConnectionId: '{Context?.ConnectionId}'");
+                //Console.WriteLine($"User.Identity.IsAuthenticated: {Context?.User?.Identity?.IsAuthenticated}");
+                //Console.WriteLine($"User.Identity.AuthenticationType: '{Context?.User?.Identity?.AuthenticationType}'");
 
                 // Print all claims for debugging
                 if (Context?.User?.Claims != null)
@@ -76,7 +78,29 @@ namespace AVMTradeReporter.Hubs
                 User2Subscription[userId] = filter;
 
                 await Clients.Caller.SendAsync("Subscribed", filter);
-                await Clients.User(userId).SendAsync("AggregatedPoolUpdated", ALGOUSD);
+
+                Console.WriteLine($"Successfully subscribed user '{userId}' with filter '{filter}'");
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"Subscribe error: {e.Message}");
+                await Clients.Caller.SendAsync("Error", e.Message);
+            }
+        }
+
+        public async Task SendBasicData(string userId, string? filter)
+        {
+
+            await Clients.User(userId).SendAsync("AggregatedPoolUpdated", ALGOUSD);
+
+            foreach (var trade in RecentBlockUpdates.OrderBy(t => t.Timestamp))
+            {
+                // Also send filtered trades to specific users based on their subscriptions
+                await Clients.User(userId).SendAsync("Block", trade);
+            }
+
+            if (filter != null)
+            {
 
                 foreach (var trade in RecentTrades.OrderBy(t => t.Timestamp))
                 {
@@ -110,13 +134,6 @@ namespace AVMTradeReporter.Hubs
                         await Clients.User(userId).SendAsync("AggregatedPoolUpdated", item);
                     }
                 }
-
-                Console.WriteLine($"Successfully subscribed user '{userId}' with filter '{filter}'");
-            }
-            catch (Exception e)
-            {
-                Console.WriteLine($"Subscribe error: {e.Message}");
-                await Clients.Caller.SendAsync("Error", e.Message);
             }
         }
 
@@ -160,7 +177,7 @@ namespace AVMTradeReporter.Hubs
                     Console.WriteLine($"  {claim.Type}: {claim.Value}");
                 }
             }
-
+            await SendBasicData(userId, null);
             await base.OnConnectedAsync();
         }
 

@@ -29,6 +29,14 @@ namespace AVMTradeReporter.Repository
             {
                 await _hubContext.Clients.All.SendAsync("Block", block, cancellationToken);
                 _logger.LogInformation("Published block #{round} to SignalR hub, time diff {diff}", block.Round, DateTimeOffset.Now - block.Timestamp);
+
+                BiatecScanHub.RecentBlockUpdates.Enqueue(block);
+                if (BiatecScanHub.RecentBlockUpdates.Count > 10)
+                {
+                    BiatecScanHub.RecentBlockUpdates.TryDequeue(out _);
+                }
+
+
             }
             catch (Exception ex)
             {
