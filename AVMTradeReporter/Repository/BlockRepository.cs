@@ -28,7 +28,7 @@ namespace AVMTradeReporter.Repository
             try
             {
                 await _hubContext.Clients.All.SendAsync("Block", block, cancellationToken);
-                _logger.LogInformation("Published block #{round} to SignalR hub", block.Round);
+                _logger.LogInformation("Published block #{round} to SignalR hub, time diff {diff}", block.Round, DateTimeOffset.Now - block.Timestamp);
             }
             catch (Exception ex)
             {
