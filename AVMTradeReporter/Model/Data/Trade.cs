@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 
 namespace AVMTradeReporter.Model.Data
 {
+    [JsonConverter(typeof(JsonStringEnumConverter))]
     public enum DEXProtocol
     {
         Pact,

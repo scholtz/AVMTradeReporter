@@ -706,7 +706,7 @@ namespace AVMTradeReporter.Repository
         /// <summary>
         /// Gets the appropriate pool processor for the specified protocol
         /// </summary>
-        private IPoolProcessor? GetPoolProcessor(DEXProtocol protocol)
+        public IPoolProcessor? GetPoolProcessor(DEXProtocol protocol)
         {
             return protocol switch
             {

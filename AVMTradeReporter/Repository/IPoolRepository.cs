@@ -1,4 +1,5 @@
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Processors.Pool;
 using Microsoft.AspNetCore.Mvc;
 
 namespace AVMTradeReporter.Repository
@@ -12,5 +13,6 @@ namespace AVMTradeReporter.Repository
         Task UpdatePoolFromLiquidity(Liquidity liquidity, CancellationToken cancellationToken);
         Task<List<Pool>> GetPoolsAsync(ulong? assetIdA, ulong? assetIdB, string? address, DEXProtocol? protocol = null, int size = 100, CancellationToken cancellationToken = default);
         Task<int> GetPoolCountAsync(CancellationToken cancellationToken = default);
+        IPoolProcessor? GetPoolProcessor(DEXProtocol protocol);
     }
 }

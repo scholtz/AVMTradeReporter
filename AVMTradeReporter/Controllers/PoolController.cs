@@ -1,4 +1,5 @@
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Processors.Pool;
 using AVMTradeReporter.Repository;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -51,7 +52,7 @@ namespace AVMTradeReporter.Controllers
             {
                 var totalCount = await _poolRepository.GetPoolCountAsync(HttpContext.RequestAborted);
                 var allPools = await _poolRepository.GetPoolsAsync(assetIdA, assetIdB, null, size: int.MaxValue, cancellationToken: HttpContext.RequestAborted);
-                
+
                 var stats = new
                 {
                     TotalPools = totalCount,
@@ -64,6 +65,28 @@ namespace AVMTradeReporter.Controllers
                 };
 
                 return Ok(stats);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to get pool statistics");
+                return StatusCode(500, new { error = "Failed to retrieve pool statistics" });
+            }
+        }
+        /// <summary>
+        /// Get pool statistics
+        /// </summary>
+        /// <returns>Pool statistics</returns>
+        [HttpGet("reload")]
+        public async Task<ActionResult<object>> Reload([FromQuery] DEXProtocol protocol, [FromQuery] ulong poolId, [FromQuery] string poolAddress)
+        {
+            try
+            {
+                var processor = _poolRepository.GetPoolProcessor(protocol);
+                if (processor == null)
+                {
+                    throw new Exception("Processor not found");
+                }
+                return Ok(await processor.LoadPoolAsync(poolAddress, poolId));
             }
             catch (Exception ex)
             {
