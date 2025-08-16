@@ -39,9 +39,7 @@ namespace AVMTradeReporter.Processors.Pool
             var LTID = app.Params.GlobalState.FirstOrDefault(p => p.Key == Convert.ToBase64String(Encoding.ASCII.GetBytes("LTID")));
             if (LTID == null) throw new Exception("LTID is missing in global params");
             var FEE_BPS = app.Params.GlobalState.FirstOrDefault(p => p.Key == Convert.ToBase64String(Encoding.ASCII.GetBytes("FEE_BPS")));
-            if (FEE_BPS == null) throw new Exception("FEE_BPS is missing in global params");
             var PACT_FEE_BPS = app.Params.GlobalState.FirstOrDefault(p => p.Key == Convert.ToBase64String(Encoding.ASCII.GetBytes("PACT_FEE_BPS")));
-            if (PACT_FEE_BPS == null) throw new Exception("PACT_FEE_BPS is missing in global params");
             var CONFIG = app.Params.GlobalState.FirstOrDefault(p => p.Key == Convert.ToBase64String(Encoding.ASCII.GetBytes("CONFIG")));
             if (CONFIG == null) throw new Exception("CONFIG is missing in global params");
             var configBytes = Convert.FromBase64String(CONFIG.Value.Bytes);
@@ -59,7 +57,8 @@ namespace AVMTradeReporter.Processors.Pool
 
             var assetADecimals = (await _assetRepository.GetAssetAsync(assetAId, cancelationTokenSource.Token))?.Params?.Decimals;
             var assetBDecimals = (await _assetRepository.GetAssetAsync(assetBId, cancelationTokenSource.Token))?.Params?.Decimals;
-
+            var lpFee = FEE_BPS == null ? 0.003m : FEE_BPS.Value.Uint / 10000m;
+            var pactFee = PACT_FEE_BPS == null || FEE_BPS == null ? 0 : Convert.ToDecimal(PACT_FEE_BPS.Value.Uint) / Convert.ToDecimal(FEE_BPS.Value.Uint);
             var updated = false;
             if (pool == null)
             {
@@ -75,8 +74,8 @@ namespace AVMTradeReporter.Processors.Pool
                     AMMType = Model.Data.AMMType.OldAMM,
                     Timestamp = DateTimeOffset.Now,
                     ApprovalProgramHash = hash,
-                    LPFee = FEE_BPS.Value.Uint / 10000m,
-                    ProtocolFeePortion = Convert.ToDecimal(PACT_FEE_BPS.Value.Uint) / Convert.ToDecimal(FEE_BPS.Value.Uint),
+                    LPFee = lpFee,
+                    ProtocolFeePortion = pactFee,
                     AssetIdA = assetAId,
                     AssetIdB = assetBId,
                     AssetADecimals = assetADecimals,
@@ -116,14 +115,14 @@ namespace AVMTradeReporter.Processors.Pool
                     pool.AssetIdLP = LTID.Value.Uint;
                     updated = true;
                 }
-                if (pool.LPFee != FEE_BPS.Value.Uint / 10000m)
+                if (pool.LPFee != lpFee)
                 {
-                    pool.LPFee = FEE_BPS.Value.Uint / 10000m;
+                    pool.LPFee = lpFee;
                     updated = true;
                 }
-                if (pool.ProtocolFeePortion != Convert.ToDecimal(PACT_FEE_BPS.Value.Uint) / Convert.ToDecimal(FEE_BPS.Value.Uint))
+                if (pool.ProtocolFeePortion != pactFee)
                 {
-                    pool.ProtocolFeePortion = Convert.ToDecimal(PACT_FEE_BPS.Value.Uint) / Convert.ToDecimal(FEE_BPS.Value.Uint);
+                    pool.ProtocolFeePortion = pactFee;
                     updated = true;
                 }
                 if (pool.AssetIdA != assetAId)

@@ -40,5 +40,30 @@ namespace AVMTradeReporterTests.Processors.Pool
 
 
         }
+        [Test]
+        public async Task LoadPactPoolAsync645869114()
+        {
+            // Arrange
+
+            using var httpClient = HttpClientConfigurator.ConfigureHttpClient(AlgodConfiguration.MainNet);
+            DefaultApi algod = new DefaultApi(httpClient);
+            var logger = new LoggerFactory().CreateLogger<PactPoolProcessor>();
+
+            var poolRepository = new MockPoolRepository();
+            var processor = new AVMTradeReporter.Processors.Pool.PactPoolProcessor(algod, poolRepository, logger, new MockAssetRepository());
+            string address = "IWT4WOUKYQBCAO76UKWZ5E4CPIJVLBE5R3NX5QH3BXMTG34WU7ZCLJ4RVY";
+            ulong appId = 645869114;
+            // Act
+            var pool = await processor.LoadPoolAsync(address, appId);
+            // Assert
+            Assert.IsNotNull(pool);
+            Assert.That(pool.PoolAddress, Is.EqualTo(address));
+            Assert.That(pool.PoolAppId, Is.EqualTo(appId));
+            Assert.That(pool.AssetIdA, Is.EqualTo(0));
+            Assert.That(pool.AssetIdB, Is.EqualTo(386195940));
+            Assert.That(pool.A, Is.GreaterThan(119972741391));
+            Assert.That(pool.B, Is.GreaterThan(708069440));
+            Assert.That(pool.LPFee, Is.EqualTo(0.003m));
+        }
     }
 }
