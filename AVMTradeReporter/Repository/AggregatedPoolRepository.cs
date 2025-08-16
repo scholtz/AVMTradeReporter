@@ -52,7 +52,7 @@ namespace AVMTradeReporter.Repository
                     }
                 }
             };
-            if(_elasticClient == null)
+            if (_elasticClient == null)
             {
                 _logger.LogError("Elasticsearch client is not initialized");
                 return;
@@ -110,7 +110,39 @@ namespace AVMTradeReporter.Repository
                 _logger.LogError(ex, "Failed to update aggregated pool for pair {a}-{b}", assetIdA, assetIdB);
             }
         }
-
+        /// <summary>
+        /// Retrieves a collection of aggregated pools, optionally filtered by asset IDs, with support for pagination.
+        /// </summary>
+        /// <remarks>If both <paramref name="assetIdA"/> and <paramref name="assetIdB"/> are specified,
+        /// the method returns pools that contain both assets, regardless of their order. If only one of the asset IDs
+        /// is specified, the method returns pools that contain the specified asset. If neither is specified, all pools
+        /// are returned.</remarks>
+        /// <param name="assetIdA">The first asset ID to filter by. If specified, only pools containing this asset will be included. Pass <see
+        /// langword="null"/> to ignore this filter.</param>
+        /// <param name="assetIdB">The second asset ID to filter by. If specified, only pools containing this asset will be included. Pass <see
+        /// langword="null"/> to ignore this filter.</param>
+        /// <param name="offset">The number of items to skip before starting to return results. Must be non-negative.</param>
+        /// <param name="size">The maximum number of items to return. Must be greater than zero.</param>
+        /// <returns>A collection of <see cref="AggregatedPool"/> objects that match the specified filters and pagination
+        /// parameters. If no filters are applied, all available pools are returned within the specified range.</returns>
+        public IEnumerable<AggregatedPool> GetAllAggregatedPools(ulong? assetIdA, ulong? assetIdB, int offset = 0, int size = 100)
+        {
+            var filteredPools = _cache.Values.AsEnumerable();
+            if (assetIdA.HasValue && assetIdB.HasValue)
+            {
+                filteredPools = filteredPools.Where(p => (p.AssetIdA == assetIdA.Value && p.AssetIdB == assetIdB.Value) ||
+                                                         (p.AssetIdB == assetIdA.Value && p.AssetIdA == assetIdB.Value));
+            }
+            else if (assetIdA.HasValue)
+            {
+                filteredPools = filteredPools.Where(p => p.AssetIdA == assetIdA.Value || p.AssetIdB == assetIdA.Value);
+            }
+            else if (assetIdB.HasValue)
+            {
+                filteredPools = filteredPools.Where(p => p.AssetIdA == assetIdB.Value || p.AssetIdB == assetIdB.Value);
+            }
+            return filteredPools.Skip(offset).Take(size);
+        }
         private async Task StoreAndPublishAsync(AggregatedPool agg, CancellationToken cancellationToken)
         {
             try

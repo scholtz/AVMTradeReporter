@@ -41,33 +41,6 @@ namespace AVMTradeReporter.Controllers
         }
 
         /// <summary>
-        /// Get a specific pool by address, app ID, and protocol
-        /// </summary>
-        /// <param name="poolAddress">Pool address</param>
-        /// <returns>Pool details if found</returns>
-        [HttpGet("{poolAddress}")]
-        public async Task<ActionResult<Pool>> GetPool(string poolAddress)
-        {
-            try
-            {
-                var pool = await _poolRepository.GetPoolAsync(poolAddress, HttpContext.RequestAborted);
-                
-                if (pool == null)
-                {
-                    return NotFound(new { error = "Pool not found" });
-                }
-                
-                return Ok(pool);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to get pool {poolAddress}", poolAddress);
-                return StatusCode(500, new { error = "Failed to retrieve pool" });
-            }
-        }
-
-
-        /// <summary>
         /// Get pool statistics
         /// </summary>
         /// <returns>Pool statistics</returns>
