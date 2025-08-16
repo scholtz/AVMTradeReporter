@@ -7,6 +7,7 @@ using System.Security.Claims;
 
 namespace AVMTradeReporter.Controllers
 {
+    [Authorize]
     [ApiController]
     [Route("api/signalr")]
     public class SignalRTestController : ControllerBase

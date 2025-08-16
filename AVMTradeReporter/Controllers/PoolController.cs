@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace AVMTradeReporter.Controllers
 {
+    [Authorize]
     [ApiController]
     [Route("api/pool")]
     public class PoolController : ControllerBase

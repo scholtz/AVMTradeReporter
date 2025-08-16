@@ -1,9 +1,11 @@
 using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace AVMTradeReporter.Controllers
 {
+    [Authorize]
     [ApiController]
     [Route("api/indexer")]
     public class IndexerController : ControllerBase
