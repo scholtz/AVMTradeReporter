@@ -26,7 +26,7 @@ namespace AVMTradeReporter.Controllers
         /// <param name="size">Number of pools to return (default: 100)</param>
         /// <returns>List of pools</returns>
         [HttpGet]
-        public ActionResult<List<Pool>> GetPools([FromQuery] ulong? assetIdA, [FromQuery] ulong? assetIdB, [FromQuery] int offset = 0, [FromQuery] int size = 100)
+        public ActionResult<List<AggregatedPool>> GetPools([FromQuery] ulong? assetIdA, [FromQuery] ulong? assetIdB, [FromQuery] int offset = 0, [FromQuery] int size = 100)
         {
             try
             {
