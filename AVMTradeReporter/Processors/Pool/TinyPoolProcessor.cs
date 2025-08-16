@@ -108,6 +108,11 @@ namespace AVMTradeReporter.Processors.Pool
                     pool.A = A.Value.Uint;
                     updated = true;
                 }
+                if (pool.AF != AF.Value.Uint)
+                {
+                    pool.AF = AF.Value.Uint;
+                    updated = true;
+                }
                 if (pool.ApprovalProgramHash != hash)
                 {
                     pool.ApprovalProgramHash = hash;
@@ -116,6 +121,11 @@ namespace AVMTradeReporter.Processors.Pool
                 if (pool.B != B.Value.Uint)
                 {
                     pool.B = B.Value.Uint;
+                    updated = true;
+                }
+                if (pool.BF != BF.Value.Uint)
+                {
+                    pool.BF = BF.Value.Uint;
                     updated = true;
                 }
                 if (pool.AssetIdLP != LTID.Value.Uint)
