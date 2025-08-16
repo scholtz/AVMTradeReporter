@@ -1,17 +1,18 @@
+using Algorand;
+using Algorand.Algod;
 using AlgorandAuthenticationV2;
 using AVMIndexReporter.Repository;
 using AVMTradeReporter.Hubs;
 using AVMTradeReporter.Model.Configuration;
+using AVMTradeReporter.Processors.Pool;
 using AVMTradeReporter.Repository;
 using AVMTradeReporter.Services;
-using AVMTradeReporter.Processors.Pool;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Security;
 using Elastic.Transport;
 using Microsoft.Extensions.Options;
+using Microsoft.OpenApi.Models;
 using StackExchange.Redis;
-using Algorand.Algod;
-using Algorand;
 
 namespace AVMTradeReporter
 {
@@ -24,8 +25,27 @@ namespace AVMTradeReporter
             // Add services to the container.
             builder.Services.AddControllers();
             // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
-            builder.Services.AddEndpointsApiExplorer();
-            builder.Services.AddSwaggerGen();
+            builder.Services.AddEndpointsApiExplorer(); builder.Services.AddSwaggerGen(c =>
+            {
+                c.SwaggerDoc("v1", new Microsoft.OpenApi.Models.OpenApiInfo
+                {
+                    Title = "AVM Trade Reporter API",
+                    Version = "v1",
+                    Description = File.ReadAllText("doc/description.md"),
+                });
+                c.AddSecurityDefinition("oauth2", new OpenApiSecurityScheme
+                {
+                    Description = "ARC-0014 Algorand authentication transaction",
+                    In = ParameterLocation.Header,
+                    Name = "Authorization",
+                    Type = SecuritySchemeType.ApiKey,
+                });
+                c.OperationFilter<Swashbuckle.AspNetCore.Filters.SecurityRequirementsOperationFilter>();
+                c.ResolveConflictingActions(apiDescriptions => apiDescriptions.First()); //This line
+                var xmlFile = $"doc/documentation.xml";
+                var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
+                c.IncludeXmlComments(xmlPath);
+            });
 
             // Configure AppConfiguration from appsettings.json
             builder.Services.Configure<AppConfiguration>(

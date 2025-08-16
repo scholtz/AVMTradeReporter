@@ -11,11 +11,18 @@
   <ItemGroup>
     <PackageReference Include="Algorand4" Version="4.1.2.2025080702" />
     <PackageReference Include="AlgorandAuthentication" Version="2.0.4" />
-    <PackageReference Include="Elastic.Clients.Elasticsearch" Version="9.1.0" />
+    <PackageReference Include="Elastic.Clients.Elasticsearch" Version="9.1.4" />
     <PackageReference Include="Microsoft.AspNetCore.SignalR" Version="1.2.0" />
     <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.22.1" />
     <PackageReference Include="StackExchange.Redis" Version="2.8.58" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="9.0.3" />
+    <PackageReference Include="Swashbuckle.AspNetCore.Filters" Version="9.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="doc\description.md">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
 </Project>
