@@ -53,7 +53,7 @@ namespace AVMTradeReporterTests
 
             if (assetIdA.HasValue && assetIdB.HasValue)
             {
-                filteredPools = filteredPools.Where(p => (p.AssetIdA == assetIdA.Value && p.AssetIdB == assetIdB.Value) || (p.AssetIdB == assetIdA.Value || p.AssetIdA == assetIdB.Value));
+                filteredPools = filteredPools.Where(p => (p.AssetIdA == assetIdA.Value && p.AssetIdB == assetIdB.Value) || (p.AssetIdB == assetIdA.Value && p.AssetIdA == assetIdB.Value));
             }
             if (!string.IsNullOrEmpty(address))
             {
