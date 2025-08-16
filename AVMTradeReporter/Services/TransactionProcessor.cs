@@ -50,27 +50,34 @@ namespace AVMTradeReporter.Services
 
         public async Task ProcessBlock(CertifiedBlock block, ITradeService tradeService, ILiquidityService liquidityService, CancellationToken cancellationToken)
         {
-            Algorand.Algod.Model.Transactions.SignedTransaction? prevTx1 = null;
-            Algorand.Algod.Model.Transactions.SignedTransaction? prevTx2 = null;
-            if (block.Block?.Transactions != null)
+            try
             {
-                ulong index = 0;
-                foreach (var currTx in block.Block.Transactions)
+                Algorand.Algod.Model.Transactions.SignedTransaction? prevTx1 = null;
+                Algorand.Algod.Model.Transactions.SignedTransaction? prevTx2 = null;
+                if (block.Block?.Transactions != null)
                 {
-                    index++;
-                    try
+                    ulong index = 0;
+                    foreach (var currTx in block.Block.Transactions)
                     {
-                        currTx.Tx.FillInParamsFromBlockHeader(block.Block);
-                        var txId = currTx.Tx.TxID();
-                        await this.ProcessTransaction(currTx, prevTx1, prevTx2, block.Block, currTx.Tx.Group, txId, currTx.Tx.Sender, TradeState.Confirmed, tradeService, liquidityService, cancellationToken);
+                        index++;
+                        try
+                        {
+                            currTx.Tx.FillInParamsFromBlockHeader(block.Block);
+                            var txId = currTx.Tx.TxID();
+                            await this.ProcessTransaction(currTx, prevTx1, prevTx2, block.Block, currTx.Tx.Group, txId, currTx.Tx.Sender, TradeState.Confirmed, tradeService, liquidityService, cancellationToken);
+                        }
+                        catch (Exception exc)
+                        {
+                            _logger.LogInformation("Error processing transaction {index} in block {block}: {error}", index, block.Block.Round, exc.Message);
+                        }
+                        prevTx2 = prevTx1;
+                        prevTx1 = currTx;
                     }
-                    catch (Exception exc)
-                    {
-                        _logger.LogInformation("Error processing transaction {index} in block {block}: {error}", index, block.Block.Round, exc.Message);
-                    }
-                    prevTx2 = prevTx1;
-                    prevTx1 = currTx;
                 }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to process block {round}", block.Block?.Round);
             }
         }
 
