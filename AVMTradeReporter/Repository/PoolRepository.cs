@@ -146,6 +146,11 @@ namespace AVMTradeReporter.Repository
         {
             try
             {
+                if (_elasticClient == null)
+                {
+                    _logger.LogError("Elasticsearch client is not initialized");
+                    return 0;
+                }
                 var searchResponse = await _elasticClient.SearchAsync<Pool>(s => s
                     .Indices("pools")
                     .Size(10000), cancellationToken);
@@ -226,7 +231,11 @@ namespace AVMTradeReporter.Repository
                     }
                 }
             };
-
+            if (_elasticClient == null)
+            {
+                _logger.LogError("Elasticsearch client is not initialized");
+                return;
+            }
             var response = await _elasticClient.Indices.PutIndexTemplateAsync(templateRequest);
             Console.WriteLine($"Pool template created: {response.IsValidResponse}");
         }
@@ -274,24 +283,27 @@ namespace AVMTradeReporter.Repository
                 }, cancellationToken);
 
                 // Save to Elasticsearch asynchronously
-                _ = Task.Run(async () =>
+                if (_elasticClient != null)
                 {
-                    try
+                    _ = Task.Run(async () =>
                     {
-                        var response = await _elasticClient.IndexAsync(pool, idx => idx
-                            .Index("pools")
-                            .Id(poolId), cancellationToken);
-
-                        if (!response.IsValidResponse)
+                        try
                         {
-                            _logger.LogError("Failed to store pool in Elasticsearch {poolId}: {error}", poolId, response.DebugInformation);
+                            var response = await _elasticClient.IndexAsync(pool, idx => idx
+                                .Index("pools")
+                                .Id(poolId), cancellationToken);
+
+                            if (!response.IsValidResponse)
+                            {
+                                _logger.LogError("Failed to store pool in Elasticsearch {poolId}: {error}", poolId, response.DebugInformation);
+                            }
                         }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Failed to store pool in Elasticsearch: {poolId}", poolId);
-                    }
-                }, cancellationToken);
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Failed to store pool in Elasticsearch: {poolId}", poolId);
+                        }
+                    }, cancellationToken);
+                }
 
                 _logger.LogDebug("Pool updated in memory: {poolId}", poolId);
 
@@ -472,30 +484,48 @@ namespace AVMTradeReporter.Repository
                 _logger.LogError(ex, "Failed to update pool from liquidity {txId}", liquidity.TxId);
             }
         }
-
-        public async Task<List<Pool>> GetPoolsAsync(ulong? assetIdA, ulong? assetIdB, DEXProtocol? protocol = null, int size = 100, CancellationToken cancellationToken = default)
+        /// <summary>
+        /// Retrieves a filtered list of liquidity pools based on the specified criteria.
+        /// </summary>
+        /// <remarks>If both <paramref name="assetIdA"/> and <paramref name="assetIdB"/> are provided, the
+        /// method filters pools where the pair of assets matches either order (e.g., asset A and asset B, or asset B
+        /// and asset A). If no filters are specified, all available pools are returned, up to the specified <paramref
+        /// name="size"/>.</remarks>
+        /// <param name="assetIdA">The ID of the first asset in the pool. Can be <see langword="null"/> to ignore this filter.</param>
+        /// <param name="assetIdB">The ID of the second asset in the pool. Can be <see langword="null"/> to ignore this filter.</param>
+        /// <param name="address">The address of the pool. Can be <see langword="null"/> or empty to ignore this filter.</param>
+        /// <param name="protocol">The decentralized exchange (DEX) protocol to filter by. Can be <see langword="null"/> to ignore this filter.</param>
+        /// <param name="size">The maximum number of pools to return. Must be a positive integer. Defaults to 100.</param>
+        /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+        /// <returns>A list of <see cref="Pool"/> objects that match the specified criteria. The list is sorted by timestamp in
+        /// descending order.</returns>
+        public async Task<List<Pool>> GetPoolsAsync(ulong? assetIdA, ulong? assetIdB, string? address, DEXProtocol? protocol = null, int size = 100, CancellationToken cancellationToken = default)
         {
             await EnsureInitialized(cancellationToken);
 
-            var pools = _poolsCache.Values.AsEnumerable();
+            var filteredPools = _poolsCache.Values.AsEnumerable();
 
             if (assetIdA.HasValue && assetIdB.HasValue)
             {
-                pools = pools.Where(p => (p.AssetIdA == assetIdA.Value && p.AssetIdB == assetIdB.Value) || (p.AssetIdB == assetIdA.Value || p.AssetIdA == assetIdB.Value));
+                filteredPools = filteredPools.Where(p => (p.AssetIdA == assetIdA.Value && p.AssetIdB == assetIdB.Value) || (p.AssetIdB == assetIdA.Value || p.AssetIdA == assetIdB.Value));
+            }
+            if (!string.IsNullOrEmpty(address))
+            {
+                filteredPools = filteredPools.Where(p => p.PoolAddress == address);
             }
 
             // Filter by protocol if specified
             if (protocol.HasValue)
             {
-                pools = pools.Where(p => p.Protocol == protocol.Value);
+                filteredPools = filteredPools.Where(p => p.Protocol == protocol.Value);
             }
 
             // Sort by timestamp descending and limit size
-            pools = pools
+            filteredPools = filteredPools
                 .OrderByDescending(p => p.Timestamp ?? DateTimeOffset.MinValue)
                 .Take(size);
 
-            return pools.ToList();
+            return filteredPools.ToList();
         }
 
         public async Task<int> GetPoolCountAsync(CancellationToken cancellationToken = default)

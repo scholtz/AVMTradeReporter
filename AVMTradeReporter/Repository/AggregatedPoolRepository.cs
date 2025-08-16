@@ -52,7 +52,11 @@ namespace AVMTradeReporter.Repository
                     }
                 }
             };
-
+            if(_elasticClient == null)
+            {
+                _logger.LogError("Elasticsearch client is not initialized");
+                return;
+            }
             var response = await _elasticClient.Indices.PutIndexTemplateAsync(templateRequest);
             _logger.LogInformation("AggregatedPool index template created: {ok}", response.IsValidResponse);
         }
@@ -111,15 +115,18 @@ namespace AVMTradeReporter.Repository
         {
             try
             {
-                // Store to Elasticsearch
-                var id = $"{agg.AssetIdA}_{agg.AssetIdB}";
-                var response = await _elasticClient.IndexAsync(agg, idx => idx
-                    .Index("aggregatedpools")
-                    .Id(id), cancellationToken);
-
-                if (!response.IsValidResponse)
+                if (_elasticClient != null)
                 {
-                    _logger.LogWarning("Failed to index aggregated pool {id}: {error}", id, response.DebugInformation);
+                    // Store to Elasticsearch
+                    var id = $"{agg.AssetIdA}_{agg.AssetIdB}";
+                    var response = await _elasticClient.IndexAsync(agg, idx => idx
+                        .Index("aggregatedpools")
+                        .Id(id), cancellationToken);
+
+                    if (!response.IsValidResponse)
+                    {
+                        _logger.LogWarning("Failed to index aggregated pool {id}: {error}", id, response.DebugInformation);
+                    }
                 }
             }
             catch (Exception ex)

@@ -26,11 +26,11 @@ namespace AVMTradeReporter.Controllers
         /// <param name="size">Number of pools to return (default: 100)</param>
         /// <returns>List of pools</returns>
         [HttpGet]
-        public async Task<ActionResult<List<Pool>>> GetPools([FromQuery] ulong? assetIdA, [FromQuery] ulong? assetIdB, [FromQuery] DEXProtocol? protocol = null, [FromQuery] int size = 100)
+        public async Task<ActionResult<List<Pool>>> GetPools([FromQuery] ulong? assetIdA, [FromQuery] ulong? assetIdB, [FromQuery] string? address, [FromQuery] DEXProtocol? protocol = null, [FromQuery] int size = 100)
         {
             try
             {
-                var pools = await _poolRepository.GetPoolsAsync(assetIdA, assetIdB, protocol, size, HttpContext.RequestAborted);
+                var pools = await _poolRepository.GetPoolsAsync(assetIdA, assetIdB, address, protocol, size, HttpContext.RequestAborted);
                 return Ok(pools);
             }
             catch (Exception ex)
@@ -77,7 +77,7 @@ namespace AVMTradeReporter.Controllers
             try
             {
                 var totalCount = await _poolRepository.GetPoolCountAsync(HttpContext.RequestAborted);
-                var allPools = await _poolRepository.GetPoolsAsync(assetIdA, assetIdB, size: int.MaxValue, cancellationToken: HttpContext.RequestAborted);
+                var allPools = await _poolRepository.GetPoolsAsync(assetIdA, assetIdB, null, size: int.MaxValue, cancellationToken: HttpContext.RequestAborted);
                 
                 var stats = new
                 {

@@ -60,7 +60,11 @@ namespace AVMTradeReporter.Repository
                     }
                 }
             };
-
+            if (_elasticClient == null)
+            {
+                _logger.LogError("Elasticsearch client is not initialized");
+                return;
+            }
             var response = await _elasticClient.Indices.PutIndexTemplateAsync(templateRequest);
 
             Console.WriteLine($"Template created: {response.IsValidResponse}");
@@ -100,56 +104,70 @@ namespace AVMTradeReporter.Repository
                         Id = trade.TxId
                     });
                 }
-
-                var bulkResponse = await _elasticClient.BulkAsync(bulkRequest, cancellationToken);
-
-                if (bulkResponse.IsValidResponse)
+                if (_elasticClient == null)
                 {
-                    var successCount = bulkResponse.Items.Count(item => item.IsValid);
-                    var failureCount = bulkResponse.Items.Count(item => !item.IsValid);
-
-                    _logger.LogInformation("Bulk indexing completed: {successCount} successful, {failureCount} failed",
-                        successCount, failureCount);
-
-                    if (failureCount > 0)
+                    // Update pools from confirmed trades in background
+                    _ = Task.Run(async () =>
                     {
-                        foreach (var failedItem in bulkResponse.Items.Where(item => !item.IsValid))
+                        foreach (var trade in trades)
                         {
-                            _logger.LogWarning("Failed to index trade {id}: {error}",
-                                failedItem.Id, failedItem.Error?.Reason ?? "Unknown error");
+                            await _poolRepository.UpdatePoolFromTrade(trade, cancellationToken);
                         }
-                    }
-
-                    // Update pools for successfully stored trades
-                    if (successCount > 0)
-                    {
-                        var successfulTrades = new List<Trade>();
-                        var bulkResponseItems = bulkResponse.Items.ToList();
-                        
-                        for (int i = 0; i < trades.Length && i < bulkResponseItems.Count; i++)
-                        {
-                            if (bulkResponseItems[i].IsValid)
-                            {
-                                successfulTrades.Add(trades[i]);
-                            }
-                        }
-
-                        // Update pools from confirmed trades in background
-                        _ = Task.Run(async () =>
-                        {
-                            foreach (var trade in successfulTrades)
-                            {
-                                await _poolRepository.UpdatePoolFromTrade(trade, cancellationToken);
-                            }
-                        }, cancellationToken);
-                    }
-
-                    return true;
+                    }, cancellationToken);
+                    return false;
                 }
                 else
                 {
-                    _logger.LogError("Bulk indexing failed: {error}", bulkResponse.DebugInformation);
-                    return false;
+                    var bulkResponse = await _elasticClient.BulkAsync(bulkRequest, cancellationToken);
+
+                    if (bulkResponse.IsValidResponse)
+                    {
+                        var successCount = bulkResponse.Items.Count(item => item.IsValid);
+                        var failureCount = bulkResponse.Items.Count(item => !item.IsValid);
+
+                        _logger.LogInformation("Bulk indexing completed: {successCount} successful, {failureCount} failed",
+                            successCount, failureCount);
+
+                        if (failureCount > 0)
+                        {
+                            foreach (var failedItem in bulkResponse.Items.Where(item => !item.IsValid))
+                            {
+                                _logger.LogWarning("Failed to index trade {id}: {error}",
+                                    failedItem.Id, failedItem.Error?.Reason ?? "Unknown error");
+                            }
+                        }
+
+                        // Update pools for successfully stored trades
+                        if (successCount > 0)
+                        {
+                            var successfulTrades = new List<Trade>();
+                            var bulkResponseItems = bulkResponse.Items.ToList();
+
+                            for (int i = 0; i < trades.Length && i < bulkResponseItems.Count; i++)
+                            {
+                                if (bulkResponseItems[i].IsValid)
+                                {
+                                    successfulTrades.Add(trades[i]);
+                                }
+                            }
+
+                            // Update pools from confirmed trades in background
+                            _ = Task.Run(async () =>
+                            {
+                                foreach (var trade in successfulTrades)
+                                {
+                                    await _poolRepository.UpdatePoolFromTrade(trade, cancellationToken);
+                                }
+                            }, cancellationToken);
+                        }
+
+                        return true;
+                    }
+                    else
+                    {
+                        _logger.LogError("Bulk indexing failed: {error}", bulkResponse.DebugInformation);
+                        return false;
+                    }
                 }
             }
             catch (Exception ex)
@@ -197,6 +215,6 @@ namespace AVMTradeReporter.Repository
             }
         }
 
-        
+
     }
 }

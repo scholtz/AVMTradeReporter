@@ -25,7 +25,7 @@ namespace AVMTradeReporter.Repository
             _hubContext = hubContext;
             _poolRepository = poolRepository;
         }
-        
+
         public async Task<bool> StoreLiquidityUpdatesAsync(Liquidity[] items, CancellationToken cancellationToken)
         {
             if (!items.Any())
@@ -61,57 +61,72 @@ namespace AVMTradeReporter.Repository
                         Id = item.TxId
                     });
                 }
-
-                var bulkResponse = await _elasticClient.BulkAsync(bulkRequest, cancellationToken);
-
-                if (bulkResponse.IsValidResponse)
+                if (_elasticClient == null)
                 {
-                    var successCount = bulkResponse.Items.Count(item => item.IsValid);
-                    var failureCount = bulkResponse.Items.Count(item => !item.IsValid);
-
-                    _logger.LogInformation("LP Bulk indexing completed: {successCount} successful, {failureCount} failed",
-                        successCount, failureCount);
-
-                    if (failureCount > 0)
+                    // Update pools from confirmed liquidity updates in background
+                    _ = Task.Run(async () =>
                     {
-                        foreach (var failedItem in bulkResponse.Items.Where(item => !item.IsValid))
+                        foreach (var liquidity in items)
                         {
-                            _logger.LogWarning("Failed to index liquidity {id}: {error}",
-                                failedItem.Id, failedItem.Error?.Reason ?? "Unknown error");
+                            await _poolRepository.UpdatePoolFromLiquidity(liquidity, cancellationToken);
                         }
-                    }
-
-                    // Update pools for successfully stored liquidity updates
-                    if (successCount > 0)
-                    {
-                        var successfulLiquidityUpdates = new List<Liquidity>();
-                        var bulkResponseItems = bulkResponse.Items.ToList();
-                        
-                        for (int i = 0; i < items.Length && i < bulkResponseItems.Count; i++)
-                        {
-                            if (bulkResponseItems[i].IsValid)
-                            {
-                                successfulLiquidityUpdates.Add(items[i]);
-                            }
-                        }
-
-                        // Update pools from confirmed liquidity updates in background
-                        _ = Task.Run(async () =>
-                        {
-                            foreach (var liquidity in successfulLiquidityUpdates)
-                            {
-                                await _poolRepository.UpdatePoolFromLiquidity(liquidity, cancellationToken);
-                            }
-                        }, cancellationToken);
-                    }
-
-                    return true;
+                    }, cancellationToken);
                 }
                 else
                 {
-                    _logger.LogError("LP Bulk indexing failed: {error}", bulkResponse.DebugInformation);
-                    return false;
+                    var bulkResponse = await _elasticClient.BulkAsync(bulkRequest, cancellationToken);
+
+                    if (bulkResponse.IsValidResponse)
+                    {
+                        var successCount = bulkResponse.Items.Count(item => item.IsValid);
+                        var failureCount = bulkResponse.Items.Count(item => !item.IsValid);
+
+                        _logger.LogInformation("LP Bulk indexing completed: {successCount} successful, {failureCount} failed",
+                            successCount, failureCount);
+
+                        if (failureCount > 0)
+                        {
+                            foreach (var failedItem in bulkResponse.Items.Where(item => !item.IsValid))
+                            {
+                                _logger.LogWarning("Failed to index liquidity {id}: {error}",
+                                    failedItem.Id, failedItem.Error?.Reason ?? "Unknown error");
+                            }
+                        }
+
+                        // Update pools for successfully stored liquidity updates
+                        if (successCount > 0)
+                        {
+                            var successfulLiquidityUpdates = new List<Liquidity>();
+                            var bulkResponseItems = bulkResponse.Items.ToList();
+
+                            for (int i = 0; i < items.Length && i < bulkResponseItems.Count; i++)
+                            {
+                                if (bulkResponseItems[i].IsValid)
+                                {
+                                    successfulLiquidityUpdates.Add(items[i]);
+                                }
+                            }
+
+                            // Update pools from confirmed liquidity updates in background
+                            _ = Task.Run(async () =>
+                            {
+                                foreach (var liquidity in successfulLiquidityUpdates)
+                                {
+                                    await _poolRepository.UpdatePoolFromLiquidity(liquidity, cancellationToken);
+                                }
+                            }, cancellationToken);
+                        }
+
+                        return true;
+                    }
+                    else
+                    {
+                        _logger.LogError("LP Bulk indexing failed: {error}", bulkResponse.DebugInformation);
+                        return false;
+                    }
                 }
+
+                return false;
             }
             catch (Exception ex)
             {

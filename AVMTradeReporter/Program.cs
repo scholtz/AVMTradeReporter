@@ -42,9 +42,6 @@ namespace AVMTradeReporter
                 });
                 c.OperationFilter<Swashbuckle.AspNetCore.Filters.SecurityRequirementsOperationFilter>();
                 c.ResolveConflictingActions(apiDescriptions => apiDescriptions.First()); //This line
-                var xmlFile = $"doc/documentation.xml";
-                var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
-                c.IncludeXmlComments(xmlPath);
             });
 
             // Configure AppConfiguration from appsettings.json
@@ -106,7 +103,7 @@ namespace AVMTradeReporter
             builder.Services.AddSingleton<ElasticsearchClient>(sp =>
             {
                 var appConfig = sp.GetRequiredService<IOptions<AppConfiguration>>().Value;
-
+                if (string.IsNullOrEmpty(appConfig.Elastic.Host) || string.IsNullOrEmpty(appConfig.Elastic.ApiKey)) return null!;// No Elasticsearch configured 
                 var settings = new ElasticsearchClientSettings(new Uri(appConfig.Elastic.Host))
                 .Authentication(new Elastic.Transport.ApiKey(appConfig.Elastic.ApiKey ?? throw new Exception("Api key for elastic is null")))
                 .ThrowExceptions()

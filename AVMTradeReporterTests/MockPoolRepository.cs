@@ -47,13 +47,17 @@ namespace AVMTradeReporterTests
             return Task.CompletedTask;
         }
 
-        public async Task<List<AVMTradeReporter.Model.Data.Pool>> GetPoolsAsync(ulong? assetIdA, ulong? assetIdB, DEXProtocol? protocol = null, int size = 100, CancellationToken cancellationToken = default)
+        public async Task<List<AVMTradeReporter.Model.Data.Pool>> GetPoolsAsync(ulong? assetIdA, ulong? assetIdB, string? address, DEXProtocol? protocol = null, int size = 100, CancellationToken cancellationToken = default)
         {
             var filteredPools = pools.AsEnumerable();
 
             if (assetIdA.HasValue && assetIdB.HasValue)
             {
                 filteredPools = filteredPools.Where(p => (p.AssetIdA == assetIdA.Value && p.AssetIdB == assetIdB.Value) || (p.AssetIdB == assetIdA.Value || p.AssetIdA == assetIdB.Value));
+            }
+            if (!string.IsNullOrEmpty(address))
+            {
+                filteredPools = filteredPools.Where(p => p.PoolAddress == address);
             }
 
             // Filter by protocol if specified

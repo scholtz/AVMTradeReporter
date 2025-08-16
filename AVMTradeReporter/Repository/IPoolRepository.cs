@@ -10,7 +10,7 @@ namespace AVMTradeReporter.Repository
         Task<bool> StorePoolAsync(Pool pool, CancellationToken cancellationToken);
         Task UpdatePoolFromTrade(Trade trade, CancellationToken cancellationToken);
         Task UpdatePoolFromLiquidity(Liquidity liquidity, CancellationToken cancellationToken);
-        Task<List<Pool>> GetPoolsAsync(ulong? assetIdA, ulong? assetIdB, DEXProtocol? protocol = null, int size = 100, CancellationToken cancellationToken = default);
+        Task<List<Pool>> GetPoolsAsync(ulong? assetIdA, ulong? assetIdB, string? address, DEXProtocol? protocol = null, int size = 100, CancellationToken cancellationToken = default);
         Task<int> GetPoolCountAsync(CancellationToken cancellationToken = default);
     }
 }

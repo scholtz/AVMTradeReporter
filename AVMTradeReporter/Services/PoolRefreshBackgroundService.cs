@@ -96,7 +96,7 @@ namespace AVMTradeReporter.Services
                 await _poolRepository.InitializeAsync(cancellationToken);
 
                 // Get all pools from repository
-                var allPools = await _poolRepository.GetPoolsAsync(null, null, size: int.MaxValue, cancellationToken: cancellationToken);
+                var allPools = await _poolRepository.GetPoolsAsync(null, null, null, size: int.MaxValue, cancellationToken: cancellationToken);
                 _logger.LogInformation("Found {poolCount} pools to refresh", allPools.Count);
 
                 if (allPools.Count == 0)
@@ -179,7 +179,10 @@ namespace AVMTradeReporter.Services
                     try
                     {
                         processor = GetPoolProcessor(DEXProtocol.Pact);
-                        await processor?.LoadPoolAsync(pool.PoolAddress, pool.PoolAppId);
+                        if (processor != null)
+                        {
+                            await processor.LoadPoolAsync(pool.PoolAddress, pool.PoolAppId);
+                        }
                     }
                     catch (Exception pactEx)
                     {
@@ -194,7 +197,10 @@ namespace AVMTradeReporter.Services
                     try
                     {
                         processor = GetPoolProcessor(DEXProtocol.Tiny);
-                        await processor?.LoadPoolAsync(pool.PoolAddress, pool.PoolAppId);
+                        if (processor != null)
+                        {
+                            await processor.LoadPoolAsync(pool.PoolAddress, pool.PoolAppId);
+                        }
                     }
                     catch (Exception pactEx)
                     {

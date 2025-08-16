@@ -22,6 +22,10 @@ namespace AVMIndexReporter.Repository
         {
             try
             {
+                if (_elasticClient == null)
+                {
+                    return false;
+                }
                 var indexResult = await _elasticClient.IndexAsync(indexer, new Id(indexer.Id), cancellationToken);
 
                 if (!indexResult.IsValidResponse)
@@ -43,6 +47,10 @@ namespace AVMIndexReporter.Repository
         {
             try
             {
+                if (_elasticClient == null)
+                {
+                    return null;
+                }
                 var getResult = await _elasticClient.GetAsync<Indexer>(new Id(id), cancellationToken);
                 if (getResult.IsValidResponse && getResult.Found)
                 {
