@@ -25,11 +25,11 @@ namespace AVMTradeReporter.Controllers
         /// <param name="size">Number of pools to return (default: 100)</param>
         /// <returns>List of pools</returns>
         [HttpGet]
-        public async Task<ActionResult<List<Pool>>> GetPools([FromQuery] DEXProtocol? protocol = null, [FromQuery] int size = 100)
+        public async Task<ActionResult<List<Pool>>> GetPools([FromQuery] ulong? assetIdA, [FromQuery] ulong? assetIdB, [FromQuery] DEXProtocol? protocol = null, [FromQuery] int size = 100)
         {
             try
             {
-                var pools = await _poolRepository.GetPoolsAsync(protocol, size, HttpContext.RequestAborted);
+                var pools = await _poolRepository.GetPoolsAsync(assetIdA, assetIdB, protocol, size, HttpContext.RequestAborted);
                 return Ok(pools);
             }
             catch (Exception ex)
@@ -65,38 +65,18 @@ namespace AVMTradeReporter.Controllers
             }
         }
 
-        /// <summary>
-        /// Get pools by protocol
-        /// </summary>
-        /// <param name="protocol">Protocol (Pact, Tiny, Biatec)</param>
-        /// <param name="size">Number of pools to return (default: 100)</param>
-        /// <returns>List of pools for the specified protocol</returns>
-        [HttpGet("by-protocol/{protocol}")]
-        public async Task<ActionResult<List<Pool>>> GetPoolsByProtocol(DEXProtocol protocol, [FromQuery] int size = 100)
-        {
-            try
-            {
-                var pools = await _poolRepository.GetPoolsAsync(protocol, size, HttpContext.RequestAborted);
-                return Ok(pools);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to get pools for protocol {protocol}", protocol);
-                return StatusCode(500, new { error = "Failed to retrieve pools" });
-            }
-        }
 
         /// <summary>
         /// Get pool statistics
         /// </summary>
         /// <returns>Pool statistics</returns>
         [HttpGet("stats")]
-        public async Task<ActionResult<object>> GetPoolStats()
+        public async Task<ActionResult<object>> GetPoolStats([FromQuery] ulong? assetIdA, [FromQuery] ulong? assetIdB)
         {
             try
             {
                 var totalCount = await _poolRepository.GetPoolCountAsync(HttpContext.RequestAborted);
-                var allPools = await _poolRepository.GetPoolsAsync(size: int.MaxValue, cancellationToken: HttpContext.RequestAborted);
+                var allPools = await _poolRepository.GetPoolsAsync(assetIdA, assetIdB, size: int.MaxValue, cancellationToken: HttpContext.RequestAborted);
                 
                 var stats = new
                 {

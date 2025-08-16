@@ -47,17 +47,33 @@ namespace AVMTradeReporterTests
             return Task.CompletedTask;
         }
 
-        public Task<List<AVMTradeReporter.Model.Data.Pool>> GetPoolsAsync(DEXProtocol? protocol = null, int size = 100, CancellationToken cancellationToken = default)
+        public async Task<List<AVMTradeReporter.Model.Data.Pool>> GetPoolsAsync(ulong? assetIdA, ulong? assetIdB, DEXProtocol? protocol = null, int size = 100, CancellationToken cancellationToken = default)
         {
-            var result = protocol.HasValue
-                ? pools.Where(p => p.Protocol == protocol.Value).Take(size).ToList()
-                : pools.Take(size).ToList();
-            return Task.FromResult(result);
+            var filteredPools = pools.AsEnumerable();
+
+            if (assetIdA.HasValue && assetIdB.HasValue)
+            {
+                filteredPools = filteredPools.Where(p => (p.AssetIdA == assetIdA.Value && p.AssetIdB == assetIdB.Value) || (p.AssetIdB == assetIdA.Value || p.AssetIdA == assetIdB.Value));
+            }
+
+            // Filter by protocol if specified
+            if (protocol.HasValue)
+            {
+                filteredPools = filteredPools.Where(p => p.Protocol == protocol.Value);
+            }
+
+            // Sort by timestamp descending and limit size
+            filteredPools = filteredPools
+                .OrderByDescending(p => p.Timestamp ?? DateTimeOffset.MinValue)
+                .Take(size);
+            await Task.Delay(1);
+            return filteredPools.ToList();
         }
 
         public Task<int> GetPoolCountAsync(CancellationToken cancellationToken = default)
         {
             return Task.FromResult(pools.Count);
         }
+
     }
 }

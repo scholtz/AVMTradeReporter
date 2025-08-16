@@ -58,7 +58,7 @@ namespace AVMTradeReporter.Repository
             _logger.LogInformation("AggregatedPool index template created: {ok}", response.IsValidResponse);
         }
 
-        public Task InitializeFromExistingPoolsAsync(IEnumerable<Pool> pools, CancellationToken cancellationToken = default)
+        public Task InitializeFromExistingPoolsAsync(IEnumerable<Model.Data.Pool> pools, CancellationToken cancellationToken = default)
         {
             try
             {
@@ -85,7 +85,7 @@ namespace AVMTradeReporter.Repository
             return Task.CompletedTask;
         }
 
-        public async Task UpdateForPairAsync(ulong assetIdA, ulong assetIdB, IEnumerable<Pool> poolsForPair, CancellationToken cancellationToken = default)
+        public async Task UpdateForPairAsync(ulong assetIdA, ulong assetIdB, IEnumerable<Model.Data.Pool> poolsForPair, CancellationToken cancellationToken = default)
         {
             try
             {

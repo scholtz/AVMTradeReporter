@@ -473,11 +473,16 @@ namespace AVMTradeReporter.Repository
             }
         }
 
-        public async Task<List<Pool>> GetPoolsAsync(DEXProtocol? protocol = null, int size = 100, CancellationToken cancellationToken = default)
+        public async Task<List<Pool>> GetPoolsAsync(ulong? assetIdA, ulong? assetIdB, DEXProtocol? protocol = null, int size = 100, CancellationToken cancellationToken = default)
         {
             await EnsureInitialized(cancellationToken);
 
             var pools = _poolsCache.Values.AsEnumerable();
+
+            if (assetIdA.HasValue && assetIdB.HasValue)
+            {
+                pools = pools.Where(p => (p.AssetIdA == assetIdA.Value && p.AssetIdB == assetIdB.Value) || (p.AssetIdB == assetIdA.Value || p.AssetIdA == assetIdB.Value));
+            }
 
             // Filter by protocol if specified
             if (protocol.HasValue)

@@ -96,7 +96,7 @@ namespace AVMTradeReporter.Services
                 await _poolRepository.InitializeAsync(cancellationToken);
 
                 // Get all pools from repository
-                var allPools = await _poolRepository.GetPoolsAsync(size: int.MaxValue, cancellationToken: cancellationToken);
+                var allPools = await _poolRepository.GetPoolsAsync(null, null, size: int.MaxValue, cancellationToken: cancellationToken);
                 _logger.LogInformation("Found {poolCount} pools to refresh", allPools.Count);
 
                 if (allPools.Count == 0)
