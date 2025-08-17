@@ -36,7 +36,7 @@ namespace AVMTradeReporterTests.Processors.Pool
             Assert.That(pool.AssetIdB, Is.EqualTo(386195940));
 
             var json = Algorand.Utils.Encoder.EncodeToJson(pool);
-            Assert.That(json, Is.EqualTo("{\r\n  \"PoolAddress\": \"M72TAR3CZLHFCC2JFIDCFDRICMDIB73FYMFETEKCEPGR5XO7ILFNUKEV34\",\r\n  \"PoolAppId\": 2757661465,\r\n  \"AssetIdA\": 0,\r\n  \"AssetADecimals\": 6,\r\n  \"AssetIdB\": 386195940,\r\n  \"AssetBDecimals\": 6,\r\n  \"AssetIdLP\": 2757661470,\r\n  \"A\": 2059963288,\r\n  \"B\": 12438010,\r\n  \"L\": 158246466,\r\n  \"Timestamp\": \"2025-08-12T19:40:40.6448335+02:00\",\r\n  \"AMMType\": 0,\r\n  \"ApprovalProgramHash\": \"85a9a6a24f463fcf7f07982f8f06761dc75dae0369b5002ecddd0c749500e7fa\",\r\n  \"LPFee\": 0.003,\r\n  \"ProtocolFeePortion\": 0.1666666666666666666666666667,\r\n  \"VirualAmountA\": 2059.963288,\r\n  \"RealAmountA\": 2059.963288,\r\n  \"VirualAmountB\": 12.43801,\r\n  \"RealAmountB\": 12.43801\r\n}"));
+            Assert.That(json, Is.EqualTo("{\r\n  \"PoolAddress\": \"M72TAR3CZLHFCC2JFIDCFDRICMDIB73FYMFETEKCEPGR5XO7ILFNUKEV34\",\r\n  \"PoolAppId\": 2757661465,\r\n  \"AssetIdA\": 0,\r\n  \"AssetADecimals\": 6,\r\n  \"AssetIdB\": 386195940,\r\n  \"AssetBDecimals\": 6,\r\n  \"AssetIdLP\": 2757661470,\r\n  \"A\": 2059963288,\r\n  \"B\": 12438010,\r\n  \"L\": 158246466,\r\n  \"Timestamp\": \"2025-08-12T19:40:40.6448335+02:00\",\r\n  \"AMMType\": 0,\r\n  \"ApprovalProgramHash\": \"85a9a6a24f463fcf7f07982f8f06761dc75dae0369b5002ecddd0c749500e7fa\",\r\n  \"LPFee\": 0.003,\r\n  \"ProtocolFeePortion\": 0.1666666666666666666666666667,\r\n  \"VirtualAmountA\": 2059.963288,\r\n  \"RealAmountA\": 2059.963288,\r\n  \"VirtualAmountB\": 12.43801,\r\n  \"RealAmountB\": 12.43801\r\n}"));
 
 
         }

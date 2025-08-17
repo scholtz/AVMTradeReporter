@@ -47,7 +47,7 @@ namespace AVMTradeReporter.Model.Data
         /// </summary>
         public decimal? ProtocolFeePortion { get; set; }
 
-        public decimal VirualAmountA
+        public decimal VirtualAmountA
         {
             get
             {
@@ -84,7 +84,7 @@ namespace AVMTradeReporter.Model.Data
                 return Convert.ToDecimal(A) / Convert.ToDecimal(Math.Pow(10, Convert.ToDouble(AssetADecimals ?? 0))) + Convert.ToDecimal(AF) / Convert.ToDecimal(Math.Pow(10, Convert.ToDouble(AssetADecimals ?? 0)));
             }
         }
-        public decimal VirualAmountB
+        public decimal VirtualAmountB
         {
             get
             {

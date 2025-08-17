@@ -1,5 +1,6 @@
 ﻿using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Repository;
+using AVMTradeReporter.Processors.Pool;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -79,5 +80,9 @@ namespace AVMTradeReporterTests
             return Task.FromResult(pools.Count);
         }
 
+        public IPoolProcessor? GetPoolProcessor(DEXProtocol protocol)
+        {
+            return null;
+        }
     }
 }

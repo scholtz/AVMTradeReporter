@@ -27,7 +27,7 @@ namespace AVMTradeReporter.Repository
         private readonly IServiceProvider _serviceProvider;
 
         // In-memory cache for pools
-        private readonly ConcurrentDictionary<string, Pool> _poolsCache = new();
+        private static readonly ConcurrentDictionary<string, Pool> _poolsCache = new();
         private readonly SemaphoreSlim _initializationSemaphore = new(1, 1);
         private bool _isInitialized = false;
 
@@ -253,10 +253,8 @@ namespace AVMTradeReporter.Repository
             try
             {
 
-                var poolId = GeneratePoolId(pool.PoolAddress);
-
                 // Update in-memory cache
-                _poolsCache.AddOrUpdate(poolId, pool, (key, oldValue) => pool);
+                _poolsCache[pool.PoolAddress] = pool;
 
                 BiatecScanHub.RecentPoolUpdates.Enqueue(pool);
                 if (BiatecScanHub.RecentPoolUpdates.Count > 100)
@@ -271,14 +269,14 @@ namespace AVMTradeReporter.Repository
                     {
                         if (_redisDatabase != null && _appConfig.Redis.Enabled)
                         {
-                            var redisKey = $"{_appConfig.Redis.KeyPrefix}{poolId}";
+                            var redisKey = $"{_appConfig.Redis.KeyPrefix}{pool.PoolAddress}";
                             var poolJson = JsonSerializer.Serialize(pool);
                             await _redisDatabase.StringSetAsync(redisKey, poolJson);
                         }
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "Failed to save pool to Redis: {poolId}", poolId);
+                        _logger.LogError(ex, "Failed to save pool to Redis: {poolId}", pool.PoolAddress);
                     }
                 }, cancellationToken);
 
@@ -291,21 +289,21 @@ namespace AVMTradeReporter.Repository
                         {
                             var response = await _elasticClient.IndexAsync(pool, idx => idx
                                 .Index("pools")
-                                .Id(poolId), cancellationToken);
+                                .Id(pool.PoolAddress), cancellationToken);
 
                             if (!response.IsValidResponse)
                             {
-                                _logger.LogError("Failed to store pool in Elasticsearch {poolId}: {error}", poolId, response.DebugInformation);
+                                _logger.LogError("Failed to store pool in Elasticsearch {poolId}: {error}", pool.PoolAddress, response.DebugInformation);
                             }
                         }
                         catch (Exception ex)
                         {
-                            _logger.LogError(ex, "Failed to store pool in Elasticsearch: {poolId}", poolId);
+                            _logger.LogError(ex, "Failed to store pool in Elasticsearch: {poolId}", pool.PoolAddress);
                         }
                     }, cancellationToken);
                 }
 
-                _logger.LogDebug("Pool updated in memory: {poolId}", poolId);
+                _logger.LogDebug("Pool updated in memory: {poolId}", pool.PoolAddress);
 
                 // Publish pool update to SignalR hub
                 await PublishPoolUpdateToHub(pool, cancellationToken);

@@ -15,7 +15,7 @@ namespace AVMTradeReporter.Repository
         private readonly ILogger<AggregatedPoolRepository> _logger;
         private readonly IHubContext<BiatecScanHub> _hubContext;
 
-        private readonly ConcurrentDictionary<(ulong A, ulong B), AggregatedPool> _cache = new();
+        private static readonly ConcurrentDictionary<(ulong A, ulong B), AggregatedPool> _cache = new();
 
         public AggregatedPoolRepository(
             ElasticsearchClient elasticClient,
@@ -145,6 +145,8 @@ namespace AVMTradeReporter.Repository
         }
         private async Task StoreAndPublishAsync(AggregatedPool agg, CancellationToken cancellationToken)
         {
+            _cache[(agg.AssetIdA, agg.AssetIdB)] = agg;
+            _cache[(agg.AssetIdB, agg.AssetIdA)] = agg;
             try
             {
                 if (_elasticClient != null)

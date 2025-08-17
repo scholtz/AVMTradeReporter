@@ -30,8 +30,8 @@ namespace AVMTradeReporterTests.Pool
                 PMax = 1.6m,
                 L = 3_715_598_743_719_791
             };
-            var virtualAmountA = Convert.ToDecimal(pool.VirualAmountA);
-            var virtualAmountB = Convert.ToDecimal(pool.VirualAmountB);
+            var virtualAmountA = Convert.ToDecimal(pool.VirtualAmountA);
+            var virtualAmountB = Convert.ToDecimal(pool.VirtualAmountB);
             Assert.That(virtualAmountB / virtualAmountA, Is.EqualTo(1.4091058619237558219157887306m));
             Assert.That(virtualAmountA, Is.EqualTo(6810660.9657368758238680553836M));
             Assert.That(virtualAmountB, Is.EqualTo(9596942.290395139625435727689M));

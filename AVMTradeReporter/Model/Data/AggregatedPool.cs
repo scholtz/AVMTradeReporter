@@ -73,8 +73,8 @@ namespace AVMTradeReporter.Model.Data
                 {
                     AssetIdA = g.Key.A,
                     AssetIdB = g.Key.B,
-                    A = (ulong)g.Sum(p => p.VirualAmountA),
-                    B = (ulong)g.Sum(p => p.VirualAmountB),
+                    A = (ulong)g.Sum(p => p.VirtualAmountA),
+                    B = (ulong)g.Sum(p => p.VirtualAmountB),
                     TVL_A = g.Sum(p => Convert.ToDecimal(p.RealAmountA)),
                     TVL_B = g.Sum(p => Convert.ToDecimal(p.RealAmountB)),
                     PoolCount = g.Count(),
