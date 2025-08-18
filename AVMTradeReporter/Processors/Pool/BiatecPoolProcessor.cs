@@ -2,6 +2,7 @@
 using AVMTradeReporter.Extensions;
 using AVMTradeReporter.Repository;
 using System.Text;
+using static Org.BouncyCastle.Math.EC.ECCurve;
 
 namespace AVMTradeReporter.Processors.Pool
 {
@@ -94,6 +95,14 @@ namespace AVMTradeReporter.Processors.Pool
             var assetADecimals = (await _assetRepository.GetAssetAsync(assetAId, cancelationTokenSource.Token))?.Params?.Decimals;
             var assetBDecimals = (await _assetRepository.GetAssetAsync(assetBId, cancelationTokenSource.Token))?.Params?.Decimals;
 
+            var aBytes = Convert.FromBase64String(A.Value.Bytes);
+            var a = BitConverter.ToUInt64(aBytes.Skip(24).Take(8).Reverse().ToArray(), 0);
+            var bBytes = Convert.FromBase64String(B.Value.Bytes);
+            var b = BitConverter.ToUInt64(bBytes.Skip(24).Take(8).Reverse().ToArray(), 0);
+            var lBytes = Convert.FromBase64String(L.Value.Bytes);
+            var l = BitConverter.ToUInt64(lBytes.Skip(24).Take(8).Reverse().ToArray(), 0);
+
+
             if (pool == null)
             {
                 pool = new AVMTradeReporter.Model.Data.Pool
@@ -101,11 +110,11 @@ namespace AVMTradeReporter.Processors.Pool
                     PoolAddress = address,
                     PoolAppId = appId,
                     Protocol = AVMTradeReporter.Model.Data.DEXProtocol.Biatec,
-                    A = A.Value.Uint,
-                    B = B.Value.Uint,
-                    L = L.Value.Uint,
+                    A = a,
+                    B = b,
+                    L = l,
                     AssetIdLP = LTID.Value.Uint,
-                    AMMType = Model.Data.AMMType.OldAMM,
+                    AMMType = Model.Data.AMMType.ConcentratedLiquidityAMM,
                     Timestamp = DateTimeOffset.Now,
                     ApprovalProgramHash = hash,
                     LPFee = lpFee,
@@ -116,6 +125,7 @@ namespace AVMTradeReporter.Processors.Pool
                     PMin = pMinValue,
                     AssetADecimals = assetADecimals,
                     AssetBDecimals = assetBDecimals,
+                    VerificationClass = VerificationClass.Value.Uint
                 };
                 updated = true;
             }
@@ -126,9 +136,9 @@ namespace AVMTradeReporter.Processors.Pool
                     pool.Protocol = Model.Data.DEXProtocol.Biatec;
                     updated = true;
                 }
-                if (pool.A != A.Value.Uint)
+                if (pool.A != a)
                 {
-                    pool.A = A.Value.Uint;
+                    pool.A = a;
                     updated = true;
                 }
                 if (pool.ApprovalProgramHash != hash)
@@ -136,14 +146,14 @@ namespace AVMTradeReporter.Processors.Pool
                     pool.ApprovalProgramHash = hash;
                     updated = true;
                 }
-                if (pool.B != B.Value.Uint)
+                if (pool.B != b)
                 {
-                    pool.B = B.Value.Uint;
+                    pool.B = b;
                     updated = true;
                 }
-                if (pool.L != L.Value.Uint)
+                if (pool.L != l)
                 {
-                    pool.L = L.Value.Uint;
+                    pool.L = l;
                     updated = true;
                 }
                 if (pool.AssetIdLP != LTID.Value.Uint)
@@ -193,9 +203,15 @@ namespace AVMTradeReporter.Processors.Pool
                     updated = true;
                 }
 
-                if (pool.AMMType != Model.Data.AMMType.OldAMM)
+                if (pool.VerificationClass != VerificationClass.Value.Uint)
                 {
-                    pool.AMMType = Model.Data.AMMType.OldAMM;
+                    pool.VerificationClass = VerificationClass.Value.Uint;
+                    updated = true;
+                }
+
+                if (pool.AMMType != Model.Data.AMMType.ConcentratedLiquidityAMM)
+                {
+                    pool.AMMType = Model.Data.AMMType.ConcentratedLiquidityAMM;
                     updated = true;
                 }
 
