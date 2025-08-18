@@ -619,6 +619,11 @@ namespace AVMTradeReporter.Repository
         {
             try
             {
+                if(_hubContext == null)
+                {
+                    _logger.LogWarning("SignalR hub context is not initialized, cannot publish pool update");
+                    return;
+                }
                 await _hubContext.Clients.All.SendAsync("PoolUpdated", pool, cancellationToken);
                 _logger.LogDebug("Published pool update to SignalR hub: {poolAddress}_{poolAppId}_{protocol}",
                     pool.PoolAddress, pool.PoolAppId, pool.Protocol);

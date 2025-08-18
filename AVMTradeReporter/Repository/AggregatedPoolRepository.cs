@@ -209,8 +209,15 @@ namespace AVMTradeReporter.Repository
                 {
                     BiatecScanHub.ALGOUSD = send;
                 }
+                if (_hubContext == null)
+                {
+                    _logger.LogWarning("Hub context is not initialized");
+                }
+                else
+                {
+                    await _hubContext.Clients.All.SendAsync("AggregatedPoolUpdated", send, cancellationToken);
+                }
 
-                await _hubContext.Clients.All.SendAsync("AggregatedPoolUpdated", send, cancellationToken);
             }
             catch (Exception ex)
             {

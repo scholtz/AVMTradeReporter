@@ -1,7 +1,13 @@
+using AVMTradeReporter.Model.Configuration;
+using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Processors.Pool;
+using AVMTradeReporter.Repository;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using AVMTradeReporter.Model.Data;
 
 namespace AVMTradeReporterTests.Model
 {
@@ -136,7 +142,7 @@ namespace AVMTradeReporterTests.Model
             };
 
             // Act
-            var result = AggregatedPool.FromPools(new AVMTradeReporter.Model.Data.Pool[] { p1, p2  })
+            var result = AggregatedPool.FromPools(new AVMTradeReporter.Model.Data.Pool[] { p1, p2 })
                 .OrderBy(r => r.AssetIdA).ThenBy(r => r.AssetIdB).ToArray();
 
             // Assert two aggregated entries: (1,2) and (2,1)
@@ -155,6 +161,36 @@ namespace AVMTradeReporterTests.Model
             Assert.That(agg12.Id, Is.EqualTo("1-2"));
 
         }
+
+
+        [Test]
+        public async Task GetAggregatedPoolVoteAlgo()
+        {
+            var pools = JsonConvert.DeserializeObject<AVMTradeReporter.Model.Data.Pool[]>(File.ReadAllText("Data/pools-vote-algo.json"));
+            var loggerPoolRepository = new LoggerFactory().CreateLogger<PoolRepository>();
+            var loggerAggregatedPoolRepository = new LoggerFactory().CreateLogger<AggregatedPoolRepository>();
+            var aggregatedPoolsRepository = new AggregatedPoolRepository(null!, loggerAggregatedPoolRepository, null!);
+            var config = new AppConfiguration() { };
+            var options = new OptionsWrapper<AppConfiguration>(config);
+            var repository = new PoolRepository(null!, loggerPoolRepository, null!, aggregatedPoolsRepository, options, null!, null!);
+            var cancellationTokenSource = new CancellationTokenSource();    
+            Assert.That(pools, Is.Not.Null, "Pools should not be null");
+            foreach (var pool in pools)
+            {
+                await repository.StorePoolAsync(pool, cancellationTokenSource.Token);
+            }
+
+            await repository.UpdateAggregatedPool(pools[0].AssetIdA ?? 0, pools[0].AssetIdB ?? 0, cancellationTokenSource.Token);
+            var aggregatedPool = aggregatedPoolsRepository.GetAggregatedPool(pools[0].AssetIdA ?? 0, pools[0].AssetIdB ?? 0);
+            Assert.That(aggregatedPool, Is.Not.Null, "Aggregated pool should not be null");
+
+            Assert.That(aggregatedPool.AssetIdA, Is.EqualTo(452399768));
+            Assert.That(aggregatedPool.AssetIdB, Is.EqualTo(0));
+            var price = aggregatedPool.B / aggregatedPool.A;
+            Assert.That(price, Is.EqualTo(0.1467794677270622992714169588m));
+
+        }
+
         [Test]
         public void FromPools_IgnoresPoolsMissingAmountsOrAssetIds()
         {

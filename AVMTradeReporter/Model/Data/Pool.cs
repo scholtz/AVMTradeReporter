@@ -64,9 +64,9 @@ namespace AVMTradeReporter.Model.Data
                         var eb = a * p + b / r;
                         var d = eb * eb - 4 * a * b * q;
                         var c = 2 * q;
-                        var l = (-eb - Convert.ToDecimal(Math.Sqrt(Convert.ToDouble(d)))) / c;
-                        // var l = Convert.ToDecimal(Math.Sqrt(Convert.ToDouble(x)));
-                        //var l = Convert.ToDecimal(L.Value / 1000000000);
+                        var l1 = (-eb - Convert.ToDecimal(Math.Sqrt(Convert.ToDouble(d)))) / c;
+                        var l2 = (-eb + Convert.ToDecimal(Math.Sqrt(Convert.ToDouble(d)))) / c;
+                        var l = Math.Max(l1, l2);
                         return a + l / r;
                     }
                     return 0;

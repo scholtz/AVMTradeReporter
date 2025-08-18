@@ -11,10 +11,10 @@ namespace AVMTradeReporter.Controllers
     public class AggregatedPoolController : ControllerBase
     {
         private readonly AggregatedPoolRepository _aggregatedPoolRepository;
-        private readonly PoolRepository _poolRepository;
+        private readonly IPoolRepository _poolRepository;
         private readonly ILogger<AggregatedPoolController> _logger;
 
-        public AggregatedPoolController(AggregatedPoolRepository aggregatedPoolRepository, PoolRepository poolRepository, ILogger<AggregatedPoolController> logger)
+        public AggregatedPoolController(AggregatedPoolRepository aggregatedPoolRepository, IPoolRepository poolRepository, ILogger<AggregatedPoolController> logger)
         {
             _aggregatedPoolRepository = aggregatedPoolRepository;
             _poolRepository = poolRepository;
