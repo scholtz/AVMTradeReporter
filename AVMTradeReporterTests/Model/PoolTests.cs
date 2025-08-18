@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using AVMTradeReporter.Model.Data.Enums;
+using Newtonsoft.Json;
 
 namespace AVMTradeReporterTests.Model
 {
@@ -34,6 +35,18 @@ namespace AVMTradeReporterTests.Model
 
             Assert.That(pool.VirtualAmountA, Is.EqualTo(18.401179052349389741062655345m));
             Assert.That(pool.VirtualAmountB, Is.EqualTo(25.780556292368994838666032793m));
+
+        }
+        [Test]
+        public void ClAMMTest3136517663()
+        {
+            // Arrange
+            var now = DateTimeOffset.UtcNow;
+            var older = now.AddMinutes(-1);
+            var pool = JsonConvert.DeserializeObject<AVMTradeReporter.Model.Data.Pool>(File.ReadAllText("Data/pool-3136517663.json"));
+            
+            Assert.That(pool.VirtualAmountA, Is.EqualTo(1423509.4775349025526735010167m));
+            Assert.That(pool.VirtualAmountB, Is.EqualTo(9698934.902364655801809186706m));
 
         }
     }
