@@ -81,6 +81,10 @@ namespace AVMTradeReporter.Model.Data
         {
             get
             {
+                if (this.Protocol == DEXProtocol.Biatec)
+                {
+                    return Convert.ToDecimal(A) / 1000000000;
+                }
                 return Convert.ToDecimal(A) / Convert.ToDecimal(Math.Pow(10, Convert.ToDouble(AssetADecimals ?? 0))) + Convert.ToDecimal(AF) / Convert.ToDecimal(Math.Pow(10, Convert.ToDouble(AssetADecimals ?? 0)));
             }
         }
@@ -119,6 +123,10 @@ namespace AVMTradeReporter.Model.Data
         {
             get
             {
+                if(this.Protocol == DEXProtocol.Biatec)
+                {
+                    return Convert.ToDecimal(B) / 1000000000;
+                }
                 return Convert.ToDecimal(B) / Convert.ToDecimal(Math.Pow(10, Convert.ToDouble(AssetBDecimals ?? 0))) + Convert.ToDecimal(BF) / Convert.ToDecimal(Math.Pow(10, Convert.ToDouble(AssetBDecimals ?? 0)));
             }
         }
