@@ -1,5 +1,6 @@
 ﻿using Algorand.Algod;
 using AVMTradeReporter.Extensions;
+using AVMTradeReporter.Model.Data.Enums;
 using AVMTradeReporter.Repository;
 using System.Text;
 
@@ -80,11 +81,11 @@ namespace AVMTradeReporter.Processors.Pool
                 {
                     PoolAddress = address,
                     PoolAppId = appId,
-                    Protocol = AVMTradeReporter.Model.Data.DEXProtocol.Tiny,
+                    Protocol = DEXProtocol.Tiny,
                     A = A.Value.Uint,
                     B = B.Value.Uint,
                     AssetIdLP = LTID.Value.Uint,
-                    AMMType = Model.Data.AMMType.OldAMM,
+                    AMMType = AMMType.OldAMM,
                     Timestamp = DateTimeOffset.Now,
                     ApprovalProgramHash = hash,
                     LPFee = FEE_BPS.Value.Uint / 10000m,
@@ -98,9 +99,9 @@ namespace AVMTradeReporter.Processors.Pool
             }
             else
             {
-                if (pool.Protocol != Model.Data.DEXProtocol.Tiny)
+                if (pool.Protocol != DEXProtocol.Tiny)
                 {
-                    pool.Protocol = Model.Data.DEXProtocol.Tiny;
+                    pool.Protocol = DEXProtocol.Tiny;
                     updated = true;
                 }
                 if (pool.A != A.Value.Uint)
@@ -153,9 +154,9 @@ namespace AVMTradeReporter.Processors.Pool
                     pool.AssetIdB = assetBId;
                     updated = true;
                 }
-                if (pool.AMMType != Model.Data.AMMType.OldAMM)
+                if (pool.AMMType != AMMType.OldAMM)
                 {
-                    pool.AMMType = Model.Data.AMMType.OldAMM;
+                    pool.AMMType = AMMType.OldAMM;
                     updated = true;
                 }
 

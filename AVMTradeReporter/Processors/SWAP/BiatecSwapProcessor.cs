@@ -3,6 +3,7 @@ using Algorand.Algod.Model.Transactions;
 using AVM.ClientGenerator.Core;
 using AVMTradeReporter.Model;
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Model.Data.Enums;
 using System.Threading;
 
 namespace AVMTradeReporter.Processors.SWAP
@@ -18,7 +19,7 @@ namespace AVMTradeReporter.Processors.SWAP
             Digest? txGroup,
             string topTxId,
             Address trader,
-            TradeState tradeState
+            TxState tradeState
             )
         {
             if (current.Tx is ApplicationNoopTransaction appCallTx)
@@ -45,7 +46,7 @@ namespace AVMTradeReporter.Processors.SWAP
 
                     if (current.Detail?.InnerTxns == null)
                     {
-                        if (tradeState == TradeState.Confirmed) return null;
+                        if (tradeState == TxState.Confirmed) return null;
                         AssetIdIn = inAssetTransferTx.XferAsset;
                         AssetIdOut = 0;
                         AssetAmountIn = inAssetTransferTx.AssetAmount;
@@ -87,7 +88,7 @@ namespace AVMTradeReporter.Processors.SWAP
                     // from native
                     if (current.Detail?.InnerTxns == null)
                     {
-                        if (tradeState == TradeState.Confirmed) return null;
+                        if (tradeState == TxState.Confirmed) return null;
 
                         AssetIdIn = 0;
                         AssetIdOut = 0;

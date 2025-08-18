@@ -1,6 +1,7 @@
 using AVMTradeReporter.Hubs;
 using AVMTradeReporter.Model.Configuration;
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Model.Data.Enums;
 using AVMTradeReporter.Processors.Pool;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Core.Bulk;
@@ -343,7 +344,7 @@ namespace AVMTradeReporter.Repository
         public async Task UpdatePoolFromTrade(Trade trade, CancellationToken cancellationToken)
         {
             // Only update from confirmed tradeError refreshing pools
-            if (trade.TradeState != TradeState.Confirmed)
+            if (trade.TradeState != TxState.Confirmed)
             {
                 _logger.LogDebug("Skipping pool update from unconfirmed trade {txId}", trade.TxId);
                 return;
@@ -421,7 +422,7 @@ namespace AVMTradeReporter.Repository
         public async Task UpdatePoolFromLiquidity(Liquidity liquidity, CancellationToken cancellationToken)
         {
             // Only update from confirmed liquidity updates
-            if (liquidity.TxState != TradeState.Confirmed)
+            if (liquidity.TxState != TxState.Confirmed)
             {
                 _logger.LogDebug("Skipping pool update from unconfirmed liquidity {txId}", liquidity.TxId);
                 return;

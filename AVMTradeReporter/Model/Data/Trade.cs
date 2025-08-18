@@ -1,20 +1,11 @@
 ﻿using Algorand;
+using AVMTradeReporter.Model.Data.Enums;
 using System.Text.Json.Serialization;
 
 namespace AVMTradeReporter.Model.Data
 {
-    [JsonConverter(typeof(JsonStringEnumConverter))]
-    public enum DEXProtocol
-    {
-        Pact,
-        Tiny,
-        Biatec
-    }
-    public enum TradeState
-    {
-        TxPool,
-        Confirmed
-    }
+
+
     public class Trade
     {
         public ulong AssetIdIn { get; set; }
@@ -32,7 +23,7 @@ namespace AVMTradeReporter.Model.Data
         public ulong PoolAppId { get; set; }
         public string TopTxId { get; set; } = string.Empty;
         [JsonConverter(typeof(JsonStringEnumConverter))]
-        public TradeState TradeState { get; set; } = TradeState.TxPool;
+        public TxState TradeState { get; set; } = TxState.TxPool;
 
         public ulong A { get; set; }
         public ulong B { get; set; }

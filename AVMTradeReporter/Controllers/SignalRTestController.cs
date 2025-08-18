@@ -1,5 +1,6 @@
 using AVMTradeReporter.Hubs;
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Model.Data.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
@@ -89,7 +90,7 @@ namespace AVMTradeReporter.Controllers
                     PoolAddress = "TEST_POOL",
                     PoolAppId = 123456,
                     Timestamp = DateTimeOffset.UtcNow,
-                    TradeState = TradeState.TxPool,
+                    TradeState = TxState.TxPool,
                     BlockId = 0,
                     TxGroup = "TEST_GROUP",
                     TopTxId = "TEST_TOP_TX"

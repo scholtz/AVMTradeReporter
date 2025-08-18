@@ -1,6 +1,7 @@
 ﻿using Algorand;
 using Algorand.Algod.Model.Transactions;
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Model.Data.Enums;
 
 namespace AVMTradeReporter.Processors.Liqudity
 {
@@ -16,7 +17,7 @@ namespace AVMTradeReporter.Processors.Liqudity
             Digest? txGroup,
             string topTxId,
             Address liqudityProvider,
-            TradeState tradeState
+            TxState tradeState
             );
     }
 }

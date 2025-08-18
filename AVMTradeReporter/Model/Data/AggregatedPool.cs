@@ -1,3 +1,4 @@
+using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -69,6 +70,9 @@ namespace AVMTradeReporter.Model.Data
 
             foreach (var g in grouped)
             {
+                Console.WriteLine(JsonConvert.SerializeObject(g.Sum(p => p.VirtualAmountA)));
+                Console.WriteLine(JsonConvert.SerializeObject(g.Sum(p => p.VirtualAmountB)));
+                Console.WriteLine(JsonConvert.SerializeObject(g));
                 yield return new AggregatedPool
                 {
                     AssetIdA = g.Key.A,

@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Model.Data.Enums;
 
 namespace AVMTradeReporterTests.Model
 {
@@ -28,7 +28,7 @@ namespace AVMTradeReporterTests.Model
                 B = 4_000_000_000,  // 4.0
                 BF = 0,   // +0.5 -> 4.5
                 Protocol = DEXProtocol.Biatec,
-                AMMType = AVMTradeReporter.Model.Data.AMMType.ConcentratedLiquidityAMM,
+                AMMType = AMMType.ConcentratedLiquidityAMM,
                 Timestamp = now
             };
 

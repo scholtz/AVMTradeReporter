@@ -1,12 +1,9 @@
-﻿using System.Text.Json.Serialization;
+﻿using AVMTradeReporter.Model.Data.Enums;
+using System.Text.Json.Serialization;
 
 namespace AVMTradeReporter.Model.Data
 {
-    public enum AMMType
-    {
-        OldAMM,
-        ConcentratedLiquidityAMM
-    }
+    
     public class Pool
     {
         public string PoolAddress { get; set; } = string.Empty;
@@ -51,29 +48,38 @@ namespace AVMTradeReporter.Model.Data
         {
             get
             {
-                if (AMMType == Data.AMMType.ConcentratedLiquidityAMM)
+                try
                 {
-                    // calculate virtual amount for concentrated liquidity AMM
-                    if (PMin.HasValue && PMax.HasValue && A.HasValue && B.HasValue)
+                    if (AMMType == Enums.AMMType.ConcentratedLiquidityAMM)
                     {
-                        var a = Convert.ToDecimal(A.Value) / 1000000000;
-                        var b = Convert.ToDecimal(B.Value) / 1000000000;
-                        var p = Convert.ToDecimal(Math.Sqrt(Convert.ToDouble(PMin)));
-                        var r = Convert.ToDecimal(Math.Sqrt(Convert.ToDouble(PMax)));
-                        var q = p / r - 1;
-                        var eb = a * p + b / r;
-                        var d = eb * eb - 4 * a * b * q;
-                        var c = 2 * q;
-                        var l1 = (-eb - Convert.ToDecimal(Math.Sqrt(Convert.ToDouble(d)))) / c;
-                        var l2 = (-eb + Convert.ToDecimal(Math.Sqrt(Convert.ToDouble(d)))) / c;
-                        var l = Math.Max(l1, l2);
-                        return a + l / r;
+                        // calculate virtual amount for concentrated liquidity AMM
+                        if (PMin.HasValue && PMax.HasValue && A.HasValue && B.HasValue)
+                        {
+                            var a = Convert.ToDecimal(A.Value) / 1000000000;
+                            var b = Convert.ToDecimal(B.Value) / 1000000000;
+                            var p = Convert.ToDecimal(Math.Sqrt(Convert.ToDouble(PMin)));
+                            var r = Convert.ToDecimal(Math.Sqrt(Convert.ToDouble(PMax)));
+                            var q = p / r - 1;
+                            var eb = a * p + b / r;
+                            var d = eb * eb - 4 * a * b * q;
+                            var c = 2 * q;
+                            var l1 = (-eb - Convert.ToDecimal(Math.Sqrt(Convert.ToDouble(d)))) / c;
+                            var l2 = (-eb + Convert.ToDecimal(Math.Sqrt(Convert.ToDouble(d)))) / c;
+                            var l = Math.Max(l1, l2);
+                            return a + l / r;
+                        }
+                        return 0;
                     }
-                    return 0;
+                    else
+                    {
+                        return RealAmountA;
+                    }
                 }
-                else
+                catch (Exception ex)
                 {
-                    return RealAmountA;
+                    // Log the exception or handle it as needed
+                    Console.Error.WriteLine($"Error calculating VirtualAmountA: {ex.Message}");
+                    return 0;
                 }
             }
         }
@@ -92,30 +98,40 @@ namespace AVMTradeReporter.Model.Data
         {
             get
             {
-                if (AMMType == Data.AMMType.ConcentratedLiquidityAMM)
+                try
                 {
-                    // calculate virtual amount for concentrated liquidity AMM
-                    if (PMin.HasValue && PMax.HasValue && A.HasValue && B.HasValue)
+                    if (AMMType == Enums.AMMType.ConcentratedLiquidityAMM)
                     {
-                        var a = Convert.ToDecimal(A.Value) / 1000000000;
-                        var b = Convert.ToDecimal(B.Value) / 1000000000;
-                        var p = Convert.ToDecimal(Math.Sqrt(Convert.ToDouble(PMin)));
-                        var r = Convert.ToDecimal(Math.Sqrt(Convert.ToDouble(PMax)));
-                        var q = p / r - 1;
-                        var eb = a * p + b / r;
-                        var d = eb * eb - 4 * a * b * q;
-                        var c = 2 * q;
-                        var l = (-eb - Convert.ToDecimal(Math.Sqrt(Convert.ToDouble(d)))) / c;
-                        //var l = Convert.ToDecimal(Math.Sqrt(Convert.ToDouble(x)));
+                        // calculate virtual amount for concentrated liquidity AMM
+                        if (PMin.HasValue && PMax.HasValue && A.HasValue && B.HasValue)
+                        {
+                            var a = Convert.ToDecimal(A.Value) / 1000000000;
+                            var b = Convert.ToDecimal(B.Value) / 1000000000;
+                            var p = Convert.ToDecimal(Math.Sqrt(Convert.ToDouble(PMin)));
+                            var r = Convert.ToDecimal(Math.Sqrt(Convert.ToDouble(PMax)));
+                            var q = p / r - 1;
+                            var eb = a * p + b / r;
+                            var d = eb * eb - 4 * a * b * q;
+                            var c = 2 * q;
+                            var l = (-eb - Convert.ToDecimal(Math.Sqrt(Convert.ToDouble(d)))) / c;
+                            //var l = Convert.ToDecimal(Math.Sqrt(Convert.ToDouble(x)));
 
-                        return b + l * p;
-                        //return Convert.ToDecimal(B.Value) / 1000000000 + Convert.ToDecimal((Convert.ToDouble(L.Value / 1000000000)) * Math.Sqrt(Convert.ToDouble(PMin.Value)));
+                            return b + l * p;
+                            //return Convert.ToDecimal(B.Value) / 1000000000 + Convert.ToDecimal((Convert.ToDouble(L.Value / 1000000000)) * Math.Sqrt(Convert.ToDouble(PMin.Value)));
+                        }
+                        return 0;
                     }
-                    return 0;
+                    else
+                    {
+                        return RealAmountB;
+                    }
+
                 }
-                else
+                catch (Exception ex)
                 {
-                    return RealAmountB;
+                    // Log the exception or handle it as needed
+                    Console.Error.WriteLine($"Error calculating VirtualAmountA: {ex.Message}");
+                    return 0;
                 }
             }
         }

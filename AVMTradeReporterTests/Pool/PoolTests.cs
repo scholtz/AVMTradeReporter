@@ -1,4 +1,5 @@
-﻿using System;
+﻿using AVMTradeReporter.Model.Data.Enums;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -23,7 +24,7 @@ namespace AVMTradeReporterTests.Pool
             //    };
             var pool = new AVMTradeReporter.Model.Data.Pool
             {
-                AMMType = AVMTradeReporter.Model.Data.AMMType.ConcentratedLiquidityAMM,
+                AMMType = AMMType.ConcentratedLiquidityAMM,
                 A = 419186_162941759,
                 B = 31058_727092031,
                 PMin = 1.4m,

@@ -1,5 +1,6 @@
 ﻿using Algorand.Algod;
 using AVMTradeReporter.Extensions;
+using AVMTradeReporter.Model.Data.Enums;
 using AVMTradeReporter.Repository;
 using System.Text;
 using static Org.BouncyCastle.Math.EC.ECCurve;
@@ -109,12 +110,12 @@ namespace AVMTradeReporter.Processors.Pool
                 {
                     PoolAddress = address,
                     PoolAppId = appId,
-                    Protocol = AVMTradeReporter.Model.Data.DEXProtocol.Biatec,
+                    Protocol = DEXProtocol.Biatec,
                     A = a,
                     B = b,
                     L = l,
                     AssetIdLP = LTID.Value.Uint,
-                    AMMType = Model.Data.AMMType.ConcentratedLiquidityAMM,
+                    AMMType = AMMType.ConcentratedLiquidityAMM,
                     Timestamp = DateTimeOffset.Now,
                     ApprovalProgramHash = hash,
                     LPFee = lpFee,
@@ -131,9 +132,9 @@ namespace AVMTradeReporter.Processors.Pool
             }
             else
             {
-                if (pool.Protocol != Model.Data.DEXProtocol.Biatec)
+                if (pool.Protocol != DEXProtocol.Biatec)
                 {
-                    pool.Protocol = Model.Data.DEXProtocol.Biatec;
+                    pool.Protocol = DEXProtocol.Biatec;
                     updated = true;
                 }
                 if (pool.A != a)
@@ -209,9 +210,9 @@ namespace AVMTradeReporter.Processors.Pool
                     updated = true;
                 }
 
-                if (pool.AMMType != Model.Data.AMMType.ConcentratedLiquidityAMM)
+                if (pool.AMMType != AMMType.ConcentratedLiquidityAMM)
                 {
-                    pool.AMMType = Model.Data.AMMType.ConcentratedLiquidityAMM;
+                    pool.AMMType = AMMType.ConcentratedLiquidityAMM;
                     updated = true;
                 }
 

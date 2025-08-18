@@ -1,5 +1,6 @@
 using AVMTradeReporter.Model.Configuration;
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Model.Data.Enums;
 using AVMTradeReporter.Processors.Pool;
 using AVMTradeReporter.Repository;
 using Microsoft.Extensions.Logging;
@@ -120,7 +121,7 @@ namespace AVMTradeReporterTests.Model
                 B = 5_000_000,  // 2.0
                 BF = 0,   // +0.2 -> 2.2
                 Protocol = DEXProtocol.Pact,
-                AMMType = AVMTradeReporter.Model.Data.AMMType.OldAMM,
+                AMMType = AMMType.OldAMM,
                 Timestamp = older
             };
 
@@ -137,7 +138,7 @@ namespace AVMTradeReporterTests.Model
                 B = 6_000_000_000,  // 4.0
                 BF = 0,   // +0.5 -> 4.5
                 Protocol = DEXProtocol.Biatec,
-                AMMType = AVMTradeReporter.Model.Data.AMMType.ConcentratedLiquidityAMM,
+                AMMType = AMMType.ConcentratedLiquidityAMM,
                 Timestamp = now
             };
 

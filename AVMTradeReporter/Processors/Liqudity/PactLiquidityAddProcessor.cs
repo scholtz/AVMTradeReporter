@@ -3,6 +3,7 @@ using Algorand.Algod.Model.Transactions;
 using AVM.ClientGenerator.Core;
 using AVMTradeReporter.Model;
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Model.Data.Enums;
 using System.Diagnostics;
 using System.Threading;
 
@@ -20,7 +21,7 @@ namespace AVMTradeReporter.Processors.Liqudity
             Digest? txGroup,
             string topTxId,
             Address liqudityProvider,
-            TradeState tradeState
+            TxState tradeState
             )
         {
             if (current.Tx is ApplicationNoopTransaction appCallTx)

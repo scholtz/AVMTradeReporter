@@ -1,12 +1,9 @@
-﻿using System.Text.Json.Serialization;
+﻿using AVMTradeReporter.Model.Data.Enums;
+using System.Text.Json.Serialization;
 
 namespace AVMTradeReporter.Model.Data
 {
-    public enum LiqudityDirection
-    {
-        DepositLiquidity,
-        WithdrawLiquidity
-    }
+    
     public class Liquidity
     {
         [JsonConverter(typeof(JsonStringEnumConverter))]
@@ -35,6 +32,6 @@ namespace AVMTradeReporter.Model.Data
         public ulong PoolAppId { get; set; }
         public string TopTxId { get; set; } = string.Empty;
         [JsonConverter(typeof(JsonStringEnumConverter))]
-        public TradeState TxState { get; set; } = TradeState.TxPool;
+        public TxState TxState { get; set; } = TxState.TxPool;
     }
 }

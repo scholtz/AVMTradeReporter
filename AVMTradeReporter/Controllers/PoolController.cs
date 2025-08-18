@@ -1,4 +1,5 @@
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Model.Data.Enums;
 using AVMTradeReporter.Processors.Pool;
 using AVMTradeReporter.Repository;
 using Microsoft.AspNetCore.Authorization;

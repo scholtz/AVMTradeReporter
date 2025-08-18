@@ -1,6 +1,7 @@
 ﻿using Algorand;
 using Algorand.Algod.Model.Transactions;
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Model.Data.Enums;
 
 namespace AVMTradeReporter.Processors.SWAP
 {
@@ -15,7 +16,7 @@ namespace AVMTradeReporter.Processors.SWAP
             Digest? txGroup,
             string topTxId,
             Address trader,
-            TradeState tradeState
+            TxState tradeState
             );
     }
 }

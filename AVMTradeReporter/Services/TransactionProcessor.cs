@@ -2,7 +2,7 @@
 using Algorand.Algod.Model;
 using Algorand.Algod.Model.Transactions;
 using AVMTradeReporter.Model;
-using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Model.Data.Enums;
 using AVMTradeReporter.Processors;
 using AVMTradeReporter.Processors.Liqudity;
 using AVMTradeReporter.Processors.SWAP;
@@ -64,7 +64,7 @@ namespace AVMTradeReporter.Services
                         {
                             currTx.Tx.FillInParamsFromBlockHeader(block.Block);
                             var txId = currTx.Tx.TxID();
-                            await this.ProcessTransaction(currTx, prevTx1, prevTx2, block.Block, currTx.Tx.Group, txId, currTx.Tx.Sender, TradeState.Confirmed, tradeService, liquidityService, cancellationToken);
+                            await this.ProcessTransaction(currTx, prevTx1, prevTx2, block.Block, currTx.Tx.Group, txId, currTx.Tx.Sender, TxState.Confirmed, tradeService, liquidityService, cancellationToken);
                         }
                         catch (Exception exc)
                         {
@@ -89,7 +89,7 @@ namespace AVMTradeReporter.Services
             Digest? txGroup,
             string topTxId,
             Address trader,
-            TradeState tradeState,
+            TxState tradeState,
             ITradeService tradeService,
             ILiquidityService liquidityService,
             CancellationToken cancellationToken

@@ -4,6 +4,7 @@ using Algorand.Gossip;
 using AVMTradeReporter.Model;
 using AVMTradeReporter.Model.Configuration;
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Model.Data.Enums;
 using AVMTradeReporter.Repository;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
@@ -119,7 +120,7 @@ namespace AVMTradeReporter.Services
                         {
                             //currTx.Tx.FillInParamsFromBlockHeader(block.Block);
                             var currTxId = currTx.Tx.TxID();
-                            await _transactionProcessor.ProcessTransaction(currTx, prevTx1, prevTx2, null, currTx.Tx.Group, currTxId, currTx.Tx.Sender, TradeState.TxPool, this, this, cancellationTokenSource.Token);
+                            await _transactionProcessor.ProcessTransaction(currTx, prevTx1, prevTx2, null, currTx.Tx.Group, currTxId, currTx.Tx.Sender, TxState.TxPool, this, this, cancellationTokenSource.Token);
                         }
                         catch (Exception exc)
                         {
