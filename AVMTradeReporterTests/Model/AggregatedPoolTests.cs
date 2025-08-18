@@ -11,7 +11,7 @@ namespace AVMTradeReporterTests.Model
         public void FromPools_ReturnsEmpty_ForNullOrEmpty()
         {
             // Null input
-            var resultNull = AggregatedPool.FromPools(null).ToArray();
+            var resultNull = AggregatedPool.FromPools(null!).ToArray();
             Assert.That(resultNull.Length, Is.EqualTo(0));
 
             // Empty input
@@ -95,6 +95,66 @@ namespace AVMTradeReporterTests.Model
             Assert.That(agg21.Id, Is.EqualTo("2-1"));
         }
 
+
+        [Test]
+        public void FromPools_AggregatesClAMMWithOldAMM()
+        {
+            // Arrange
+            var now = DateTimeOffset.UtcNow;
+            var older = now.AddMinutes(-1);
+
+            var p1 = new AVMTradeReporter.Model.Data.Pool
+            {
+                AssetIdA = 1,
+                AssetADecimals = 6,
+                AssetIdB = 2,
+                AssetBDecimals = 6,
+                A = 4_000_000,  // 1.0
+                AF = 0,   // +0.1 -> 1.1
+                B = 5_000_000,  // 2.0
+                BF = 0,   // +0.2 -> 2.2
+                Protocol = DEXProtocol.Pact,
+                AMMType = AVMTradeReporter.Model.Data.AMMType.OldAMM,
+                Timestamp = older
+            };
+
+            var p2 = new AVMTradeReporter.Model.Data.Pool
+            {
+                AssetIdA = 1,
+                AssetADecimals = 6,
+                AssetIdB = 2,
+                AssetBDecimals = 6,
+                PMin = 1,
+                PMax = 2,
+                A = 5_000_000_000,  // 3.0
+                AF = 0,   // +0.3 -> 3.3
+                B = 6_000_000_000,  // 4.0
+                BF = 0,   // +0.5 -> 4.5
+                Protocol = DEXProtocol.Biatec,
+                AMMType = AVMTradeReporter.Model.Data.AMMType.ConcentratedLiquidityAMM,
+                Timestamp = now
+            };
+
+            // Act
+            var result = AggregatedPool.FromPools(new AVMTradeReporter.Model.Data.Pool[] { p1, p2  })
+                .OrderBy(r => r.AssetIdA).ThenBy(r => r.AssetIdB).ToArray();
+
+            // Assert two aggregated entries: (1,2) and (2,1)
+            Assert.That(result.Length, Is.EqualTo(2));
+
+            var agg12 = result.Single(r => r.AssetIdA == 1 && r.AssetIdB == 2);
+
+            // Values are derived from virtual amounts (equal to real amounts for non-concentrated AMM)
+            // For (1,2): A = p1.A_real (1.1) + reverse(p2).A_real (4.5) = 5.6
+            //            B = p1.B_real (2.2) + reverse(p2).B_real (3.3) = 5.5
+            Assert.That(agg12.A, Is.EqualTo(33.411611892693684301049159175M));
+            Assert.That(agg12.B, Is.EqualTo(45.523232618035869447454225347M));
+            Assert.That(agg12.TVL_A, Is.EqualTo(9m));
+            Assert.That(agg12.TVL_B, Is.EqualTo(11m));
+            Assert.That(agg12.PoolCount, Is.EqualTo(2m));
+            Assert.That(agg12.Id, Is.EqualTo("1-2"));
+
+        }
         [Test]
         public void FromPools_IgnoresPoolsMissingAmountsOrAssetIds()
         {

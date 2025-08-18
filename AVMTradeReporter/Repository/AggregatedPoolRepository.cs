@@ -143,6 +143,28 @@ namespace AVMTradeReporter.Repository
             }
             return filteredPools.Skip(offset).Take(size);
         }
+        /// <summary>
+        /// Retrieves the aggregated pool associated with the specified asset pair.
+        /// </summary>
+        /// <remarks>The method checks for the aggregated pool in both possible orderings of the asset
+        /// pair  (i.e., <paramref name="assetIdA"/> followed by <paramref name="assetIdB"/>, and vice versa).</remarks>
+        /// <param name="assetIdA">The ID of the first asset in the pair.</param>
+        /// <param name="assetIdB">The ID of the second asset in the pair.</param>
+        /// <returns>An <see cref="AggregatedPool"/> object representing the aggregated pool for the specified asset pair,  or
+        /// <see langword="null"/> if no matching pool is found.</returns>
+        public AggregatedPool? GetAggregatedPool(ulong assetIdA, ulong assetIdB)
+        {
+            if (_cache.TryGetValue((assetIdA, assetIdB), out var pool))
+            {
+                return pool;
+            }
+            if (_cache.TryGetValue((assetIdB, assetIdA), out pool))
+            {
+                return pool;
+            }
+            return null; // Not found
+        }
+
         private async Task StoreAndPublishAsync(AggregatedPool agg, CancellationToken cancellationToken)
         {
             _cache[(agg.AssetIdA, agg.AssetIdB)] = agg;

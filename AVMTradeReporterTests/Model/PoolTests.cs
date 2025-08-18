@@ -1,0 +1,40 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using AVMTradeReporter.Model.Data;
+
+namespace AVMTradeReporterTests.Model
+{
+    public class PoolTests
+    {
+
+        [Test]
+        public void ClAMMTest()
+        {
+            // Arrange
+            var now = DateTimeOffset.UtcNow;
+            var older = now.AddMinutes(-1);
+
+            var pool = new AVMTradeReporter.Model.Data.Pool
+            {
+                AssetIdA = 1,
+                AssetADecimals = 6,
+                AssetIdB = 2,
+                AssetBDecimals = 6,
+                PMin = 1,
+                PMax = 2,
+                A = 3_000_000_000,  // 3.0
+                AF = 0,   // +0.3 -> 3.3
+                B = 4_000_000_000,  // 4.0
+                BF = 0,   // +0.5 -> 4.5
+                Protocol = DEXProtocol.Biatec,
+                AMMType = AVMTradeReporter.Model.Data.AMMType.ConcentratedLiquidityAMM,
+                Timestamp = now
+            };
+
+            Assert.That(pool.VirtualAmountA, Is.EqualTo(18.401179052349389741062655345m));
+            Assert.That(pool.VirtualAmountB, Is.EqualTo(25.780556292368994838666032793m));
+
+        }
+    }
+}

@@ -54,7 +54,7 @@ namespace AVMTradeReporter.Model.Data
                 if (AMMType == Data.AMMType.ConcentratedLiquidityAMM)
                 {
                     // calculate virtual amount for concentrated liquidity AMM
-                    if (PMin.HasValue && PMax.HasValue && A.HasValue && B.HasValue && L.HasValue)
+                    if (PMin.HasValue && PMax.HasValue && A.HasValue && B.HasValue)
                     {
                         var a = Convert.ToDecimal(A.Value) / 1000000000;
                         var b = Convert.ToDecimal(B.Value) / 1000000000;
@@ -95,7 +95,7 @@ namespace AVMTradeReporter.Model.Data
                 if (AMMType == Data.AMMType.ConcentratedLiquidityAMM)
                 {
                     // calculate virtual amount for concentrated liquidity AMM
-                    if (PMin.HasValue && PMax.HasValue && A.HasValue && B.HasValue && L.HasValue)
+                    if (PMin.HasValue && PMax.HasValue && A.HasValue && B.HasValue)
                     {
                         var a = Convert.ToDecimal(A.Value) / 1000000000;
                         var b = Convert.ToDecimal(B.Value) / 1000000000;
@@ -123,7 +123,7 @@ namespace AVMTradeReporter.Model.Data
         {
             get
             {
-                if(this.Protocol == DEXProtocol.Biatec)
+                if (this.Protocol == DEXProtocol.Biatec)
                 {
                     return Convert.ToDecimal(B) / 1000000000;
                 }
@@ -147,7 +147,7 @@ namespace AVMTradeReporter.Model.Data
                 BF = AF,
                 L = L,
                 PMin = PMin == null ? null : 1 / PMin,
-                PMax = PMax == null ? null : 1 /PMax,
+                PMax = PMax == null ? null : 1 / PMax,
                 VerificationClass = VerificationClass,
                 Protocol = Protocol,
                 Timestamp = Timestamp,

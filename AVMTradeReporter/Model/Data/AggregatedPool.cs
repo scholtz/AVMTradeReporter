@@ -25,7 +25,7 @@ namespace AVMTradeReporter.Model.Data
         public ulong AssetIdB { get; set; }
 
         /// <summary>
-        /// Total aggregated amount of asset A across all pools with this pair.
+        /// Total aggregated amount of asset A across all pools with this pair form virtual pool amount.
         /// </summary>
         public decimal A { get; set; }
 
@@ -64,7 +64,7 @@ namespace AVMTradeReporter.Model.Data
 
             var grouped = pools
                 .Where(p => p.AssetIdA.HasValue && p.AssetIdB.HasValue && p.A.HasValue && p.B.HasValue)
-                .Union(pools.Select(p=>p.Reverse()).Where(p => p.AssetIdA.HasValue && p.AssetIdB.HasValue && p.A.HasValue && p.B.HasValue))
+                .Union(pools.Select(p => p.Reverse()).Where(p => p.AssetIdA.HasValue && p.AssetIdB.HasValue && p.A.HasValue && p.B.HasValue))
                 .GroupBy(p => new { A = p.AssetIdA!.Value, B = p.AssetIdB!.Value });
 
             foreach (var g in grouped)
@@ -73,10 +73,10 @@ namespace AVMTradeReporter.Model.Data
                 {
                     AssetIdA = g.Key.A,
                     AssetIdB = g.Key.B,
-                    A = (ulong)g.Sum(p => p.VirtualAmountA),
-                    B = (ulong)g.Sum(p => p.VirtualAmountB),
-                    TVL_A = g.Sum(p => Convert.ToDecimal(p.RealAmountA)),
-                    TVL_B = g.Sum(p => Convert.ToDecimal(p.RealAmountB)),
+                    A = g.Sum(p => p.VirtualAmountA),
+                    B = g.Sum(p => p.VirtualAmountB),
+                    TVL_A = g.Sum(p => p.RealAmountA),
+                    TVL_B = g.Sum(p => p.RealAmountB),
                     PoolCount = g.Count(),
                     LastUpdated = g.Max(p => p.Timestamp)
                 };

@@ -84,5 +84,10 @@ namespace AVMTradeReporterTests
         {
             return null;
         }
+
+        public Task UpdateAggregatedPool(ulong aId, ulong bId, CancellationToken cancellationToken)
+        {
+            throw new NotImplementedException();
+        }
     }
 }

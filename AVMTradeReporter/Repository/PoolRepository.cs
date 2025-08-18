@@ -311,10 +311,7 @@ namespace AVMTradeReporter.Repository
                 // Update aggregated view for this asset pair if asset ids are present
                 if (pool.AssetIdA.HasValue && pool.AssetIdB.HasValue)
                 {
-                    var aId = pool.AssetIdA.Value;
-                    var bId = pool.AssetIdB.Value;
-                    var poolsForPair = _poolsCache.Values.Where(p => (p.AssetIdA == aId && p.AssetIdB == bId) || (p.AssetIdA == bId && p.AssetIdB == aId)).ToList();
-                    await _aggregatedPoolRepository.UpdateForPairAsync(aId, bId, poolsForPair, cancellationToken);
+                    await UpdateAggregatedPool(pool.AssetIdA.Value, pool.AssetIdB.Value, cancellationToken);
                 }
 
                 return true;
@@ -323,6 +320,23 @@ namespace AVMTradeReporter.Repository
             {
                 _logger.LogError(ex, "Failed to store pool");
                 return false;
+            }
+        }
+        public async Task UpdateAggregatedPool(ulong aId, ulong bId, CancellationToken cancellationToken)
+        {
+            await EnsureInitialized(cancellationToken);
+            try
+            {
+                // Update aggregated pool for this asset pair
+                var poolsForPair = _poolsCache.Values.Where(p => (p.AssetIdA == aId && p.AssetIdB == bId) || (p.AssetIdA == bId && p.AssetIdB == aId));
+                if (poolsForPair != null)
+                {
+                    await _aggregatedPoolRepository.UpdateForPairAsync(aId, bId, poolsForPair, cancellationToken);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to update aggregated pool for assets {assetIdA} and {assetIdB}", aId, bId);
             }
         }
 

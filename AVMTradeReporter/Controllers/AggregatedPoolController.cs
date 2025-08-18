@@ -10,11 +10,13 @@ namespace AVMTradeReporter.Controllers
     [Route("api/aggregated-pool")]
     public class AggregatedPoolController : ControllerBase
     {
-        private readonly AggregatedPoolRepository _poolRepository;
+        private readonly AggregatedPoolRepository _aggregatedPoolRepository;
+        private readonly PoolRepository _poolRepository;
         private readonly ILogger<AggregatedPoolController> _logger;
 
-        public AggregatedPoolController(AggregatedPoolRepository poolRepository, ILogger<AggregatedPoolController> logger)
+        public AggregatedPoolController(AggregatedPoolRepository aggregatedPoolRepository, PoolRepository poolRepository, ILogger<AggregatedPoolController> logger)
         {
+            _aggregatedPoolRepository = aggregatedPoolRepository;
             _poolRepository = poolRepository;
             _logger = logger;
         }
@@ -30,7 +32,7 @@ namespace AVMTradeReporter.Controllers
         {
             try
             {
-                var pools = _poolRepository.GetAllAggregatedPools(assetIdA, assetIdB, offset, size);
+                var pools = _aggregatedPoolRepository.GetAllAggregatedPools(assetIdA, assetIdB, offset, size);
                 return Ok(pools);
             }
             catch (Exception ex)
@@ -40,5 +42,25 @@ namespace AVMTradeReporter.Controllers
             }
         }
 
+        /// <summary>
+        /// Update and retrieve aggregated pool
+        /// </summary>
+        /// <returns>AggregatedPool</returns>
+        [HttpGet("reload")]
+        public async Task<ActionResult<AggregatedPool>> Reload([FromQuery] ulong assetIdA, [FromQuery] ulong assetIdB)
+        {
+            try
+            {
+                var cancellationToken = HttpContext.RequestAborted;
+                await _poolRepository.UpdateAggregatedPool(assetIdA, assetIdB, cancellationToken);
+                var pool = _aggregatedPoolRepository.GetAggregatedPool(assetIdA, assetIdB);
+                return Ok(pool);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to update or retrieve pool");
+                return StatusCode(500, new { error = "Failed to update or retrieve pool" });
+            }
+        }
     }
 }
