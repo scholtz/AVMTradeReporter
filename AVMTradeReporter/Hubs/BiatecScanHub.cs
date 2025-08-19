@@ -146,7 +146,7 @@ namespace AVMTradeReporter.Hubs
                 }
 
                 User2Subscription.TryRemove(userId, out _);
-                await Clients.Caller.SendAsync("Unsubscribed");
+                await Clients.Caller.SendAsync(BiatecScanHub.Subscriptions.INFO, "Unsubscribed");
                 Console.WriteLine($"Successfully unsubscribed user '{userId}'");
             }
             catch (Exception e)
