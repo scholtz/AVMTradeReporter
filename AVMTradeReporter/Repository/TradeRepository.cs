@@ -205,7 +205,7 @@ namespace AVMTradeReporter.Repository
                             subscribedClientsConnections.Add(userId);
                         }
                     }
-                    await _hubContext.Clients.Users(subscribedClientsConnections).SendAsync("TradeUpdated", trade, cancellationToken);
+                    await _hubContext.Clients.Users(subscribedClientsConnections).SendAsync(BiatecScanHub.Subscriptions.TRADE, trade, cancellationToken);
                 }
 
                 _logger.LogInformation("Published {tradeCount} trades to SignalR hub", trades.Length);

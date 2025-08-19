@@ -162,7 +162,7 @@ namespace AVMTradeReporter.Repository
                             subscribedClientsConnections.Add(userId);
                         }
                     }
-                    await _hubContext.Clients.Users(subscribedClientsConnections).SendAsync("LiquidityUpdated", liquidityUpdate, cancellationToken);
+                    await _hubContext.Clients.Users(subscribedClientsConnections).SendAsync(BiatecScanHub.Subscriptions.LIQUIDITY, liquidityUpdate, cancellationToken);
                 }
 
                 _logger.LogInformation("Published {liquidityCount} liquidity updates to SignalR hub", liquidityUpdates.Length);

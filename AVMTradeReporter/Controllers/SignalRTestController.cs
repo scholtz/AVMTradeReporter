@@ -4,6 +4,7 @@ using AVMTradeReporter.Model.Data.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
+using System.Diagnostics;
 using System.Security.Claims;
 
 namespace AVMTradeReporter.Controllers
@@ -33,7 +34,7 @@ namespace AVMTradeReporter.Controllers
                 Claims = User?.Claims?.Select(c => new { c.Type, c.Value }).ToArray(),
                 Headers = Request.Headers.ToDictionary(h => h.Key, h => h.Value.ToString())
             };
-            
+
             Console.WriteLine($"Auth test result: {System.Text.Json.JsonSerializer.Serialize(authInfo)}");
             return Ok(authInfo);
         }
@@ -50,7 +51,7 @@ namespace AVMTradeReporter.Controllers
                 Claims = User?.Claims?.Select(c => new { c.Type, c.Value }).ToArray(),
                 Headers = Request.Headers.ToDictionary(h => h.Key, h => h.Value.ToString())
             };
-            
+
             Console.WriteLine($"Authorized auth test result: {System.Text.Json.JsonSerializer.Serialize(authInfo)}");
             return Ok(authInfo);
         }
@@ -61,7 +62,7 @@ namespace AVMTradeReporter.Controllers
         {
             try
             {
-                await _hubContext.Clients.All.SendAsync("TestMessage", message);
+                await _hubContext.Clients.All.SendAsync(BiatecScanHub.Subscriptions.INFO, message);
                 _logger.LogInformation("Test message sent to all clients: {message}", message);
                 return Ok(new { success = true, message = "Test message sent successfully" });
             }
@@ -96,7 +97,7 @@ namespace AVMTradeReporter.Controllers
                     TopTxId = "TEST_TOP_TX"
                 };
 
-                await _hubContext.Clients.All.SendAsync("TradeUpdated", testTrade);
+                await _hubContext.Clients.All.SendAsync(BiatecScanHub.Subscriptions.TRADE, testTrade);
                 _logger.LogInformation("Test trade sent to all clients: {txId}", testTrade.TxId);
                 return Ok(new { success = true, trade = testTrade });
             }
@@ -111,8 +112,8 @@ namespace AVMTradeReporter.Controllers
         public IActionResult GetConnectionInfo()
         {
             var subscriptions = BiatecScanHub.GetSubscriptions();
-            return Ok(new 
-            { 
+            return Ok(new
+            {
                 connectionCount = subscriptions.Count,
                 subscriptions = subscriptions
             });

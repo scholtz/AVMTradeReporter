@@ -646,7 +646,7 @@ namespace AVMTradeReporter.Repository
                         subscribedClientsConnections.Add(userId);
                     }
                 }
-                await _hubContext.Clients.Users(subscribedClientsConnections).SendAsync("PoolUpdated", pool, cancellationToken);
+                await _hubContext.Clients.Users(subscribedClientsConnections).SendAsync(BiatecScanHub.Subscriptions.POOL, pool, cancellationToken);
             }
             catch (Exception ex)
             {

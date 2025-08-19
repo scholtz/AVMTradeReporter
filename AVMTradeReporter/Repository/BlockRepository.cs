@@ -48,7 +48,7 @@ namespace AVMTradeReporter.Repository
                         subscribedClientsConnections.Add(userId);
                     }
                 }
-                await _hubContext.Clients.Clients(subscribedClientsConnections).SendAsync("Block", block, cancellationToken);
+                await _hubContext.Clients.Clients(subscribedClientsConnections).SendAsync(BiatecScanHub.Subscriptions.BLOCK, block, cancellationToken);
 
                 //await _hubContext.Clients.All.SendAsync("Block", block, cancellationToken);
                 _logger.LogInformation("Published block #{round} to {N} subscribed users at SignalR hub, time diff {diff}", block.Round, subscribedClientsConnections.Count, DateTimeOffset.Now - block.Timestamp);

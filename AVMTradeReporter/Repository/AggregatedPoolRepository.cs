@@ -189,7 +189,7 @@ namespace AVMTradeReporter.Repository
                         subscribedClientsConnections.Add(userId);
                     }
                 }
-                await _hubContext.Clients.Users(subscribedClientsConnections).SendAsync("AggregatedPoolUpdated", send, cancellationToken);
+                await _hubContext.Clients.Users(subscribedClientsConnections).SendAsync(BiatecScanHub.Subscriptions.AGGREGATED_POOL, send, cancellationToken);
 
             }
         }

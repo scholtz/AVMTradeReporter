@@ -3,6 +3,7 @@ using AVMTradeReporter.Model.Subscription;
 using Elastic.Clients.Elasticsearch.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
+using Newtonsoft.Json;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Security.Claims;
@@ -18,6 +19,18 @@ namespace AVMTradeReporter.Hubs
         public static readonly ConcurrentQueue<AggregatedPool> RecentAggregatedPoolUpdates = new ConcurrentQueue<AggregatedPool>();
         public static readonly ConcurrentQueue<Model.Data.Block> RecentBlockUpdates = new ConcurrentQueue<Model.Data.Block>();
         public static AggregatedPool? ALGOUSD = null;
+
+        public class Subscriptions
+        {
+            public const string TRADE = "Trade";
+            public const string LIQUIDITY = "Liquidity";
+            public const string BLOCK = "Block";
+            public const string POOL = "Pool";
+            public const string AGGREGATED_POOL = "AggregatedPool";
+            public const string ERROR = "Error";
+            public const string INFO = "Info";
+        }
+
 
         // Test method without authorization for debugging
         public async Task TestConnection()
@@ -38,12 +51,12 @@ namespace AVMTradeReporter.Hubs
                 };
 
                 Console.WriteLine($"TestConnection - {System.Text.Json.JsonSerializer.Serialize(connectionInfo)}");
-                await Clients.Caller.SendAsync("TestConnectionResult", connectionInfo);
+                await Clients.Caller.SendAsync(BiatecScanHub.Subscriptions.INFO, connectionInfo);
             }
             catch (Exception e)
             {
                 Console.WriteLine($"TestConnection error: {e.Message}");
-                await Clients.Caller.SendAsync("Error", e.Message);
+                await Clients.Caller.SendAsync(BiatecScanHub.Subscriptions.ERROR, e.Message);
             }
         }
 
@@ -56,21 +69,21 @@ namespace AVMTradeReporter.Hubs
                 var userId = GetUserId();
                 if (string.IsNullOrEmpty(userId))
                 {
-                    await Clients.Caller.SendAsync("Error", "User identification failed");
+                    await Clients.Caller.SendAsync(BiatecScanHub.Subscriptions.ERROR, "User identification failed");
                     return;
                 }
 
                 User2Subscription[userId] = filter;
 
                 await SendBasicData(userId, filter);
-                await Clients.Caller.SendAsync("Subscribed", filter);
+                await Clients.Caller.SendAsync(BiatecScanHub.Subscriptions.INFO, $"Subscribed to {JsonConvert.SerializeObject(filter)}");
 
                 Console.WriteLine($"Successfully subscribed user '{userId}' with filter '{filter}'");
             }
             catch (Exception e)
             {
                 Console.WriteLine($"Subscribe error: {e.Message}");
-                await Clients.Caller.SendAsync("Error", e.Message);
+                await Clients.Caller.SendAsync(BiatecScanHub.Subscriptions.ERROR, e.Message);
             }
         }
 
@@ -78,42 +91,42 @@ namespace AVMTradeReporter.Hubs
         {
             if (filter.MainAggregatedPools)
             {
-                await Clients.User(userId).SendAsync("AggregatedPoolUpdated", ALGOUSD);
+                await Clients.User(userId).SendAsync(BiatecScanHub.Subscriptions.AGGREGATED_POOL, ALGOUSD);
             }
             if (filter.RecentBlocks)
             {
                 foreach (var trade in RecentBlockUpdates.OrderBy(t => t.Timestamp))
                 {
                     // Also send filtered trades to specific users based on their subscriptions
-                    await Clients.User(userId).SendAsync("Block", trade);
+                    await Clients.User(userId).SendAsync(BiatecScanHub.Subscriptions.BLOCK, trade);
                 }
             }
             if (filter.RecentTrades)
             {
                 foreach (var trade in RecentTrades.OrderBy(t => t.Timestamp))
                 {
-                    await Clients.User(userId).SendAsync("FilteredTradeUpdated", trade);
+                    await Clients.User(userId).SendAsync(BiatecScanHub.Subscriptions.TRADE, trade);
                 }
             }
             if (filter.RecentLiquidity)
             {
                 foreach (var item in RecentLiquidityUpdates.OrderBy(t => t.Timestamp))
                 {
-                    await Clients.User(userId).SendAsync("FilteredLiquidityUpdated", item);
+                    await Clients.User(userId).SendAsync(BiatecScanHub.Subscriptions.LIQUIDITY, item);
                 }
             }
             if (filter.RecentPool)
             {
                 foreach (var item in RecentPoolUpdates.OrderBy(t => t.Timestamp))
                 {
-                    await Clients.User(userId).SendAsync("PoolUpdated", item);
+                    await Clients.User(userId).SendAsync(BiatecScanHub.Subscriptions.POOL, item);
                 }
             }
             if (filter.RecentAggregatedPool)
             {
                 foreach (var item in RecentAggregatedPoolUpdates.OrderBy(t => t.LastUpdated))
                 {
-                    await Clients.User(userId).SendAsync("AggregatedPoolUpdated", item);
+                    await Clients.User(userId).SendAsync(BiatecScanHub.Subscriptions.AGGREGATED_POOL, item);
                 }
             }
         }
@@ -128,7 +141,7 @@ namespace AVMTradeReporter.Hubs
 
                 if (string.IsNullOrEmpty(userId))
                 {
-                    await Clients.Caller.SendAsync("Error", "User identification failed");
+                    await Clients.Caller.SendAsync(BiatecScanHub.Subscriptions.ERROR, "User identification failed");
                     return;
                 }
 
@@ -139,7 +152,7 @@ namespace AVMTradeReporter.Hubs
             catch (Exception e)
             {
                 Console.WriteLine($"Unsubscribe error: {e.Message}");
-                await Clients.Caller.SendAsync("Error", e.Message);
+                await Clients.Caller.SendAsync(BiatecScanHub.Subscriptions.ERROR, e.Message);
             }
         }
 
