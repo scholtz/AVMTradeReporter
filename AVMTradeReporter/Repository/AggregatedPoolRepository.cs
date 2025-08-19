@@ -94,7 +94,7 @@ namespace AVMTradeReporter.Repository
             try
             {
                 // Recompute aggregate for this pair only
-                var agg = AggregatedPool.FromPools(poolsForPair).FirstOrDefault();
+                var agg = AggregatedPool.FromPools(poolsForPair).FirstOrDefault(p => p.AssetIdA == assetIdA && p.AssetIdB == assetIdB);
                 if (agg == null)
                 {
                     // No pools remain for this pair; clear cache and send empty (or skip). We'll skip for now.

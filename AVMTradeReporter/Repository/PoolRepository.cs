@@ -330,10 +330,12 @@ namespace AVMTradeReporter.Repository
             try
             {
                 // Update aggregated pool for this asset pair
-                var poolsForPair = _poolsCache.Values.Where(p => (p.AssetIdA == aId && p.AssetIdB == bId) || (p.AssetIdA == bId && p.AssetIdB == aId));
+                var poolsForPair = _poolsCache.Values.Where(p => p.AssetIdA == aId || p.AssetIdA == bId || p.AssetIdB == bId || p.AssetIdB == aId);
                 if (poolsForPair != null)
                 {
-                    await _aggregatedPoolRepository.UpdateForPairAsync(aId, bId, poolsForPair, cancellationToken);
+                    var lowAsset = Math.Min(aId, bId);
+                    var highAsset = Math.Min(aId, bId);
+                    await _aggregatedPoolRepository.UpdateForPairAsync(lowAsset, highAsset, poolsForPair, cancellationToken);
                 }
             }
             catch (Exception ex)

@@ -83,8 +83,8 @@ namespace AVMTradeReporterTests.Model
             // Values are derived from virtual amounts (equal to real amounts for non-concentrated AMM)
             // For (1,2): A = p1.A_real (1.1) + reverse(p2).A_real (4.5) = 5.6
             //            B = p1.B_real (2.2) + reverse(p2).B_real (3.3) = 5.5
-            Assert.That(agg12.A, Is.EqualTo(8m));
-            Assert.That(agg12.B, Is.EqualTo(6m));
+            Assert.That(agg12.VirtualSumALevel1, Is.EqualTo(8m));
+            Assert.That(agg12.VirtualSumBLevel1, Is.EqualTo(6m));
             Assert.That(agg12.TVL_A, Is.EqualTo(8m));
             Assert.That(agg12.TVL_B, Is.EqualTo(6m));
             Assert.That(agg12.PoolCount, Is.EqualTo(2m));
@@ -93,8 +93,8 @@ namespace AVMTradeReporterTests.Model
 
             // For (2,1): A = p2.A_real (3.3) + reverse(p1).A_real (2.2) = 5.5
             //            B = p2.B_real (4.5) + reverse(p1).B_real (1.1) = 5.6
-            Assert.That(agg21.A, Is.EqualTo(6m));
-            Assert.That(agg21.B, Is.EqualTo(8m));
+            Assert.That(agg21.VirtualSumALevel1, Is.EqualTo(6m));
+            Assert.That(agg21.VirtualSumBLevel1, Is.EqualTo(8m));
             Assert.That(agg21.TVL_A, Is.EqualTo(6m));
             Assert.That(agg21.TVL_B, Is.EqualTo(8m));
             Assert.That(agg21.PoolCount, Is.EqualTo(2));
@@ -154,8 +154,8 @@ namespace AVMTradeReporterTests.Model
             // Values are derived from virtual amounts (equal to real amounts for non-concentrated AMM)
             // For (1,2): A = p1.A_real (1.1) + reverse(p2).A_real (4.5) = 5.6
             //            B = p1.B_real (2.2) + reverse(p2).B_real (3.3) = 5.5
-            Assert.That(agg12.A, Is.EqualTo(33.411611892693684301049159175M));
-            Assert.That(agg12.B, Is.EqualTo(45.523232618035869447454225347M));
+            Assert.That(agg12.VirtualSumALevel1, Is.EqualTo(33.411611892693684301049159175M));
+            Assert.That(agg12.VirtualSumBLevel1, Is.EqualTo(45.523232618035869447454225347M));
             Assert.That(agg12.TVL_A, Is.EqualTo(9m));
             Assert.That(agg12.TVL_B, Is.EqualTo(11m));
             Assert.That(agg12.PoolCount, Is.EqualTo(2m));
@@ -164,6 +164,93 @@ namespace AVMTradeReporterTests.Model
         }
 
 
+        [Test]
+        public void FromPools_Level2Calculation()
+        {
+            // Arrange
+            var now = DateTimeOffset.UtcNow;
+            var older = now.AddMinutes(-1);
+
+            var p1 = new AVMTradeReporter.Model.Data.Pool
+            {
+                PoolAddress = "addr-1-2",
+                AssetIdA = 1,
+                AssetADecimals = 6,
+                AssetIdB = 2,
+                AssetBDecimals = 6,
+                A = 4_000_000,  // 1.0
+                AF = 0,   // +0.1 -> 1.1
+                B = 3_000_000,  // 2.0
+                BF = 0,   // +0.2 -> 2.2
+                Protocol = DEXProtocol.Pact,
+                Timestamp = older
+            };
+
+            var p2 = new AVMTradeReporter.Model.Data.Pool
+            {
+                PoolAddress = "addr-2-1",
+                AssetIdA = 2,
+                AssetADecimals = 6,
+                AssetIdB = 1,
+                AssetBDecimals = 6,
+                A = 3_000_000,  // 3.0
+                AF = 0,   // +0.3 -> 3.3
+                B = 4_000_000,  // 4.0
+                BF = 0,   // +0.5 -> 4.5
+                Protocol = DEXProtocol.Tiny,
+                Timestamp = now
+            };
+            var p3 = new AVMTradeReporter.Model.Data.Pool
+            {
+                PoolAddress = "addr-1-3",
+                AssetIdA = 1,
+                AssetADecimals = 6,
+                AssetIdB = 3,
+                AssetBDecimals = 6,
+                A = 7_000_000,  // 1.0
+                AF = 0,   // +0.1 -> 1.1
+                B = 8_000_000,  // 2.0
+                BF = 0,   // +0.2 -> 2.2
+                Protocol = DEXProtocol.Pact,
+                Timestamp = older
+            };
+            var p4 = new AVMTradeReporter.Model.Data.Pool
+            {
+                PoolAddress = "addr-3-2",
+                AssetIdA = 3,
+                AssetADecimals = 6,
+                AssetIdB = 2,
+                AssetBDecimals = 6,
+                A = 9_000_000,  // 1.0
+                AF = 0,   // +0.1 -> 1.1
+                B = 10_000_000,  // 2.0
+                BF = 0,   // +0.2 -> 2.2
+                Protocol = DEXProtocol.Pact,
+                Timestamp = older
+            };
+
+
+            // Act
+            var result = AggregatedPool.FromPools(new AVMTradeReporter.Model.Data.Pool[] { p1, p2, p3, p4 })
+                .OrderBy(r => r.AssetIdA).ThenBy(r => r.AssetIdB).ToArray();
+
+            // Assert two aggregated entries: (1,2) and (2,1)
+            Assert.That(result.Length, Is.EqualTo(6));
+
+            var agg12 = result.Single(r => r.AssetIdA == 1 && r.AssetIdB == 2);
+
+            Assert.That(agg12.VirtualSumALevel1, Is.EqualTo(8m));
+            Assert.That(agg12.VirtualSumBLevel1, Is.EqualTo(6m));
+            Assert.That(agg12.TVL_A, Is.EqualTo(8m));
+            Assert.That(agg12.TVL_B, Is.EqualTo(6m));
+            Assert.That(agg12.PoolCount, Is.EqualTo(2m));
+            Assert.That(agg12.LastUpdated, Is.EqualTo(now)); // max timestamp
+            Assert.That(agg12.Id, Is.EqualTo("1-2"));
+            Assert.That(agg12.Level2Pools.ToArray(), Is.EqualTo(new string[] { p3.PoolAddress, p4.PoolAddress }));
+            Assert.That(agg12.Level1Pools.ToArray(), Is.EqualTo(new string[] { p1.PoolAddress, p2.PoolAddress }));
+
+
+        }
         [Test]
         public async Task GetAggregatedPoolVoteAlgo()
         {
@@ -174,7 +261,7 @@ namespace AVMTradeReporterTests.Model
             var config = new AppConfiguration() { };
             var options = new OptionsWrapper<AppConfiguration>(config);
             var repository = new PoolRepository(null!, loggerPoolRepository, null!, aggregatedPoolsRepository, options, null!, null!);
-            var cancellationTokenSource = new CancellationTokenSource();    
+            var cancellationTokenSource = new CancellationTokenSource();
             Assert.That(pools, Is.Not.Null, "Pools should not be null");
             foreach (var pool in pools)
             {
@@ -187,7 +274,7 @@ namespace AVMTradeReporterTests.Model
 
             Assert.That(aggregatedPool.AssetIdA, Is.EqualTo(452399768));
             Assert.That(aggregatedPool.AssetIdB, Is.EqualTo(0));
-            var price = aggregatedPool.B / aggregatedPool.A;
+            var price = aggregatedPool.VirtualSumBLevel1 / aggregatedPool.VirtualSumALevel1;
             Assert.That(price, Is.EqualTo(0.1467794677270622992714169588m));
 
         }
