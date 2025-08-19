@@ -150,11 +150,11 @@ namespace AVMTradeReporter.Model.Data
                     var keyCB = $"{assetC}-{pool.AssetIdB}";
                     if (ret.TryGetValue(keyAC, out var aggregatedPoolAC) && ret.TryGetValue(keyCB, out var aggregatedPoolCB))
                     {
-                        if (aggregatedPoolAC.AssetIdB != pool.AssetIdA)
+                        if (aggregatedPoolAC.AssetIdA != pool.AssetIdA)
                         {
                             aggregatedPoolAC = aggregatedPoolAC.Reverse();
                         }
-                        if (aggregatedPoolCB.AssetIdA != pool.AssetIdB)
+                        if (aggregatedPoolCB.AssetIdB != pool.AssetIdB)
                         {
                             aggregatedPoolCB = aggregatedPoolCB.Reverse();
                         }
@@ -176,35 +176,35 @@ namespace AVMTradeReporter.Model.Data
                             }
                         }
                     }
-                    var keyBC = $"{pool.AssetIdB}-{assetC}";
-                    var keyCA = $"{assetC}-{pool.AssetIdA}";
-                    if (ret.TryGetValue(keyBC, out var aggregatedPoolBC) && ret.TryGetValue(keyCA, out var aggregatedPoolCA))
-                    {
-                        if (aggregatedPoolBC.AssetIdA != pool.AssetIdB)
-                        {
-                            aggregatedPoolBC = aggregatedPoolBC.Reverse();
-                        }
-                        if (aggregatedPoolCA.AssetIdB != pool.AssetIdA)
-                        {
-                            aggregatedPoolCA = aggregatedPoolCA.Reverse();
-                        }
-                        var minAssetCVirtual = Math.Min(aggregatedPoolBC.VirtualSumBLevel1, aggregatedPoolCA.VirtualSumALevel1);
-                        if (minAssetCVirtual > 0 && aggregatedPoolBC.VirtualSumBLevel1 > 0 && aggregatedPoolCA.VirtualSumALevel1 > 0)
-                        {
-                            var aggregatedPoolBCAVirtual = aggregatedPoolBC.VirtualSumALevel1 * minAssetCVirtual / aggregatedPoolBC.VirtualSumBLevel1;
-                            var aggregatedPoolCABBBVirtual = aggregatedPoolCA.VirtualSumBLevel1 * minAssetCVirtual / aggregatedPoolCA.VirtualSumALevel1;
-                            pool.VirtualSumALevel2 += aggregatedPoolBCAVirtual;
-                            pool.VirtualSumBLevel2 += aggregatedPoolCABBBVirtual;
-                            foreach (var poolAddress in aggregatedPoolBC.Level1Pools)
-                            {
-                                pool.Level2Pools.Add(poolAddress);
-                            }
-                            foreach (var poolAddress in aggregatedPoolCA.Level1Pools)
-                            {
-                                pool.Level2Pools.Add(poolAddress);
-                            }
-                        }
-                    }
+                    //var keyBC = $"{pool.AssetIdB}-{assetC}";
+                    //var keyCA = $"{assetC}-{pool.AssetIdA}";
+                    //if (ret.TryGetValue(keyBC, out var aggregatedPoolBC) && ret.TryGetValue(keyCA, out var aggregatedPoolCA))
+                    //{
+                    //    if (aggregatedPoolBC.AssetIdA != pool.AssetIdB)
+                    //    {
+                    //        aggregatedPoolBC = aggregatedPoolBC.Reverse();
+                    //    }
+                    //    if (aggregatedPoolCA.AssetIdB != pool.AssetIdA)
+                    //    {
+                    //        aggregatedPoolCA = aggregatedPoolCA.Reverse();
+                    //    }
+                    //    var minAssetCVirtual = Math.Min(aggregatedPoolBC.VirtualSumBLevel1, aggregatedPoolCA.VirtualSumALevel1);
+                    //    if (minAssetCVirtual > 0 && aggregatedPoolBC.VirtualSumBLevel1 > 0 && aggregatedPoolCA.VirtualSumALevel1 > 0)
+                    //    {
+                    //        var aggregatedPoolBCAVirtual = aggregatedPoolBC.VirtualSumALevel1 * minAssetCVirtual / aggregatedPoolBC.VirtualSumBLevel1;
+                    //        var aggregatedPoolCABBBVirtual = aggregatedPoolCA.VirtualSumBLevel1 * minAssetCVirtual / aggregatedPoolCA.VirtualSumALevel1;
+                    //        pool.VirtualSumALevel2 += aggregatedPoolBCAVirtual;
+                    //        pool.VirtualSumBLevel2 += aggregatedPoolCABBBVirtual;
+                    //        foreach (var poolAddress in aggregatedPoolBC.Level1Pools)
+                    //        {
+                    //            pool.Level2Pools.Add(poolAddress);
+                    //        }
+                    //        foreach (var poolAddress in aggregatedPoolCA.Level1Pools)
+                    //        {
+                    //            pool.Level2Pools.Add(poolAddress);
+                    //        }
+                    //    }
+                    //}
 
 
                 }

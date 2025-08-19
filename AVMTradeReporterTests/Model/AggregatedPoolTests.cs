@@ -249,8 +249,8 @@ namespace AVMTradeReporterTests.Model
             Assert.That(agg12.Level2Pools.ToArray(), Is.EqualTo(new string[] { p3.PoolAddress, p4.PoolAddress }));
             Assert.That(agg12.Level1Pools.ToArray(), Is.EqualTo(new string[] { p1.PoolAddress, p2.PoolAddress }));
 
-            Assert.That(agg12.VirtualSumALevel2, Is.EqualTo(16.888888888888888888888888889M));
-            Assert.That(agg12.VirtualSumBLevel2, Is.EqualTo(13.3M));
+            Assert.That(agg12.VirtualSumALevel2, Is.EqualTo(7));
+            Assert.That(agg12.VirtualSumBLevel2, Is.EqualTo(8.888888888888888888888888889m));
 
         }
         [Test]
