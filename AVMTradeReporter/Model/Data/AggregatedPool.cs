@@ -180,11 +180,11 @@ namespace AVMTradeReporter.Model.Data
                     var keyCA = $"{assetC}-{pool.AssetIdA}";
                     if (ret.TryGetValue(keyBC, out var aggregatedPoolBC) && ret.TryGetValue(keyCA, out var aggregatedPoolCA))
                     {
-                        if (aggregatedPoolBC.AssetIdA != pool.AssetIdB)
+                        if (aggregatedPoolBC.AssetIdB != pool.AssetIdB)
                         {
                             aggregatedPoolBC = aggregatedPoolBC.Reverse();
                         }
-                        if (aggregatedPoolCA.AssetIdB != pool.AssetIdA)
+                        if (aggregatedPoolCA.AssetIdA != pool.AssetIdA)
                         {
                             aggregatedPoolCA = aggregatedPoolCA.Reverse();
                         }
