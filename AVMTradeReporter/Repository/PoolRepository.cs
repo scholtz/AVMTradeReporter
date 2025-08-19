@@ -524,6 +524,13 @@ namespace AVMTradeReporter.Repository
             if (assetIdA.HasValue && assetIdB.HasValue)
             {
                 filteredPools = filteredPools.Where(p => (p.AssetIdA == assetIdA.Value && p.AssetIdB == assetIdB.Value) || (p.AssetIdB == assetIdA.Value && p.AssetIdA == assetIdB.Value));
+            }else if (assetIdA.HasValue)
+            {
+                filteredPools = filteredPools.Where(p => p.AssetIdA == assetIdA.Value || p.AssetIdB == assetIdA.Value);
+            }
+            else if (assetIdB.HasValue)
+            {
+                filteredPools = filteredPools.Where(p => p.AssetIdA == assetIdB.Value || p.AssetIdB == assetIdB.Value);
             }
             if (!string.IsNullOrEmpty(address))
             {
