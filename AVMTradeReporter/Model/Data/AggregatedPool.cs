@@ -150,11 +150,11 @@ namespace AVMTradeReporter.Model.Data
                     var keyCB = $"{assetC}-{pool.AssetIdB}";
                     if (ret.TryGetValue(keyAC, out var aggregatedPoolAC) && ret.TryGetValue(keyCB, out var aggregatedPoolCB))
                     {
-                        if (aggregatedPoolAC.AssetIdA != pool.AssetIdA)
+                        if (aggregatedPoolAC.AssetIdB != pool.AssetIdA)
                         {
                             aggregatedPoolAC = aggregatedPoolAC.Reverse();
                         }
-                        if (aggregatedPoolCB.AssetIdB != pool.AssetIdB)
+                        if (aggregatedPoolCB.AssetIdA != pool.AssetIdB)
                         {
                             aggregatedPoolCB = aggregatedPoolCB.Reverse();
                         }
@@ -180,11 +180,11 @@ namespace AVMTradeReporter.Model.Data
                     var keyCA = $"{assetC}-{pool.AssetIdA}";
                     if (ret.TryGetValue(keyBC, out var aggregatedPoolBC) && ret.TryGetValue(keyCA, out var aggregatedPoolCA))
                     {
-                        if (aggregatedPoolBC.AssetIdB != pool.AssetIdB)
+                        if (aggregatedPoolBC.AssetIdA != pool.AssetIdB)
                         {
                             aggregatedPoolBC = aggregatedPoolBC.Reverse();
                         }
-                        if (aggregatedPoolCA.AssetIdA != pool.AssetIdA)
+                        if (aggregatedPoolCA.AssetIdB != pool.AssetIdA)
                         {
                             aggregatedPoolCA = aggregatedPoolCA.Reverse();
                         }
