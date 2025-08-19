@@ -160,17 +160,20 @@ namespace AVMTradeReporter.Model.Data
                         }
 
                         var minAssetCVirtual = Math.Min(aggregatedPoolAC.VirtualSumBLevel1, aggregatedPoolCB.VirtualSumALevel1);
-                        var aggregatedPoolACAVirtual = aggregatedPoolAC.VirtualSumALevel1 * minAssetCVirtual / aggregatedPoolAC.VirtualSumBLevel1;
-                        var aggregatedPoolCABBVirtual = aggregatedPoolCB.VirtualSumBLevel1 * minAssetCVirtual / aggregatedPoolCB.VirtualSumALevel1;
-                        pool.VirtualSumALevel2 += aggregatedPoolACAVirtual;
-                        pool.VirtualSumBLevel2 += aggregatedPoolCABBVirtual;
-                        foreach (var poolAddress in aggregatedPoolAC.Level1Pools)
+                        if (minAssetCVirtual > 0)
                         {
-                            pool.Level2Pools.Add(poolAddress);
-                        }
-                        foreach (var poolAddress in aggregatedPoolCB.Level1Pools)
-                        {
-                            pool.Level2Pools.Add(poolAddress);
+                            var aggregatedPoolACAVirtual = aggregatedPoolAC.VirtualSumALevel1 * minAssetCVirtual / aggregatedPoolAC.VirtualSumBLevel1;
+                            var aggregatedPoolCABBVirtual = aggregatedPoolCB.VirtualSumBLevel1 * minAssetCVirtual / aggregatedPoolCB.VirtualSumALevel1;
+                            pool.VirtualSumALevel2 += aggregatedPoolACAVirtual;
+                            pool.VirtualSumBLevel2 += aggregatedPoolCABBVirtual;
+                            foreach (var poolAddress in aggregatedPoolAC.Level1Pools)
+                            {
+                                pool.Level2Pools.Add(poolAddress);
+                            }
+                            foreach (var poolAddress in aggregatedPoolCB.Level1Pools)
+                            {
+                                pool.Level2Pools.Add(poolAddress);
+                            }
                         }
                     }
                     var keyBC = $"{pool.AssetIdB}-{assetC}";
@@ -186,17 +189,20 @@ namespace AVMTradeReporter.Model.Data
                             aggregatedPoolCA = aggregatedPoolCA.Reverse();
                         }
                         var minAssetCVirtual = Math.Min(aggregatedPoolBC.VirtualSumBLevel1, aggregatedPoolCA.VirtualSumALevel1);
-                        var aggregatedPoolBCAVirtual = aggregatedPoolBC.VirtualSumALevel1 * minAssetCVirtual / aggregatedPoolBC.VirtualSumBLevel1;
-                        var aggregatedPoolCABBBVirtual = aggregatedPoolCA.VirtualSumBLevel1 * minAssetCVirtual / aggregatedPoolCA.VirtualSumALevel1;
-                        pool.VirtualSumALevel2 += aggregatedPoolBCAVirtual;
-                        pool.VirtualSumBLevel2 += aggregatedPoolCABBBVirtual;
-                        foreach (var poolAddress in aggregatedPoolBC.Level1Pools)
+                        if (minAssetCVirtual > 0)
                         {
-                            pool.Level2Pools.Add(poolAddress);
-                        }
-                        foreach (var poolAddress in aggregatedPoolCA.Level1Pools)
-                        {
-                            pool.Level2Pools.Add(poolAddress);
+                            var aggregatedPoolBCAVirtual = aggregatedPoolBC.VirtualSumALevel1 * minAssetCVirtual / aggregatedPoolBC.VirtualSumBLevel1;
+                            var aggregatedPoolCABBBVirtual = aggregatedPoolCA.VirtualSumBLevel1 * minAssetCVirtual / aggregatedPoolCA.VirtualSumALevel1;
+                            pool.VirtualSumALevel2 += aggregatedPoolBCAVirtual;
+                            pool.VirtualSumBLevel2 += aggregatedPoolCABBBVirtual;
+                            foreach (var poolAddress in aggregatedPoolBC.Level1Pools)
+                            {
+                                pool.Level2Pools.Add(poolAddress);
+                            }
+                            foreach (var poolAddress in aggregatedPoolCA.Level1Pools)
+                            {
+                                pool.Level2Pools.Add(poolAddress);
+                            }
                         }
                     }
 
