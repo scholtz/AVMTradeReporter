@@ -89,7 +89,7 @@ namespace AVMTradeReporter.Hubs
 
         public async Task SendBasicData(string userId, SubscriptionFilter filter)
         {
-            if (filter.MainAggregatedPools)
+            if (filter.MainAggregatedPools && ALGOUSD != null)
             {
                 await Clients.User(userId).SendAsync(BiatecScanHub.Subscriptions.AGGREGATED_POOL, ALGOUSD);
             }
