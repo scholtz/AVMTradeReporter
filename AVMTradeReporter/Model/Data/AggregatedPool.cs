@@ -160,7 +160,7 @@ namespace AVMTradeReporter.Model.Data
                         }
 
                         var minAssetCVirtual = Math.Min(aggregatedPoolAC.VirtualSumBLevel1, aggregatedPoolCB.VirtualSumALevel1);
-                        if (minAssetCVirtual > 0)
+                        if (minAssetCVirtual > 0 && aggregatedPoolAC.VirtualSumBLevel1 > 0 && aggregatedPoolCB.VirtualSumALevel1 > 0)
                         {
                             var aggregatedPoolACAVirtual = aggregatedPoolAC.VirtualSumALevel1 * minAssetCVirtual / aggregatedPoolAC.VirtualSumBLevel1;
                             var aggregatedPoolCABBVirtual = aggregatedPoolCB.VirtualSumBLevel1 * minAssetCVirtual / aggregatedPoolCB.VirtualSumALevel1;
@@ -189,7 +189,7 @@ namespace AVMTradeReporter.Model.Data
                             aggregatedPoolCA = aggregatedPoolCA.Reverse();
                         }
                         var minAssetCVirtual = Math.Min(aggregatedPoolBC.VirtualSumBLevel1, aggregatedPoolCA.VirtualSumALevel1);
-                        if (minAssetCVirtual > 0)
+                        if (minAssetCVirtual > 0 && aggregatedPoolBC.VirtualSumBLevel1 > 0 && aggregatedPoolCA.VirtualSumALevel1 > 0)
                         {
                             var aggregatedPoolBCAVirtual = aggregatedPoolBC.VirtualSumALevel1 * minAssetCVirtual / aggregatedPoolBC.VirtualSumBLevel1;
                             var aggregatedPoolCABBBVirtual = aggregatedPoolCA.VirtualSumBLevel1 * minAssetCVirtual / aggregatedPoolCA.VirtualSumALevel1;
