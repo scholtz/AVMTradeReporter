@@ -2,6 +2,7 @@
 using AVMTradeReporter.Model.Data;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Core.Bulk;
+using Elastic.Clients.Elasticsearch.Security;
 using Microsoft.AspNetCore.SignalR;
 
 namespace AVMTradeReporter.Repository
@@ -149,9 +150,7 @@ namespace AVMTradeReporter.Repository
 
                 foreach (var liquidityUpdate in liquidityUpdates)
                 {
-                    // Publish to all clients by default
-                    await _hubContext.Clients.All.SendAsync("LiquidityUpdated", liquidityUpdate, cancellationToken);
-
+                    var subscribedClientsConnections = new HashSet<string>();
                     // Also send filtered liquidity updates to specific users based on their subscriptions
                     foreach (var subscription in subscriptions)
                     {
@@ -160,9 +159,10 @@ namespace AVMTradeReporter.Repository
 
                         if (BiatecScanHub.ShouldSendLiquidityToUser(liquidityUpdate, filter))
                         {
-                            await _hubContext.Clients.User(userId).SendAsync("FilteredLiquidityUpdated", liquidityUpdate, cancellationToken);
+                            subscribedClientsConnections.Add(userId);
                         }
                     }
+                    await _hubContext.Clients.Users(subscribedClientsConnections).SendAsync("LiquidityUpdated", liquidityUpdate, cancellationToken);
                 }
 
                 _logger.LogInformation("Published {liquidityCount} liquidity updates to SignalR hub", liquidityUpdates.Length);

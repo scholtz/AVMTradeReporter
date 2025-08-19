@@ -7,6 +7,7 @@ using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Core.Bulk;
 using Elastic.Clients.Elasticsearch.IndexManagement;
 using Elastic.Clients.Elasticsearch.Mapping;
+using Elastic.Clients.Elasticsearch.Security;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
 using Org.BouncyCastle.Utilities;
@@ -620,14 +621,32 @@ namespace AVMTradeReporter.Repository
         {
             try
             {
-                if(_hubContext == null)
+                if (_hubContext == null)
                 {
                     _logger.LogWarning("SignalR hub context is not initialized, cannot publish pool update");
                     return;
                 }
-                await _hubContext.Clients.All.SendAsync("PoolUpdated", pool, cancellationToken);
-                _logger.LogDebug("Published pool update to SignalR hub: {poolAddress}_{poolAppId}_{protocol}",
-                    pool.PoolAddress, pool.PoolAppId, pool.Protocol);
+                var subscriptions = BiatecScanHub.GetSubscriptions();
+
+                if (!subscriptions.Any())
+                {
+                    _logger.LogDebug("No active subscriptions, skipping trade publication");
+                    return;
+                }
+                var subscribedClientsConnections = new HashSet<string>();
+
+                // Also send filtered trades to specific users based on their subscriptions
+                foreach (var subscription in subscriptions)
+                {
+                    var userId = subscription.Key;
+                    var filter = subscription.Value;
+
+                    if (BiatecScanHub.ShouldSendPoolToUser(pool, filter))
+                    {
+                        subscribedClientsConnections.Add(userId);
+                    }
+                }
+                await _hubContext.Clients.Users(subscribedClientsConnections).SendAsync("PoolUpdated", pool, cancellationToken);
             }
             catch (Exception ex)
             {

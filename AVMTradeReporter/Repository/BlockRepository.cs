@@ -3,6 +3,7 @@ using AVMTradeReporter.Hubs;
 using AVMTradeReporter.Model.Data;
 using Microsoft.AspNetCore.SignalR;
 using StackExchange.Redis;
+using System.Diagnostics;
 
 namespace AVMTradeReporter.Repository
 {
@@ -27,8 +28,30 @@ namespace AVMTradeReporter.Repository
         {
             try
             {
-                await _hubContext.Clients.All.SendAsync("Block", block, cancellationToken);
-                _logger.LogInformation("Published block #{round} to SignalR hub, time diff {diff}", block.Round, DateTimeOffset.Now - block.Timestamp);
+                var subscriptions = BiatecScanHub.GetSubscriptions();
+
+                if (!subscriptions.Any())
+                {
+                    _logger.LogDebug("No active subscriptions, skipping trade publication");
+                    return;
+                }
+
+                var subscribedClientsConnections = new HashSet<string>();
+
+                foreach (var subscription in subscriptions)
+                {
+                    var userId = subscription.Key;
+                    var filter = subscription.Value;
+
+                    if (BiatecScanHub.ShouldBlockToUser(block, filter))
+                    {
+                        subscribedClientsConnections.Add(userId);
+                    }
+                }
+                await _hubContext.Clients.Clients(subscribedClientsConnections).SendAsync("Block", block, cancellationToken);
+
+                //await _hubContext.Clients.All.SendAsync("Block", block, cancellationToken);
+                _logger.LogInformation("Published block #{round} to {N} subscribed users at SignalR hub, time diff {diff}", block.Round, subscribedClientsConnections.Count, DateTimeOffset.Now - block.Timestamp);
 
                 BiatecScanHub.RecentBlockUpdates.Enqueue(block);
                 if (BiatecScanHub.RecentBlockUpdates.Count > 10)

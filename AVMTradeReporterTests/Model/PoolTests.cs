@@ -44,10 +44,9 @@ namespace AVMTradeReporterTests.Model
             var now = DateTimeOffset.UtcNow;
             var older = now.AddMinutes(-1);
             var pool = JsonConvert.DeserializeObject<AVMTradeReporter.Model.Data.Pool>(File.ReadAllText("Data/pool-3136517663.json"));
-            
+            Assert.That(pool, Is.Not.Null, "Failed to deserialize pool data from JSON file.");
             Assert.That(pool.VirtualAmountA, Is.EqualTo(1423509.4775349025526735010167m));
             Assert.That(pool.VirtualAmountB, Is.EqualTo(9698934.902364655801809186706m));
-
         }
     }
 }

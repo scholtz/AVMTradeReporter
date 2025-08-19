@@ -4,6 +4,7 @@ using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Core.Bulk;
 using Elastic.Clients.Elasticsearch.IndexManagement;
 using Elastic.Clients.Elasticsearch.Mapping;
+using Elastic.Clients.Elasticsearch.Security;
 using Microsoft.AspNetCore.SignalR;
 
 namespace AVMTradeReporter.Repository
@@ -191,8 +192,7 @@ namespace AVMTradeReporter.Repository
 
                 foreach (var trade in trades)
                 {
-                    // Publish to all clients by default
-                    await _hubContext.Clients.All.SendAsync("TradeUpdated", trade, cancellationToken);
+                    var subscribedClientsConnections = new HashSet<string>();
 
                     // Also send filtered trades to specific users based on their subscriptions
                     foreach (var subscription in subscriptions)
@@ -202,9 +202,10 @@ namespace AVMTradeReporter.Repository
 
                         if (BiatecScanHub.ShouldSendTradeToUser(trade, filter))
                         {
-                            await _hubContext.Clients.User(userId).SendAsync("FilteredTradeUpdated", trade, cancellationToken);
+                            subscribedClientsConnections.Add(userId);
                         }
                     }
+                    await _hubContext.Clients.Users(subscribedClientsConnections).SendAsync("TradeUpdated", trade, cancellationToken);
                 }
 
                 _logger.LogInformation("Published {tradeCount} trades to SignalR hub", trades.Length);

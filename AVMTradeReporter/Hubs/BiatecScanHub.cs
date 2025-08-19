@@ -1,15 +1,17 @@
 ﻿using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Model.Subscription;
 using Elastic.Clients.Elasticsearch.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Security.Claims;
 
 namespace AVMTradeReporter.Hubs
 {
     public class BiatecScanHub : Hub
     {
-        private static readonly ConcurrentDictionary<string, string> User2Subscription = new ConcurrentDictionary<string, string>();
+        private static readonly ConcurrentDictionary<string, SubscriptionFilter> User2Subscription = new ConcurrentDictionary<string, SubscriptionFilter>();
         public static readonly ConcurrentQueue<Trade> RecentTrades = new ConcurrentQueue<Trade>();
         public static readonly ConcurrentQueue<Liquidity> RecentLiquidityUpdates = new ConcurrentQueue<Liquidity>();
         public static readonly ConcurrentQueue<Pool> RecentPoolUpdates = new ConcurrentQueue<Pool>();
@@ -46,29 +48,12 @@ namespace AVMTradeReporter.Hubs
         }
 
         [Authorize]
-        public async Task Subscribe(string filter)
+        public async Task Subscribe(SubscriptionFilter filter)
         {
             try
             {
                 // Enhanced user identification with debugging
                 var userId = GetUserId();
-                //Console.WriteLine($"Subscribe attempt - UserId: '{userId}', Filter: '{filter}'");
-                //Console.WriteLine($"User.Identity.Name: '{Context?.User?.Identity?.Name}'");
-                //Console.WriteLine($"UserIdentifier: '{Context?.UserIdentifier}'");
-                //Console.WriteLine($"ConnectionId: '{Context?.ConnectionId}'");
-                //Console.WriteLine($"User.Identity.IsAuthenticated: {Context?.User?.Identity?.IsAuthenticated}");
-                //Console.WriteLine($"User.Identity.AuthenticationType: '{Context?.User?.Identity?.AuthenticationType}'");
-
-                // Print all claims for debugging
-                if (Context?.User?.Claims != null)
-                {
-                    Console.WriteLine("User Claims:");
-                    foreach (var claim in Context.User.Claims)
-                    {
-                        Console.WriteLine($"  {claim.Type}: {claim.Value}");
-                    }
-                }
-
                 if (string.IsNullOrEmpty(userId))
                 {
                     await Clients.Caller.SendAsync("Error", "User identification failed");
@@ -77,6 +62,7 @@ namespace AVMTradeReporter.Hubs
 
                 User2Subscription[userId] = filter;
 
+                await SendBasicData(userId, filter);
                 await Clients.Caller.SendAsync("Subscribed", filter);
 
                 Console.WriteLine($"Successfully subscribed user '{userId}' with filter '{filter}'");
@@ -88,51 +74,46 @@ namespace AVMTradeReporter.Hubs
             }
         }
 
-        public async Task SendBasicData(string userId, string? filter)
+        public async Task SendBasicData(string userId, SubscriptionFilter filter)
         {
-
-            await Clients.User(userId).SendAsync("AggregatedPoolUpdated", ALGOUSD);
-
-            foreach (var trade in RecentBlockUpdates.OrderBy(t => t.Timestamp))
+            if (filter.MainAggregatedPools)
             {
-                // Also send filtered trades to specific users based on their subscriptions
-                await Clients.User(userId).SendAsync("Block", trade);
+                await Clients.User(userId).SendAsync("AggregatedPoolUpdated", ALGOUSD);
             }
-
-            if (filter != null)
+            if (filter.RecentBlocks)
             {
-
+                foreach (var trade in RecentBlockUpdates.OrderBy(t => t.Timestamp))
+                {
+                    // Also send filtered trades to specific users based on their subscriptions
+                    await Clients.User(userId).SendAsync("Block", trade);
+                }
+            }
+            if (filter.RecentTrades)
+            {
                 foreach (var trade in RecentTrades.OrderBy(t => t.Timestamp))
                 {
-                    // Also send filtered trades to specific users based on their subscriptions
-                    if (BiatecScanHub.ShouldSendTradeToUser(trade, filter))
-                    {
-                        await Clients.User(userId).SendAsync("FilteredTradeUpdated", trade);
-                    }
+                    await Clients.User(userId).SendAsync("FilteredTradeUpdated", trade);
                 }
+            }
+            if (filter.RecentLiquidity)
+            {
                 foreach (var item in RecentLiquidityUpdates.OrderBy(t => t.Timestamp))
                 {
-                    // Also send filtered trades to specific users based on their subscriptions
-                    if (BiatecScanHub.ShouldSendLiquidityToUser(item, filter))
-                    {
-                        await Clients.User(userId).SendAsync("FilteredLiquidityUpdated", item);
-                    }
+                    await Clients.User(userId).SendAsync("FilteredLiquidityUpdated", item);
                 }
+            }
+            if (filter.RecentPool)
+            {
                 foreach (var item in RecentPoolUpdates.OrderBy(t => t.Timestamp))
                 {
-                    // Also send filtered trades to specific users based on their subscriptions
-                    if (BiatecScanHub.ShouldSendPoolToUser(item, filter))
-                    {
-                        await Clients.User(userId).SendAsync("PoolUpdated", item);
-                    }
+                    await Clients.User(userId).SendAsync("PoolUpdated", item);
                 }
+            }
+            if (filter.RecentAggregatedPool)
+            {
                 foreach (var item in RecentAggregatedPoolUpdates.OrderBy(t => t.LastUpdated))
                 {
-                    // Also send filtered trades to specific users based on their subscriptions
-                    if (BiatecScanHub.ShouldSendAggregatedPoolToUser(item, filter))
-                    {
-                        await Clients.User(userId).SendAsync("AggregatedPoolUpdated", item);
-                    }
+                    await Clients.User(userId).SendAsync("AggregatedPoolUpdated", item);
                 }
             }
         }
@@ -177,7 +158,6 @@ namespace AVMTradeReporter.Hubs
                     Console.WriteLine($"  {claim.Type}: {claim.Value}");
                 }
             }
-            await SendBasicData(userId, null);
             await base.OnConnectedAsync();
         }
 
@@ -249,166 +229,50 @@ namespace AVMTradeReporter.Hubs
         }
 
         // Static method to get current subscriptions (can be used by external services)
-        public static IReadOnlyDictionary<string, string> GetSubscriptions()
+        public static IReadOnlyDictionary<string, SubscriptionFilter> GetSubscriptions()
         {
             return User2Subscription.ToArray().ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
         }
-        public static bool ShouldSendTradeToUser(Trade trade, string filter)
+        public static bool ShouldSendTradeToUser(Trade trade, SubscriptionFilter filter)
         {
-            if (string.IsNullOrEmpty(filter))
-            {
-                return true; // No filter means send all trades
-            }
-
-            try
-            {
-                // Simple filtering logic - can be enhanced based on requirements
-                // Filter format examples:
-                // "protocol:Biatec" - filter by protocol
-                // "asset:123" - filter by asset ID (either in or out)
-                // "trader:ADDR123" - filter by trader address
-                // "pool:456" - filter by pool app ID
-
-                var filterParts = filter.Split(':', StringSplitOptions.RemoveEmptyEntries);
-                if (filterParts.Length != 2)
-                {
-                    return true; // Invalid filter format, send all
-                }
-
-                var filterType = filterParts[0].ToLowerInvariant();
-                var filterValue = filterParts[1];
-
-                return filterType switch
-                {
-                    "protocol" => trade.Protocol.ToString().Equals(filterValue, StringComparison.OrdinalIgnoreCase),
-                    "asset" => trade.AssetIdIn.ToString() == filterValue || trade.AssetIdOut.ToString() == filterValue,
-                    "trader" => trade.Trader.Equals(filterValue, StringComparison.OrdinalIgnoreCase),
-                    "pool" => trade.PoolAppId.ToString() == filterValue,
-                    "pooladdress" => trade.PoolAddress.Equals(filterValue, StringComparison.OrdinalIgnoreCase),
-                    "state" => trade.TradeState.ToString().Equals(filterValue, StringComparison.OrdinalIgnoreCase),
-                    _ => true // Unknown filter type, send all
-                };
-            }
-            catch
-            {
-                return true; // On error, send the trade
-            }
+            if (filter.RecentTrades) return true;
+            if (filter.PoolsAddresses.Contains(trade.PoolAddress)) return true;
+            var aggregatedPoolId = $"{trade.AssetIdIn}-{trade.AssetIdOut}";
+            if (filter.AggregatedPoolsIds.Contains(aggregatedPoolId)) return true;
+            var aggregatedPoolIdReverted = $"{trade.AssetIdOut}-{trade.AssetIdIn}";
+            if (filter.AggregatedPoolsIds.Contains(aggregatedPoolIdReverted)) return true;
+            return false;
         }
-        public static bool ShouldSendLiquidityToUser(Liquidity item, string filter)
+        public static bool ShouldSendLiquidityToUser(Liquidity item, SubscriptionFilter filter)
         {
-            if (string.IsNullOrEmpty(filter))
-            {
-                return true; // No filter means send all trades
-            }
-
-            try
-            {
-                // Simple filtering logic - can be enhanced based on requirements
-                // Filter format examples:
-                // "protocol:Biatec" - filter by protocol
-                // "asset:123" - filter by asset ID (either in or out)
-                // "trader:ADDR123" - filter by trader address
-                // "pool:456" - filter by pool app ID
-
-                var filterParts = filter.Split(':', StringSplitOptions.RemoveEmptyEntries);
-                if (filterParts.Length != 2)
-                {
-                    return true; // Invalid filter format, send all
-                }
-
-                var filterType = filterParts[0].ToLowerInvariant();
-                var filterValue = filterParts[1];
-
-                return filterType switch
-                {
-                    "protocol" => item.Protocol.ToString().Equals(filterValue, StringComparison.OrdinalIgnoreCase),
-                    "asset" => item.AssetIdA.ToString() == filterValue || item.AssetIdB.ToString() == filterValue || item.AssetIdLP.ToString() == filterValue,
-                    "trader" => item.LiquidityProvider.Equals(filterValue, StringComparison.OrdinalIgnoreCase),
-                    "pool" => item.PoolAppId.ToString() == filterValue,
-                    "pooladdress" => item.PoolAddress.Equals(filterValue, StringComparison.OrdinalIgnoreCase),
-                    "state" => item.TxState.ToString().Equals(filterValue, StringComparison.OrdinalIgnoreCase),
-                    _ => true // Unknown filter type, send all
-                };
-            }
-            catch
-            {
-                return true; // On error, send the trade
-            }
+            if (filter.RecentLiquidity) return true;
+            if (filter.PoolsAddresses.Contains(item.PoolAddress)) return true;
+            var aggregatedPoolId = $"{item.AssetIdA}-{item.AssetIdB}";
+            if (filter.AggregatedPoolsIds.Contains(aggregatedPoolId)) return true;
+            var aggregatedPoolIdReverted = $"{item.AssetIdB}-{item.AssetIdA}";
+            if (filter.AggregatedPoolsIds.Contains(aggregatedPoolIdReverted)) return true;
+            return false;
         }
-        public static bool ShouldSendPoolToUser(Pool item, string filter)
+        public static bool ShouldBlockToUser(AVMTradeReporter.Model.Data.Block item, SubscriptionFilter filter)
         {
-            if (string.IsNullOrEmpty(filter))
-            {
-                return true; // No filter means send all trades
-            }
-
-            try
-            {
-                // Simple filtering logic - can be enhanced based on requirements
-                // Filter format examples:
-                // "protocol:Biatec" - filter by protocol
-                // "asset:123" - filter by asset ID (either in or out)
-                // "trader:ADDR123" - filter by trader address
-                // "pool:456" - filter by pool app ID
-
-                var filterParts = filter.Split(':', StringSplitOptions.RemoveEmptyEntries);
-                if (filterParts.Length != 2)
-                {
-                    return true; // Invalid filter format, send all
-                }
-
-                var filterType = filterParts[0].ToLowerInvariant();
-                var filterValue = filterParts[1];
-
-                return filterType switch
-                {
-                    "protocol" => item.Protocol.ToString().Equals(filterValue, StringComparison.OrdinalIgnoreCase),
-                    "asset" => item.AssetIdA.ToString() == filterValue || item.AssetIdB.ToString() == filterValue || item.AssetIdLP.ToString() == filterValue,
-                    "pool" => item.PoolAppId.ToString() == filterValue,
-                    "pooladdress" => item.PoolAddress.Equals(filterValue, StringComparison.OrdinalIgnoreCase),
-                    _ => true // Unknown filter type, send all
-                };
-            }
-            catch
-            {
-                return true; // On error, send the trade
-            }
+            if (filter.RecentBlocks) return true;
+            return false;
         }
-        public static bool ShouldSendAggregatedPoolToUser(AggregatedPool item, string filter)
+        public static bool ShouldSendPoolToUser(Pool item, SubscriptionFilter filter)
         {
-            if (string.IsNullOrEmpty(filter))
-            {
-                return true; // No filter means send all trades
-            }
+            if (filter.RecentTrades) return true;
+            if (filter.PoolsAddresses.Contains(item.PoolAddress)) return true;
+            var aggregatedPoolId = $"{item.AssetIdA}-{item.AssetIdB}";
+            if (filter.AggregatedPoolsIds.Contains(aggregatedPoolId)) return true;
+            var aggregatedPoolIdReverted = $"{item.AssetIdB}-{item.AssetIdA}";
+            if (filter.AggregatedPoolsIds.Contains(aggregatedPoolIdReverted)) return true;
 
-            try
-            {
-                // Simple filtering logic - can be enhanced based on requirements
-                // Filter format examples:
-                // "protocol:Biatec" - filter by protocol
-                // "asset:123" - filter by asset ID (either in or out)
-                // "trader:ADDR123" - filter by trader address
-                // "pool:456" - filter by pool app ID
-
-                var filterParts = filter.Split(':', StringSplitOptions.RemoveEmptyEntries);
-                if (filterParts.Length != 2)
-                {
-                    return true; // Invalid filter format, send all
-                }
-
-                var filterType = filterParts[0].ToLowerInvariant();
-                var filterValue = filterParts[1];
-
-                return filterType switch
-                {
-                    "asset" => item.AssetIdA.ToString() == filterValue || item.AssetIdB.ToString() == filterValue,
-                    _ => true // Unknown filter type, send all
-                };
-            }
-            catch
-            {
-                return true; // On error, send the trade
-            }
+            return false;
+        }
+        public static bool ShouldSendAggregatedPoolToUser(AggregatedPool item, SubscriptionFilter filter)
+        {
+            if (filter.AggregatedPoolsIds.Contains(item.Id)) return true;
+            return false;
         }
     }
 }
