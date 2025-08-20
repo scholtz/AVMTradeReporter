@@ -247,10 +247,28 @@ namespace AVMTradeReporter.Repository
             await EnsureInitialized(cancellationToken);
             return _poolsCache.TryGetValue(poolAddress, out var pool) ? pool : null;
         }
-
-        public async Task<bool> StorePoolAsync(Pool pool, CancellationToken cancellationToken)
+        /// <summary>
+        /// Stores the specified pool in memory, Redis, and Elasticsearch, and updates related aggregated data.
+        /// </summary>
+        /// <remarks>This method performs the following actions: <list type="bullet"> <item>Updates the
+        /// in-memory cache with the specified pool.</item> <item>Asynchronously saves the pool to Redis, if Redis is
+        /// enabled in the application configuration.</item> <item>Asynchronously indexes the pool in Elasticsearch, if
+        /// an Elasticsearch client is configured.</item> <item>Publishes the pool update to a SignalR hub.</item>
+        /// <item>Updates the aggregated view for the asset pair associated with the pool, if asset IDs are present and
+        /// <paramref name="updateAggregated"/> is <see langword="true"/>.</item> </list> If any of the asynchronous
+        /// operations fail, the failure is logged, but the method will still attempt to complete other
+        /// operations.</remarks>
+        /// <param name="pool">The pool object to store. Must not be null.</param>
+        /// <param name="updateAggregated">A value indicating whether to update the aggregated view for the asset pair associated with the pool. Used in tests not to update on pools loading.
+        /// Defaults to <see langword="true"/>.</param>
+        /// <param name="cancellationToken">A <see cref="CancellationToken"/> to observe while waiting for the operation to complete.</param>
+        /// <returns><see langword="true"/> if the pool was successfully stored; otherwise, <see langword="false"/>.</returns>
+        public async Task<bool> StorePoolAsync(Pool pool, bool updateAggregated = true, CancellationToken? cancellationToken = null)
         {
-            await EnsureInitialized(cancellationToken);
+            using var cancellationTokenSource = new CancellationTokenSource();
+            var token = cancellationToken.HasValue ? cancellationToken.Value : cancellationTokenSource.Token;
+
+            await EnsureInitialized(token);
 
             try
             {
@@ -280,7 +298,7 @@ namespace AVMTradeReporter.Repository
                     {
                         _logger.LogError(ex, "Failed to save pool to Redis: {poolId}", pool.PoolAddress);
                     }
-                }, cancellationToken);
+                }, token);
 
                 // Save to Elasticsearch asynchronously
                 if (_elasticClient != null)
@@ -291,7 +309,7 @@ namespace AVMTradeReporter.Repository
                         {
                             var response = await _elasticClient.IndexAsync(pool, idx => idx
                                 .Index("pools")
-                                .Id(pool.PoolAddress), cancellationToken);
+                                .Id(pool.PoolAddress), token);
 
                             if (!response.IsValidResponse)
                             {
@@ -302,18 +320,18 @@ namespace AVMTradeReporter.Repository
                         {
                             _logger.LogError(ex, "Failed to store pool in Elasticsearch: {poolId}", pool.PoolAddress);
                         }
-                    }, cancellationToken);
+                    }, token);
                 }
 
                 _logger.LogDebug("Pool updated in memory: {poolId}", pool.PoolAddress);
 
                 // Publish pool update to SignalR hub
-                await PublishPoolUpdateToHub(pool, cancellationToken);
+                await PublishPoolUpdateToHub(pool, token);
 
                 // Update aggregated view for this asset pair if asset ids are present
-                if (pool.AssetIdA.HasValue && pool.AssetIdB.HasValue)
+                if (updateAggregated && pool.AssetIdA.HasValue && pool.AssetIdB.HasValue)
                 {
-                    await UpdateAggregatedPool(pool.AssetIdA.Value, pool.AssetIdB.Value, cancellationToken);
+                    await UpdateAggregatedPool(pool.AssetIdA.Value, pool.AssetIdB.Value, token);
                 }
 
                 return true;
@@ -334,7 +352,7 @@ namespace AVMTradeReporter.Repository
                 if (poolsForPair != null)
                 {
                     var lowAsset = Math.Min(aId, bId);
-                    var highAsset = Math.Min(aId, bId);
+                    var highAsset = Math.Max(aId, bId);
                     await _aggregatedPoolRepository.UpdateForPairAsync(lowAsset, highAsset, poolsForPair, cancellationToken);
                 }
             }
@@ -375,7 +393,7 @@ namespace AVMTradeReporter.Repository
                         }
                     }
 
-                    await StorePoolAsync(newPool, cancellationToken);
+                    await StorePoolAsync(newPool, true, cancellationToken);
                     _logger.LogInformation("Created new pool from trade: {poolAddress}_{poolAppId}_{protocol}",
                         trade.PoolAddress, trade.PoolAppId, trade.Protocol);
                     return;
@@ -411,7 +429,7 @@ namespace AVMTradeReporter.Repository
                     }
                 }
 
-                await StorePoolAsync(existingPool, cancellationToken);
+                await StorePoolAsync(existingPool, true, cancellationToken);
 
                 _logger.LogDebug("Updated pool from trade: {poolAddress}_{poolAppId}_{protocol}",
                     trade.PoolAddress, trade.PoolAppId, trade.Protocol);
@@ -453,7 +471,7 @@ namespace AVMTradeReporter.Repository
                         }
                     }
 
-                    await StorePoolAsync(newPool, cancellationToken);
+                    await StorePoolAsync(newPool, true, cancellationToken);
                     _logger.LogInformation("Created new pool from liquidity: {poolAddress}_{poolAppId}_{protocol}",
                         liquidity.PoolAddress, liquidity.PoolAppId, liquidity.Protocol);
                     return;
@@ -490,7 +508,7 @@ namespace AVMTradeReporter.Repository
                     }
                 }
 
-                await StorePoolAsync(existingPool, cancellationToken);
+                await StorePoolAsync(existingPool, true, cancellationToken);
 
                 _logger.LogDebug("Updated pool from liquidity: {poolAddress}_{poolAppId}_{protocol}",
                     liquidity.PoolAddress, liquidity.PoolAppId, liquidity.Protocol);
@@ -524,7 +542,8 @@ namespace AVMTradeReporter.Repository
             if (assetIdA.HasValue && assetIdB.HasValue)
             {
                 filteredPools = filteredPools.Where(p => (p.AssetIdA == assetIdA.Value && p.AssetIdB == assetIdB.Value) || (p.AssetIdB == assetIdA.Value && p.AssetIdA == assetIdB.Value));
-            }else if (assetIdA.HasValue)
+            }
+            else if (assetIdA.HasValue)
             {
                 filteredPools = filteredPools.Where(p => p.AssetIdA == assetIdA.Value || p.AssetIdB == assetIdA.Value);
             }

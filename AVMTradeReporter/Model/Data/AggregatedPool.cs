@@ -95,7 +95,7 @@ namespace AVMTradeReporter.Model.Data
             if (pools == null) return ret.Values;
 
             var grouped = pools
-                .Where(p => p.AssetIdA.HasValue && p.AssetIdB.HasValue && p.A.HasValue && p.B.HasValue)
+                .Where(p => p.AssetIdA.HasValue && p.AssetIdB.HasValue && p.A.HasValue && p.B.HasValue && p.AssetIdA != p.AssetIdB)
                 .Union(pools.Select(p => p.Reverse()).Where(p => p.AssetIdA.HasValue && p.AssetIdB.HasValue && p.A.HasValue && p.B.HasValue))
                 .GroupBy(p => new { A = p.AssetIdA!.Value, B = p.AssetIdB!.Value });
 
@@ -118,7 +118,10 @@ namespace AVMTradeReporter.Model.Data
                 };
                 ret[$"{g.Key.B}-{g.Key.A}"] = ret[$"{g.Key.A}-{g.Key.B}"].Reverse();
             }
-
+#if RELEASE
+// temporarily disabled 
+return ret.Values;
+#endif
             // Add Level 2 pools
             // find intermediary pools for each aggregated pool
             // intermediary pool is the pool where exists aggreageted pool from asset A to asset C and from asset C to asset B

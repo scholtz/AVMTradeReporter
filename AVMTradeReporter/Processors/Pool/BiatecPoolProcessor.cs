@@ -226,7 +226,7 @@ namespace AVMTradeReporter.Processors.Pool
             if (updated)
             {
                 _logger.LogInformation("Pool {appId} {appAddress} updated with pool refresh", pool.PoolAppId, pool.PoolAddress);
-                await _poolRepository.StorePoolAsync(pool, cancelationTokenSource.Token);
+                await _poolRepository.StorePoolAsync(pool, true, cancelationTokenSource.Token);
             }
             return pool;
         }

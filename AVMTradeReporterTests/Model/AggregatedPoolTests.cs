@@ -267,7 +267,7 @@ namespace AVMTradeReporterTests.Model
             Assert.That(pools, Is.Not.Null, "Pools should not be null");
             foreach (var pool in pools)
             {
-                await repository.StorePoolAsync(pool, cancellationTokenSource.Token);
+                await repository.StorePoolAsync(pool,false, cancellationTokenSource.Token);
             }
 
             await repository.UpdateAggregatedPool(pools[0].AssetIdA ?? 0, pools[0].AssetIdB ?? 0, cancellationTokenSource.Token);
@@ -307,5 +307,63 @@ namespace AVMTradeReporterTests.Model
             Assert.That(result.Any(r => r.AssetIdA == 10 && r.AssetIdB == 20), Is.True);
             Assert.That(result.Any(r => r.AssetIdA == 20 && r.AssetIdB == 10), Is.True);
         }
+        [Test]
+        public async Task GetAggregatedPoolAlgoUsdcLevel1()
+        {
+            var pools = JsonConvert.DeserializeObject<AVMTradeReporter.Model.Data.Pool[]>(File.ReadAllText("Data/pools-algo-usdc.json"));
+            var loggerPoolRepository = new LoggerFactory().CreateLogger<PoolRepository>();
+            var loggerAggregatedPoolRepository = new LoggerFactory().CreateLogger<AggregatedPoolRepository>();
+            var aggregatedPoolsRepository = new AggregatedPoolRepository(null!, loggerAggregatedPoolRepository, null!);
+            var config = new AppConfiguration() { };
+            var options = new OptionsWrapper<AppConfiguration>(config);
+            var repository = new PoolRepository(null!, loggerPoolRepository, null!, aggregatedPoolsRepository, options, null!, null!);
+            var cancellationTokenSource = new CancellationTokenSource();
+            Assert.That(pools, Is.Not.Null, "Pools should not be null");
+            foreach (var pool in pools)
+            {
+                await repository.StorePoolAsync(pool, false, cancellationTokenSource.Token);
+            }
+
+            await repository.UpdateAggregatedPool(0, 31566704, cancellationTokenSource.Token);
+            var aggregatedPool = aggregatedPoolsRepository.GetAggregatedPool(0, 31566704);
+            Assert.That(aggregatedPool, Is.Not.Null, "Aggregated pool should not be null");
+
+            Assert.That(aggregatedPool.AssetIdA, Is.EqualTo(0));
+            Assert.That(aggregatedPool.AssetIdB, Is.EqualTo(31566704));
+            var price = aggregatedPool.VirtualSumBLevel1 / aggregatedPool.VirtualSumALevel1;
+            Assert.That(price, Is.EqualTo(0.2419409725161350303906896744m));
+
+        }
+
+        [Test]
+        public async Task GetAggregatedPoolAlgoUsdcLevel2()
+        {
+            var pools = JsonConvert.DeserializeObject<AVMTradeReporter.Model.Data.Pool[]>(File.ReadAllText("Data/pools-algo-usdc-big-20250820.json"));
+            var loggerPoolRepository = new LoggerFactory().CreateLogger<PoolRepository>();
+            var loggerAggregatedPoolRepository = new LoggerFactory().CreateLogger<AggregatedPoolRepository>();
+            var aggregatedPoolsRepository = new AggregatedPoolRepository(null!, loggerAggregatedPoolRepository, null!);
+            var config = new AppConfiguration() { };
+            var options = new OptionsWrapper<AppConfiguration>(config);
+            var repository = new PoolRepository(null!, loggerPoolRepository, null!, aggregatedPoolsRepository, options, null!, null!);
+            var cancellationTokenSource = new CancellationTokenSource();
+            Assert.That(pools, Is.Not.Null, "Pools should not be null");
+            foreach (var pool in pools)
+            {
+                await repository.StorePoolAsync(pool, false, cancellationTokenSource.Token);
+            }
+
+            await repository.UpdateAggregatedPool(0, 31566704, cancellationTokenSource.Token);
+            var aggregatedPool = aggregatedPoolsRepository.GetAggregatedPool(0, 31566704);
+            Assert.That(aggregatedPool, Is.Not.Null, "Aggregated pool should not be null");
+
+            Assert.That(aggregatedPool.AssetIdA, Is.EqualTo(0));
+            Assert.That(aggregatedPool.AssetIdB, Is.EqualTo(31566704));
+            var priceLevel1 = aggregatedPool.VirtualSumBLevel1 / aggregatedPool.VirtualSumALevel1;
+            Assert.That(priceLevel1, Is.EqualTo(0.2419287836457800044215208276m));
+            var priceLevel2 = aggregatedPool.VirtualSumBLevel2 / aggregatedPool.VirtualSumALevel2;
+            Assert.That(priceLevel2, Is.EqualTo(0.226399026016675825900209013m));
+
+        }
+
     }
 }

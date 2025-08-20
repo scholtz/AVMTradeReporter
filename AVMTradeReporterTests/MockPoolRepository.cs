@@ -26,7 +26,7 @@ namespace AVMTradeReporterTests
             return Task.FromResult<AVMTradeReporter.Model.Data.Pool?>(pool);
         }
 
-        public Task<bool> StorePoolAsync(AVMTradeReporter.Model.Data.Pool pool, CancellationToken cancellationToken)
+        public Task<bool> StorePoolAsync(AVMTradeReporter.Model.Data.Pool pool, bool updateAggregated = true, CancellationToken? cancellationToken = null)
         {
             var existing = pools.FirstOrDefault(p => p.PoolAddress == pool.PoolAddress);
             if (existing != null)

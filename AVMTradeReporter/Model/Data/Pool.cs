@@ -55,10 +55,18 @@ namespace AVMTradeReporter.Model.Data
                         // calculate virtual amount for concentrated liquidity AMM
                         if (PMin.HasValue && PMax.HasValue && A.HasValue && B.HasValue)
                         {
+                            if(PMin == PMax)
+                            {
+                                // special case when PMin == PMax, we can calculate the virtual amount directly
+
+                                return RealAmountA;
+                            }
+
                             var a = Convert.ToDecimal(A.Value) / 1000000000;
                             var b = Convert.ToDecimal(B.Value) / 1000000000;
                             var p = Convert.ToDecimal(Math.Sqrt(Convert.ToDouble(PMin)));
                             var r = Convert.ToDecimal(Math.Sqrt(Convert.ToDouble(PMax)));
+
                             var q = p / r - 1;
                             var eb = a * p + b / r;
                             var d = eb * eb - 4 * a * b * q;
@@ -105,6 +113,12 @@ namespace AVMTradeReporter.Model.Data
                         // calculate virtual amount for concentrated liquidity AMM
                         if (PMin.HasValue && PMax.HasValue && A.HasValue && B.HasValue)
                         {
+                            if (PMin == PMax)
+                            {
+                                // special case when PMin == PMax, we can calculate the virtual amount directly
+
+                                return RealAmountA;
+                            }
                             var a = Convert.ToDecimal(A.Value) / 1000000000;
                             var b = Convert.ToDecimal(B.Value) / 1000000000;
                             var p = Convert.ToDecimal(Math.Sqrt(Convert.ToDouble(PMin)));
@@ -130,7 +144,7 @@ namespace AVMTradeReporter.Model.Data
                 catch (Exception ex)
                 {
                     // Log the exception or handle it as needed
-                    Console.Error.WriteLine($"Error calculating VirtualAmountA: {ex.Message}");
+                    Console.Error.WriteLine($"Error calculating VirtualAmountB: {ex.Message}");
                     return 0;
                 }
             }

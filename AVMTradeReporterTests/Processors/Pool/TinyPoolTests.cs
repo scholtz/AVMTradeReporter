@@ -61,7 +61,7 @@ namespace AVMTradeReporterTests.Processors.Pool
                 Protocol = DEXProtocol.Pact,
                 ApprovalProgramHash = "hash",
                 Timestamp = DateTimeOffset.UtcNow
-            }, cancellationTokenSource.Token);
+            }, false, cancellationTokenSource.Token);
 
             var processor = new AVMTradeReporter.Processors.Pool.TinyPoolProcessor(algod, poolRepository, logger, new MockAssetRepository());
             string address = "2PIFZW53RHCSFSYMCFUBW4XOCXOMB7XOYQSQ6KGT3KVGJTL4HM6COZRNMM";
@@ -98,7 +98,7 @@ namespace AVMTradeReporterTests.Processors.Pool
                 Protocol = DEXProtocol.Tiny,
                 ApprovalProgramHash = "hash",
                 Timestamp = DateTimeOffset.UtcNow
-            }, cancellationTokenSource.Token);
+            }, false, cancellationTokenSource.Token);
 
             var processor = new AVMTradeReporter.Processors.Pool.TinyPoolProcessor(algod, poolRepository, logger, new MockAssetRepository());
             string address = "E3CM5G2PMOS2IDKWLQDUSXUKUPJNY4HM4XOS4GJD2STQB7EJJC4HJLIXFE";
