@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: avm-trade-reporter2-app
-          image: scholtz2/avm-trade-reporter:1.2025.08.19-main
+          image: scholtz2/avm-trade-reporter:1.2025.08.20-main
           imagePullPolicy: Always
           resources:
             requests:
