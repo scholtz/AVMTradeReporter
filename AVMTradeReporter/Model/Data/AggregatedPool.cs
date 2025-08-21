@@ -180,6 +180,10 @@ namespace AVMTradeReporter.Model.Data
                         {
                             var aggregatedPoolACAVirtual = aggregatedPoolAC.VirtualSumALevel1 * minAssetCVirtual / aggregatedPoolAC.VirtualSumBLevel1;
                             var aggregatedPoolCABBVirtual = aggregatedPoolCB.VirtualSumBLevel1 * minAssetCVirtual / aggregatedPoolCB.VirtualSumALevel1;
+
+                            if (aggregatedPoolACAVirtual == 0) continue;
+                            if (aggregatedPoolCABBVirtual == 0) continue;
+
                             pool.VirtualSumALevel2 += aggregatedPoolACAVirtual;
                             pool.VirtualSumBLevel2 += aggregatedPoolCABBVirtual;
 
