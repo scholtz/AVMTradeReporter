@@ -118,10 +118,10 @@ namespace AVMTradeReporter.Model.Data
                 };
                 ret[$"{g.Key.B}-{g.Key.A}"] = ret[$"{g.Key.A}-{g.Key.B}"].Reverse();
             }
-#if RELEASE
-// temporarily disabled 
-return ret.Values;
-#endif
+            //#if RELEASE
+            //// temporarily disabled 
+            //return ret.Values;
+            //#endif
             if (level1Only)
             {
                 // if only level 1 pools are requested, return them now
