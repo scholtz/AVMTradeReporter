@@ -25,6 +25,12 @@ namespace AVMTradeReporter.Controllers
 
                 var processor = new MainnetImageProcessor();
                 var data = await processor.LoadImageAsync(assetId, cancellationToken);
+                if (data.Length > 100)
+                {
+                    // add cache headers to cache for 1 week
+                    Response.Headers["Cache-Control"] = "public,max-age=604800"; // 1
+                    Response.Headers["Expires"] = DateTime.UtcNow.AddDays(7).ToString("R");
+                }
                 return File(data, "image/png");
             }
             catch (HttpRequestException ex)
