@@ -1,5 +1,6 @@
 ﻿using Algorand;
 using Algorand.Algod;
+using AVMTradeReporter.Model.Data.Enums;
 using AVMTradeReporter.Processors.Pool;
 using Microsoft.Extensions.Logging;
 using System;
@@ -64,6 +65,33 @@ namespace AVMTradeReporterTests.Processors.Pool
             Assert.That(pool.A, Is.GreaterThan(119972741391));
             Assert.That(pool.B, Is.GreaterThan(708069440));
             Assert.That(pool.LPFee, Is.EqualTo(0.003m));
+        }
+        [Test]
+        public async Task LoadPactPoolAsyncStableSwap()
+        {
+            // Arrange
+
+            using var httpClient = HttpClientConfigurator.ConfigureHttpClient(AlgodConfiguration.MainNet);
+            DefaultApi algod = new DefaultApi(httpClient);
+            var logger = new LoggerFactory().CreateLogger<PactPoolProcessor>();
+
+            var poolRepository = new MockPoolRepository();
+            var processor = new AVMTradeReporter.Processors.Pool.PactPoolProcessor(algod, poolRepository, logger, new MockAssetRepository());
+            string address = "UA5STOUUVGT3ARYUCBQKXBE6L3XONZL3MOP7AC3VXP5AQA6NI5OUBRJ6UU";
+            ulong appId = 1205810547;
+            // Act
+            var pool = await processor.LoadPoolAsync(address, appId);
+            // Assert
+            Assert.IsNotNull(pool);
+            Assert.That(pool.AMMType, Is.EqualTo(AMMType.StableSwap));
+            Assert.That(pool.PoolAddress, Is.EqualTo(address));
+            Assert.That(pool.PoolAppId, Is.EqualTo(appId));
+            Assert.That(pool.AssetIdA, Is.EqualTo(0));
+            Assert.That(pool.AssetIdB, Is.EqualTo(1185173782));
+            Assert.That(pool.A, Is.GreaterThan(1));
+            Assert.That(pool.B, Is.GreaterThan(1));
+            Assert.That(pool.LPFee, Is.EqualTo(0.0015m));
+            Assert.That(pool.ProtocolFeePortion, Is.EqualTo(0.2));
         }
     }
 }

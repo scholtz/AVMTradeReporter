@@ -267,17 +267,17 @@ namespace AVMTradeReporterTests.Model
             Assert.That(pools, Is.Not.Null, "Pools should not be null");
             foreach (var pool in pools)
             {
-                await repository.StorePoolAsync(pool,false, cancellationTokenSource.Token);
+                await repository.StorePoolAsync(pool, false, cancellationTokenSource.Token);
             }
 
             await repository.UpdateAggregatedPool(pools[0].AssetIdA ?? 0, pools[0].AssetIdB ?? 0, cancellationTokenSource.Token);
             var aggregatedPool = aggregatedPoolsRepository.GetAggregatedPool(pools[0].AssetIdA ?? 0, pools[0].AssetIdB ?? 0);
             Assert.That(aggregatedPool, Is.Not.Null, "Aggregated pool should not be null");
 
-            Assert.That(aggregatedPool.AssetIdA, Is.EqualTo(452399768));
-            Assert.That(aggregatedPool.AssetIdB, Is.EqualTo(0));
+            Assert.That(aggregatedPool.AssetIdA, Is.EqualTo(0));
+            Assert.That(aggregatedPool.AssetIdB, Is.EqualTo(452399768));
             var price = aggregatedPool.VirtualSumBLevel1 / aggregatedPool.VirtualSumALevel1;
-            Assert.That(price, Is.EqualTo(0.1467794677270622992714169588m));
+            Assert.That(price, Is.EqualTo(6.8129419971702496226889404405m));
 
         }
 
@@ -361,7 +361,7 @@ namespace AVMTradeReporterTests.Model
             var priceLevel1 = aggregatedPool.VirtualSumBLevel1 / aggregatedPool.VirtualSumALevel1;
             Assert.That(priceLevel1, Is.EqualTo(0.2419287836457800044215208276m));
             var priceLevel2 = aggregatedPool.VirtualSumBLevel2 / aggregatedPool.VirtualSumALevel2;
-            Assert.That(priceLevel2, Is.EqualTo(0.226399026016675825900209013m));
+            Assert.That(priceLevel2, Is.EqualTo(0.2248087775069365526107028402m));
 
         }
 

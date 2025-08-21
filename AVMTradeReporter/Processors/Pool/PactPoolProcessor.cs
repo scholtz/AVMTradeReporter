@@ -43,6 +43,10 @@ namespace AVMTradeReporter.Processors.Pool
             var PACT_FEE_BPS = app.Params.GlobalState.FirstOrDefault(p => p.Key == Convert.ToBase64String(Encoding.ASCII.GetBytes("PACT_FEE_BPS")));
             var CONFIG = app.Params.GlobalState.FirstOrDefault(p => p.Key == Convert.ToBase64String(Encoding.ASCII.GetBytes("CONFIG")));
             if (CONFIG == null) throw new Exception("CONFIG is missing in global params");
+
+            var CONTRACT_NAME = app.Params.GlobalState.FirstOrDefault(p => p.Key == Convert.ToBase64String(Encoding.ASCII.GetBytes("CONTRACT_NAME")));
+            var contractName = CONTRACT_NAME != null ? Encoding.UTF8.GetString(Convert.FromBase64String(CONTRACT_NAME.Value.Bytes)) : "Pact AMM";
+
             var configBytes = Convert.FromBase64String(CONFIG.Value.Bytes);
             //app.Params.GlobalState
             var hash = app.Params.ApprovalProgram.Bytes.ToSha256Hex();
@@ -60,6 +64,13 @@ namespace AVMTradeReporter.Processors.Pool
             var assetBDecimals = (await _assetRepository.GetAssetAsync(assetBId, cancelationTokenSource.Token))?.Params?.Decimals;
             var lpFee = FEE_BPS == null ? 0.003m : FEE_BPS.Value.Uint / 10000m;
             var pactFee = PACT_FEE_BPS == null || FEE_BPS == null ? 0 : Convert.ToDecimal(PACT_FEE_BPS.Value.Uint) / Convert.ToDecimal(FEE_BPS.Value.Uint);
+
+            var type = AMMType.OldAMM;
+            if (contractName == "[SI] PACT AMM")
+            {
+                type = AMMType.StableSwap;
+            }
+
             var updated = false;
             if (pool == null)
             {
@@ -72,7 +83,7 @@ namespace AVMTradeReporter.Processors.Pool
                     B = B.Value.Uint,
                     L = L.Value.Uint,
                     AssetIdLP = LTID.Value.Uint,
-                    AMMType = AMMType.OldAMM,
+                    AMMType = type,
                     Timestamp = DateTimeOffset.Now,
                     ApprovalProgramHash = hash,
                     LPFee = lpFee,
@@ -148,7 +159,7 @@ namespace AVMTradeReporter.Processors.Pool
                 }
                 if (pool.AMMType != AMMType.OldAMM)
                 {
-                    pool.AMMType = AMMType.OldAMM;
+                    pool.AMMType = type;
                     updated = true;
                 }
 
