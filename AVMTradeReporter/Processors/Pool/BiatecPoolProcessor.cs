@@ -83,8 +83,10 @@ namespace AVMTradeReporter.Processors.Pool
 
             var assetAId = assetA.Value.Uint;
             var assetBId = assetB.Value.Uint;
-            var lpFee = FEE_SCALE.Value.Uint / SCALE.Value.Uint;
-            var protocolFeePortion = Convert.ToDecimal(FEE_Protocol.Value.Uint) / FEE_Protocol_Scale;
+            var lpFee = Convert.ToDecimal(FEE_SCALE.Value.Uint) / SCALE.Value.Uint;
+            var FEE_ProtocolBytes = Convert.FromBase64String(FEE_Protocol.Value.Bytes);
+            var fee_Protocol = BitConverter.ToUInt64(FEE_ProtocolBytes.Skip(24).Take(8).Reverse().ToArray(), 0);
+            var protocolFeePortion = Convert.ToDecimal(fee_Protocol) / FEE_Protocol_Scale;
             //app.Params.GlobalState
             var hash = app.Params.ApprovalProgram.Bytes.ToSha256Hex();
 

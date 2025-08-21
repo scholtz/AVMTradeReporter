@@ -69,5 +69,36 @@ namespace AVMTradeReporterTests.Processors.Pool
             Assert.That(pool.VirtualAmountB / pool.VirtualAmountA, Is.GreaterThanOrEqualTo(pool.PMin));
             Assert.That(pool.VirtualAmountB / pool.VirtualAmountA, Is.LessThanOrEqualTo(pool.PMax));
         }
+        [Test]
+        public async Task LoadBiatecPoolAsync3098469455()
+        {
+            // Arrange
+
+            using var httpClient = HttpClientConfigurator.ConfigureHttpClient(AlgodConfiguration.MainNet);
+            DefaultApi algod = new DefaultApi(httpClient);
+            var logger = new LoggerFactory().CreateLogger<BiatecPoolProcessor>();
+
+            var poolRepository = new MockPoolRepository();
+            var processor = new AVMTradeReporter.Processors.Pool.BiatecPoolProcessor(algod, poolRepository, logger, new MockAssetRepository());
+            string address = "LBLOB5IO3UZX3JOBY2MHDLPEWWIKMPYIISAKLABX4B7S4SPG2W65OQXOKQ";
+            ulong appId = 3098469455;
+            // Act
+            var pool = await processor.LoadPoolAsync(address, appId);
+            // Assert
+            Assert.IsNotNull(pool);
+            Assert.That(pool.PoolAddress, Is.EqualTo(address));
+            Assert.That(pool.PoolAppId, Is.EqualTo(appId));
+            Assert.That(pool.AssetIdA, Is.EqualTo(1241945177));
+            Assert.That(pool.AssetIdB, Is.EqualTo(31566704));
+            Assert.That(pool.A, Is.GreaterThan(0));
+            Assert.That(pool.B, Is.GreaterThan(0));
+            Assert.That(pool.L, Is.GreaterThan(0));
+            Assert.That(pool.PMin, Is.GreaterThan(0));
+            Assert.That(pool.PMax, Is.GreaterThan(0));
+            Assert.That(pool.LPFee, Is.EqualTo(0.001m));
+            Assert.That(pool.ProtocolFeePortion, Is.EqualTo(0.2m));
+            Assert.That(pool.VirtualAmountB / pool.VirtualAmountA, Is.GreaterThanOrEqualTo(pool.PMin));
+            Assert.That(pool.VirtualAmountB / pool.VirtualAmountA, Is.LessThanOrEqualTo(pool.PMax));
+        }
     }
 }
