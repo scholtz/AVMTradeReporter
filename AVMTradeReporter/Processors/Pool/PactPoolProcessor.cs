@@ -66,10 +66,19 @@ namespace AVMTradeReporter.Processors.Pool
             var pactFee = PACT_FEE_BPS == null || FEE_BPS == null ? 0 : Convert.ToDecimal(PACT_FEE_BPS.Value.Uint) / Convert.ToDecimal(FEE_BPS.Value.Uint);
 
             var type = AMMType.OldAMM;
+            var a = A.Value.Uint;
+            var b = B.Value.Uint;
+            ulong? stableA = null;
+            ulong? stableB = null;
             if (contractName == "[SI] PACT AMM")
             {
                 type = AMMType.StableSwap;
+                stableA = a;
+                stableB = b;
+                a = 0;
+                b = 0;
             }
+            _logger.LogInformation($"Processing {contractName}");
 
             var updated = false;
             if (pool == null)
@@ -79,8 +88,10 @@ namespace AVMTradeReporter.Processors.Pool
                     PoolAddress = address,
                     PoolAppId = appId,
                     Protocol = DEXProtocol.Pact,
-                    A = A.Value.Uint,
-                    B = B.Value.Uint,
+                    A = a,
+                    B = b,
+                    StableA = stableA,
+                    StableB = stableB,
                     L = L.Value.Uint,
                     AssetIdLP = LTID.Value.Uint,
                     AMMType = type,
@@ -102,9 +113,14 @@ namespace AVMTradeReporter.Processors.Pool
                     pool.Protocol = DEXProtocol.Pact;
                     updated = true;
                 }
-                if (pool.A != A.Value.Uint)
+                if (pool.A != a)
                 {
-                    pool.A = A.Value.Uint;
+                    pool.A = a;
+                    updated = true;
+                }
+                if (pool.StableA != stableA)
+                {
+                    pool.StableA = stableA;
                     updated = true;
                 }
                 if (pool.ApprovalProgramHash != hash)
@@ -112,9 +128,14 @@ namespace AVMTradeReporter.Processors.Pool
                     pool.ApprovalProgramHash = hash;
                     updated = true;
                 }
-                if (pool.B != B.Value.Uint)
+                if (pool.B != b)
                 {
-                    pool.B = B.Value.Uint;
+                    pool.B = b;
+                    updated = true;
+                }
+                if (pool.StableB != stableB)
+                {
+                    pool.StableB = stableB;
                     updated = true;
                 }
                 if (pool.L != L.Value.Uint)
@@ -167,8 +188,6 @@ namespace AVMTradeReporter.Processors.Pool
                 {
                     pool.Timestamp = DateTimeOffset.Now;
                 }
-
-
             }
             if (updated)
             {
