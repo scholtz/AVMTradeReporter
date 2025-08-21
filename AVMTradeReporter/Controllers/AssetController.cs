@@ -15,7 +15,7 @@ namespace AVMTradeReporter.Controllers
         }
 
         /// Returns image for asset by id
-        [HttpGet("{assetId}")]
+        [HttpGet("image/{assetId}")]
         public async Task<IActionResult> GetAssetImage(ulong assetId)
         {
             try
