@@ -284,6 +284,7 @@ namespace AVMTradeReporter.Hubs
         }
         public static bool ShouldSendAggregatedPoolToUser(AggregatedPool item, SubscriptionFilter filter)
         {
+            if (filter.RecentAggregatedPool) return true;
             if (filter.AggregatedPoolsIds.Contains(item.Id)) return true;
             return false;
         }

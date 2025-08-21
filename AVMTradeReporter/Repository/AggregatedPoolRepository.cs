@@ -77,7 +77,14 @@ namespace AVMTradeReporter.Repository
                 {
                     foreach (var agg in aggregates)
                     {
-                        await StoreAndPublishAsync(agg, cancellationToken);
+                        var send = agg;
+                        if (agg.AssetIdA > agg.AssetIdB)
+                        {
+                            // Ensure consistent order for the pair
+                            send = agg.Reverse();
+                        }
+                        await StoreAggregatedPoolAsync(send, cancellationToken);
+                        await PublishToHubAsync(send, cancellationToken);
                     }
                 }, cancellationToken);
             }
@@ -103,8 +110,14 @@ namespace AVMTradeReporter.Repository
                     return;
                 }
 
-                _cache[(agg.AssetIdA, agg.AssetIdB)] = agg;
-                await StoreAndPublishAsync(agg, cancellationToken);
+                var send = agg;
+                if (agg.AssetIdA > agg.AssetIdB)
+                {
+                    // Ensure consistent order for the pair
+                    send = agg.Reverse();
+                }
+                await StoreAggregatedPoolAsync(send, cancellationToken);
+                await PublishToHubAsync(send, cancellationToken);
             }
             catch (Exception ex)
             {
@@ -190,10 +203,9 @@ namespace AVMTradeReporter.Repository
                     }
                 }
                 await _hubContext.Clients.Users(subscribedClientsConnections).SendAsync(BiatecScanHub.Subscriptions.AGGREGATED_POOL, send, cancellationToken);
-
             }
         }
-        private async Task StoreAndPublishAsync(AggregatedPool agg, CancellationToken cancellationToken)
+        private async Task StoreAggregatedPoolAsync(AggregatedPool agg, CancellationToken cancellationToken)
         {
             _cache[(agg.AssetIdA, agg.AssetIdB)] = agg;
             _cache[(agg.AssetIdB, agg.AssetIdA)] = agg;
@@ -222,12 +234,6 @@ namespace AVMTradeReporter.Repository
             {
                 // Publish to hub (simple broadcast like other repos)
                 var send = agg;
-                if (agg.AssetIdA > agg.AssetIdB)
-                {
-                    // Ensure consistent order for the pair
-                    send = agg.Reverse();
-                }
-
                 BiatecScanHub.RecentAggregatedPoolUpdates.Enqueue(send);
                 if (BiatecScanHub.RecentAggregatedPoolUpdates.Count > 100)
                 {
@@ -237,7 +243,7 @@ namespace AVMTradeReporter.Repository
                 {
                     BiatecScanHub.ALGOUSD = send;
                 }
-                await PublishToHubAsync(send, cancellationToken);
+
             }
             catch (Exception ex)
             {
