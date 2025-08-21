@@ -77,11 +77,19 @@ namespace AVMTradeReporter.Model.Data
         /// <summary>
         /// Aggregated sum of virtual amounts of level 1 and level 2 pools for asset A.
         /// </summary>
+#if RELEASE
+        public decimal VirtualSumA => VirtualSumALevel1;
+#else
         public decimal VirtualSumA => VirtualSumALevel1 + VirtualSumALevel2;
+#endif
         /// <summary>
         /// Aggregated sum of virtual amounts of level 1 and level 2 pools for asset B.
         /// </summary>
+#if RELEASE
+        public decimal VirtualSumB => VirtualSumBLevel1;
+#else
         public decimal VirtualSumB => VirtualSumBLevel1 + VirtualSumBLevel2;
+#endif
 
         /// <summary>
         /// Aggregates pools by (AssetIdA, AssetIdB) and computes the sum of A and B.
