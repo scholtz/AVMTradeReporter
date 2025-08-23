@@ -11,10 +11,13 @@ namespace AVMTradeReporterTests
 {
     public class MockAssetRepository : IAssetRepository
     {
+        private readonly Dictionary<ulong, Asset> _assets = new();
+
         public async Task<Asset?> GetAssetAsync(ulong assetId, CancellationToken cancellationToken = default)
         {
             await Task.Delay(1, cancellationToken);
-            return new Asset
+            if (_assets.TryGetValue(assetId, out var a)) return a;
+            var asset = new Asset
             {
                 Index = assetId,
                 Params = new AssetParams
@@ -32,6 +35,14 @@ namespace AVMTradeReporterTests
                     Clawback = null
                 }
             };
+            _assets[assetId] = asset;
+            return asset;
+        }
+
+        public Task SetAssetAsync(Asset asset, CancellationToken cancellationToken = default)
+        {
+            _assets[asset.Index] = asset;
+            return Task.CompletedTask;
         }
     }
 }

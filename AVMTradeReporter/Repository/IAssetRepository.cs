@@ -4,7 +4,7 @@ namespace AVMTradeReporter.Repository
 {
     public interface IAssetRepository
     {
-        public Task<Algorand.Algod.Model.Asset?> GetAssetAsync(ulong assetId, CancellationToken cancellationToken = default);
-
+        Task<BiatecAsset?> GetAssetAsync(ulong assetId, CancellationToken cancellationToken = default);
+        Task SetAssetAsync(BiatecAsset asset, CancellationToken cancellationToken = default);
     }
 }
