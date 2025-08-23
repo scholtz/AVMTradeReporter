@@ -377,6 +377,7 @@ namespace AVMTradeReporter.Repository
 
                     if (changed)
                     {
+                        asset.Timestamp = DateTimeOffset.UtcNow;
                         await _assetRepository.SetAssetAsync(asset, cancellationToken);
                     }
                 }
