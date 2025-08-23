@@ -7,6 +7,6 @@ namespace AVMTradeReporter.Model.Data
         public AssetType Type { get; set; } = AssetType.ASA;
         public decimal PriceUSD { get; set; }
         public decimal TVL_USD { get; set; }
-        
+        public DateTimeOffset? Timestamp { get; set; }
     }
 }

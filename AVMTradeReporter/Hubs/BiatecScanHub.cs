@@ -124,6 +124,13 @@ namespace AVMTradeReporter.Hubs
                     await Clients.User(userId).SendAsync(BiatecScanHub.Subscriptions.POOL, item);
                 }
             }
+            if (filter.RecentAssets)
+            {
+                foreach (var item in RecentAssetUpdates.OrderBy(t => t.Timestamp))
+                {
+                    await Clients.User(userId).SendAsync(BiatecScanHub.Subscriptions.ASSET, item);
+                }
+            }
             if (filter.RecentAggregatedPool)
             {
                 foreach (var item in RecentAggregatedPoolUpdates.OrderBy(t => t.LastUpdated))

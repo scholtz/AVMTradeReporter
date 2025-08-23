@@ -60,6 +60,10 @@ namespace AVMTradeReporter.Repository
                                         var asset = JsonSerializer.Deserialize<BiatecAsset>(value!);
                                         if (asset != null)
                                         {
+                                            if (asset.Timestamp == null)
+                                            {
+                                                asset.Timestamp = DateTimeOffset.UtcNow;
+                                            }
                                             _assetCache[asset.Index] = asset;
                                             loaded++;
                                         }
@@ -128,7 +132,8 @@ namespace AVMTradeReporter.Repository
                             Reserve = null,
                             Freeze = null,
                             Clawback = null
-                        }
+                        },
+                        Timestamp = DateTimeOffset.UtcNow
                     };
                     _assetCache[0] = algo;
                     return algo;
@@ -158,6 +163,14 @@ namespace AVMTradeReporter.Repository
         public async Task SetAssetAsync(BiatecAsset asset, CancellationToken cancellationToken = default)
         {
             if (asset == null) return;
+            if (_assetCache.ContainsKey(asset.Index))
+            {
+                var cached = _assetCache[asset.Index];
+                if (asset.PriceUSD != cached.PriceUSD || asset.TVL_USD != cached.TVL_USD)
+                {
+                    asset.Timestamp = DateTimeOffset.UtcNow;
+                }
+            }
             _assetCache[asset.Index] = asset;
 
             BiatecScanHub.RecentAssetUpdates.Enqueue(asset);
@@ -166,6 +179,7 @@ namespace AVMTradeReporter.Repository
                 BiatecScanHub.RecentAssetUpdates.TryDequeue(out _);
             }
             await EnsureInitializedAsync(cancellationToken);
+            await PersistToRedisAsync(asset, cancellationToken);
             await PublishToHubAsync(asset, cancellationToken);
         }
 
@@ -229,17 +243,17 @@ namespace AVMTradeReporter.Repository
             return query.OrderBy(a => a.Index).Skip(offset).Take(size).ToArray();
         }
 
-        private async Task PersistToRedisAsync(ulong assetId, Algorand.Algod.Model.Asset asset)
+        private async Task PersistToRedisAsync(BiatecAsset asset, CancellationToken cancellationToken)
         {
             if (_redisDatabase == null) return;
             try
             {
                 var json = System.Text.Json.JsonSerializer.Serialize(asset);
-                await _redisDatabase.StringSetAsync(RedisKeyPrefix + assetId, json);
+                await _redisDatabase.StringSetAsync(RedisKeyPrefix + asset.Index, json);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to persist asset {AssetId} to Redis", assetId);
+                _logger.LogWarning(ex, "Failed to persist asset {AssetId} to Redis", asset.Index);
             }
         }
     }
