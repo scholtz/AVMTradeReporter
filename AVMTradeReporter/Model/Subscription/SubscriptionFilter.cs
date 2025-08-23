@@ -7,10 +7,12 @@
         public bool RecentLiquidity { get; set; } = false;
         public bool RecentPool { get; set; } = false;
         public bool RecentAggregatedPool { get; set; } = false;
+        public bool RecentAssets { get; set; } = false;
 
         public bool MainAggregatedPools { get; set; } = false;
 
-        public List<string> PoolsAddresses { get; set; } = new();
-        public List<string> AggregatedPoolsIds { get; set; } = new();
+        public HashSet<string> PoolsAddresses { get; set; } = new();
+        public HashSet<string> AggregatedPoolsIds { get; set; } = new();
+        public HashSet<ulong> AssetIds { get; set; } = new();
     }
 }

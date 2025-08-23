@@ -1,10 +1,13 @@
 ﻿using Algorand.Algod;
 using Algorand.KMD;
+using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Processors.Pool;
 using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
 using System.Collections.Concurrent;
 using System.Text.Json;
+using AVMTradeReporter.Hubs;
+using Microsoft.AspNetCore.SignalR;
 
 namespace AVMTradeReporter.Repository
 {
@@ -13,7 +16,8 @@ namespace AVMTradeReporter.Repository
         private readonly IDefaultApi _algod;
         private readonly ILogger<AssetRepository> _logger;
         private readonly IDatabase? _redisDatabase;
-        private static readonly ConcurrentDictionary<ulong, Algorand.Algod.Model.Asset> _assetCache = new();
+        private static readonly ConcurrentDictionary<ulong, BiatecAsset> _assetCache = new();
+        private readonly IHubContext<BiatecScanHub>? _hubContext;
         private static bool _initialized = false;
         private static readonly SemaphoreSlim _initLock = new(1, 1);
         private const string RedisKeyPrefix = "asset:";
@@ -21,11 +25,13 @@ namespace AVMTradeReporter.Repository
         public AssetRepository(
             IDefaultApi algod,
             ILogger<AssetRepository> logger,
-            IDatabase? redisDatabase = null)
+            IDatabase? redisDatabase = null,
+            IHubContext<BiatecScanHub>? hubContext = null)
         {
             _algod = algod;
             _logger = logger;
             _redisDatabase = redisDatabase;
+            _hubContext = hubContext;
         }
 
         private async Task EnsureInitializedAsync(CancellationToken cancellationToken)
@@ -51,7 +57,7 @@ namespace AVMTradeReporter.Repository
                                 {
                                     try
                                     {
-                                        var asset = System.Text.Json.JsonSerializer.Deserialize<Algorand.Algod.Model.Asset>(value!);
+                                        var asset = JsonSerializer.Deserialize<BiatecAsset>(value!);
                                         if (asset != null)
                                         {
                                             _assetCache[asset.Index] = asset;
@@ -97,7 +103,7 @@ namespace AVMTradeReporter.Repository
             }
         }
 
-        public async Task<Algorand.Algod.Model.Asset?> GetAssetAsync(ulong assetId, CancellationToken cancellationToken = default)
+        public async Task<BiatecAsset?> GetAssetAsync(ulong assetId, CancellationToken cancellationToken = default)
         {
             try
             {
@@ -106,7 +112,7 @@ namespace AVMTradeReporter.Repository
                 if (assetId == 0)
                 {
                     if (_assetCache.TryGetValue(0, out var native)) return native;
-                    var algo = new Algorand.Algod.Model.Asset()
+                    var algo = new BiatecAsset()
                     {
                         Index = 0,
                         Params = new Algorand.Algod.Model.AssetParams()
@@ -133,13 +139,14 @@ namespace AVMTradeReporter.Repository
                     return cached;
                 }
 
+                // Not in memory, load from algod
                 var asset = await _algod.GetAssetByIDAsync(cancellationToken, assetId);
                 if (asset != null)
                 {
-                    _assetCache[assetId] = asset;
-                    _ = PersistToRedisAsync(assetId, asset);
+                    _assetCache[assetId] = Newtonsoft.Json.JsonConvert.DeserializeObject<BiatecAsset>(Newtonsoft.Json.JsonConvert.SerializeObject(asset) ?? throw new Exception($"Unable to serialize asset {asset.Index}")) ?? throw new Exception($"Unable to deserialize asset to biatec asset {asset.Index}");
+                    await SetAssetAsync(_assetCache[assetId], cancellationToken); // fire and forget
                 }
-                return asset;
+                return _assetCache[assetId];
             }
             catch (Exception ex)
             {
@@ -148,19 +155,60 @@ namespace AVMTradeReporter.Repository
             }
         }
 
-        public async Task SetAssetAsync(Algorand.Algod.Model.Asset asset, CancellationToken cancellationToken = default)
+        public async Task SetAssetAsync(BiatecAsset asset, CancellationToken cancellationToken = default)
         {
             if (asset == null) return;
-            await EnsureInitializedAsync(cancellationToken);
             _assetCache[asset.Index] = asset;
-            await PersistToRedisAsync(asset.Index, asset);
+
+            BiatecScanHub.RecentAssetUpdates.Enqueue(asset);
+            while (BiatecScanHub.RecentAssetUpdates.Count > 50)
+            {
+                BiatecScanHub.RecentAssetUpdates.TryDequeue(out _);
+            }
+            await EnsureInitializedAsync(cancellationToken);
+            await PublishToHubAsync(asset, cancellationToken);
         }
 
-        public async Task<IEnumerable<Algorand.Algod.Model.Asset>> GetAssetsAsync(IEnumerable<ulong>? ids, string? search, int size, CancellationToken cancellationToken)
+        private async Task PublishToHubAsync(BiatecAsset asset, CancellationToken cancellationToken)
+        {
+            try
+            {
+                if (asset == null) throw new ArgumentNullException(nameof(asset));
+                // Ensure the pool is stored before publishing
+                if (_hubContext == null)
+                {
+                    _logger.LogWarning("Hub context is not initialized");
+                }
+                else
+                {
+                    var subscriptions = BiatecScanHub.GetSubscriptions();
+
+                    var subscribedClientsConnections = new HashSet<string>();
+
+                    foreach (var subscription in subscriptions)
+                    {
+                        var userId = subscription.Key;
+                        var filter = subscription.Value;
+
+                        if (BiatecScanHub.ShouldSendAssetToUser(asset, filter))
+                        {
+                            subscribedClientsConnections.Add(userId);
+                        }
+                    }
+                    await _hubContext.Clients.Users(subscribedClientsConnections).SendAsync(BiatecScanHub.Subscriptions.ASSET, asset, cancellationToken);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to publish asset {AssetId} to hub", asset.Index);
+            }
+        }
+
+        public async Task<IEnumerable<BiatecAsset>> GetAssetsAsync(IEnumerable<ulong>? ids, string? search, int offset, int size, CancellationToken cancellationToken)
         {
             await EnsureInitializedAsync(cancellationToken);
 
-            IEnumerable<Algorand.Algod.Model.Asset> query = _assetCache.Values;
+            IEnumerable<BiatecAsset> query = _assetCache.Values;
 
             if (ids != null && ids.Any())
             {
@@ -178,7 +226,7 @@ namespace AVMTradeReporter.Repository
                 query = query.Where(a => (a.Params?.Name?.ToLowerInvariant().Contains(s) ?? false) || (a.Params?.UnitName?.ToLowerInvariant().Contains(s) ?? false));
             }
 
-            return query.OrderBy(a => a.Index).Take(size).ToArray();
+            return query.OrderBy(a => a.Index).Skip(offset).Take(size).ToArray();
         }
 
         private async Task PersistToRedisAsync(ulong assetId, Algorand.Algod.Model.Asset asset)

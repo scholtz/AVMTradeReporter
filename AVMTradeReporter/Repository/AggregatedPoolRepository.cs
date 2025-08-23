@@ -180,29 +180,36 @@ namespace AVMTradeReporter.Repository
         }
         public async Task PublishToHubAsync(AggregatedPool send, CancellationToken cancellationToken = default)
         {
-            if (send == null) throw new ArgumentNullException(nameof(send));
-            // Ensure the pool is stored before publishing
-            if (_hubContext == null)
+            try
             {
-                _logger.LogWarning("Hub context is not initialized");
-            }
-            else
-            {
-                var subscriptions = BiatecScanHub.GetSubscriptions();
-
-                var subscribedClientsConnections = new HashSet<string>();
-
-                foreach (var subscription in subscriptions)
+                if (send == null) throw new ArgumentNullException(nameof(send));
+                // Ensure the pool is stored before publishing
+                if (_hubContext == null)
                 {
-                    var userId = subscription.Key;
-                    var filter = subscription.Value;
-
-                    if (BiatecScanHub.ShouldSendAggregatedPoolToUser(send, filter))
-                    {
-                        subscribedClientsConnections.Add(userId);
-                    }
+                    _logger.LogWarning("Hub context is not initialized");
                 }
-                await _hubContext.Clients.Users(subscribedClientsConnections).SendAsync(BiatecScanHub.Subscriptions.AGGREGATED_POOL, send, cancellationToken);
+                else
+                {
+                    var subscriptions = BiatecScanHub.GetSubscriptions();
+
+                    var subscribedClientsConnections = new HashSet<string>();
+
+                    foreach (var subscription in subscriptions)
+                    {
+                        var userId = subscription.Key;
+                        var filter = subscription.Value;
+
+                        if (BiatecScanHub.ShouldSendAggregatedPoolToUser(send, filter))
+                        {
+                            subscribedClientsConnections.Add(userId);
+                        }
+                    }
+                    await _hubContext.Clients.Users(subscribedClientsConnections).SendAsync(BiatecScanHub.Subscriptions.AGGREGATED_POOL, send, cancellationToken);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to publish AggregatedPoolUpdated for {a}-{b}", send.AssetIdA, send.AssetIdB);
             }
         }
         private async Task StoreAggregatedPoolAsync(AggregatedPool agg, CancellationToken cancellationToken)

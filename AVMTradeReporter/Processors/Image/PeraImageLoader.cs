@@ -8,7 +8,7 @@ namespace AVMTradeReporter.Processors.Image
     {
         class AssetData
         {
-            public string Logo { get; set; }
+            public string Logo { get; set; } = string.Empty;
         }
         public async Task<byte[]> LoadImageAsync(ulong assetId, CancellationToken cancellationToken)
         {

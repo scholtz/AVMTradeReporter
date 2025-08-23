@@ -1,7 +1,8 @@
-﻿using AVMTradeReporter.Processors.Image;
+﻿using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Processors.Image;
+using AVMTradeReporter.Repository;
 using Microsoft.AspNetCore.Mvc;
 using System.Net;
-using AVMTradeReporter.Repository;
 
 namespace AVMTradeReporter.Controllers
 {
@@ -26,8 +27,8 @@ namespace AVMTradeReporter.Controllers
         /// <param name="size">Maximum number of results to return (default 100, max 500).</param>
         /// <returns>List of matching assets with basic metadata.</returns>
         [HttpGet]
-        [ProducesResponseType(typeof(IEnumerable<object>), 200)]
-        public async Task<IActionResult> GetAssets([FromQuery] string? ids = null, [FromQuery] string? search = null, [FromQuery] int size = 100)
+        [ProducesResponseType(typeof(IEnumerable<BiatecAsset>), 200)]
+        public async Task<ActionResult<IEnumerable<BiatecAsset>>> GetAssets([FromQuery] string? ids = null, [FromQuery] string? search = null, [FromQuery] int offset = 0, [FromQuery] int size = 100)
         {
             try
             {
@@ -43,19 +44,9 @@ namespace AVMTradeReporter.Controllers
                                     .ToArray();
                 }
 
-                var assets = await _assetRepository.GetAssetsAsync(parsedIds, search, size, HttpContext.RequestAborted);
+                var assets = await _assetRepository.GetAssetsAsync(parsedIds, search, offset, size, HttpContext.RequestAborted);
 
-                var result = assets.Select(a => new
-                {
-                    id = a.Index,
-                    name = a.Params?.Name,
-                    unitName = a.Params?.UnitName,
-                    decimals = a.Params?.Decimals,
-                    total = a.Params?.Total,
-                    url = a.Params?.Url
-                });
-
-                return Ok(result);
+                return Ok(assets);
             }
             catch (OperationCanceledException)
             {

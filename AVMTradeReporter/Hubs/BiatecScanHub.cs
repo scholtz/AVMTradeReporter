@@ -12,14 +12,6 @@ namespace AVMTradeReporter.Hubs
 {
     public class BiatecScanHub : Hub
     {
-        private static readonly ConcurrentDictionary<string, SubscriptionFilter> User2Subscription = new ConcurrentDictionary<string, SubscriptionFilter>();
-        public static readonly ConcurrentQueue<Trade> RecentTrades = new ConcurrentQueue<Trade>();
-        public static readonly ConcurrentQueue<Liquidity> RecentLiquidityUpdates = new ConcurrentQueue<Liquidity>();
-        public static readonly ConcurrentQueue<Pool> RecentPoolUpdates = new ConcurrentQueue<Pool>();
-        public static readonly ConcurrentQueue<AggregatedPool> RecentAggregatedPoolUpdates = new ConcurrentQueue<AggregatedPool>();
-        public static readonly ConcurrentQueue<Model.Data.Block> RecentBlockUpdates = new ConcurrentQueue<Model.Data.Block>();
-        public static AggregatedPool? ALGOUSD = null;
-
         public class Subscriptions
         {
             public const string TRADE = "Trade";
@@ -27,9 +19,19 @@ namespace AVMTradeReporter.Hubs
             public const string BLOCK = "Block";
             public const string POOL = "Pool";
             public const string AGGREGATED_POOL = "AggregatedPool";
+            public const string ASSET = "Asset";
             public const string ERROR = "Error";
             public const string INFO = "Info";
         }
+
+        private static readonly ConcurrentDictionary<string, SubscriptionFilter> User2Subscription = new ConcurrentDictionary<string, SubscriptionFilter>();
+        public static readonly ConcurrentQueue<Trade> RecentTrades = new ConcurrentQueue<Trade>();
+        public static readonly ConcurrentQueue<Liquidity> RecentLiquidityUpdates = new ConcurrentQueue<Liquidity>();
+        public static readonly ConcurrentQueue<Pool> RecentPoolUpdates = new ConcurrentQueue<Pool>();
+        public static readonly ConcurrentQueue<AggregatedPool> RecentAggregatedPoolUpdates = new ConcurrentQueue<AggregatedPool>();
+        public static readonly ConcurrentQueue<Model.Data.Block> RecentBlockUpdates = new ConcurrentQueue<Model.Data.Block>();
+        public static readonly ConcurrentQueue<BiatecAsset> RecentAssetUpdates = new ConcurrentQueue<BiatecAsset>();
+        public static AggregatedPool? ALGOUSD = null;
 
 
         // Test method without authorization for debugging
@@ -286,6 +288,12 @@ namespace AVMTradeReporter.Hubs
         {
             if (filter.RecentAggregatedPool) return true;
             if (filter.AggregatedPoolsIds.Contains(item.Id)) return true;
+            return false;
+        }
+        public static bool ShouldSendAssetToUser(BiatecAsset item, SubscriptionFilter filter)
+        {
+            if (filter.RecentAssets) return true;
+            if (filter.AssetIds.Contains(item.Index)) return true;
             return false;
         }
     }
