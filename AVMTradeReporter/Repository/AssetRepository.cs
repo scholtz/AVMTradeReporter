@@ -163,14 +163,6 @@ namespace AVMTradeReporter.Repository
         public async Task SetAssetAsync(BiatecAsset asset, CancellationToken cancellationToken = default)
         {
             if (asset == null) return;
-            if (_assetCache.ContainsKey(asset.Index))
-            {
-                var cached = _assetCache[asset.Index];
-                if (asset.PriceUSD != cached.PriceUSD || asset.TVL_USD != cached.TVL_USD)
-                {
-                    asset.Timestamp = DateTimeOffset.UtcNow;
-                }
-            }
 
             if (asset.Timestamp == null)
             {
