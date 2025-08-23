@@ -300,7 +300,7 @@ namespace AVMTradeReporter.Hubs
         public static bool ShouldSendAssetToUser(BiatecAsset item, SubscriptionFilter filter)
         {
             if (filter.RecentAssets) return true;
-            if (filter.AssetIds.Contains(item.Index)) return true;
+            if (filter.AssetIds.Contains(item.Index.ToString())) return true;
             return false;
         }
     }

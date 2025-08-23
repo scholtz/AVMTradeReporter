@@ -13,6 +13,6 @@
 
         public HashSet<string> PoolsAddresses { get; set; } = new();
         public HashSet<string> AggregatedPoolsIds { get; set; } = new();
-        public HashSet<ulong> AssetIds { get; set; } = new();
+        public HashSet<string> AssetIds { get; set; } = new();
     }
 }
