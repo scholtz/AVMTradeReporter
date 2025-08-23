@@ -148,8 +148,8 @@ namespace AVMTradeReporter.Repository
                 var asset = await _algod.GetAssetByIDAsync(cancellationToken, assetId);
                 if (asset != null)
                 {
-                    _assetCache[assetId] = Newtonsoft.Json.JsonConvert.DeserializeObject<BiatecAsset>(Newtonsoft.Json.JsonConvert.SerializeObject(asset) ?? throw new Exception($"Unable to serialize asset {asset.Index}")) ?? throw new Exception($"Unable to deserialize asset to biatec asset {asset.Index}");
-                    await SetAssetAsync(_assetCache[assetId], cancellationToken); // fire and forget
+                    var assetToStore = Newtonsoft.Json.JsonConvert.DeserializeObject<BiatecAsset>(Newtonsoft.Json.JsonConvert.SerializeObject(asset) ?? throw new Exception($"Unable to serialize asset {asset.Index}")) ?? throw new Exception($"Unable to deserialize asset to biatec asset {asset.Index}");
+                    await SetAssetAsync(assetToStore, cancellationToken); // fire and forget
                 }
                 return _assetCache[assetId];
             }
@@ -170,6 +170,11 @@ namespace AVMTradeReporter.Repository
                 {
                     asset.Timestamp = DateTimeOffset.UtcNow;
                 }
+            }
+
+            if (asset.Timestamp == null)
+            {
+                asset.Timestamp = DateTimeOffset.UtcNow;
             }
             _assetCache[asset.Index] = asset;
 
