@@ -240,7 +240,7 @@ namespace AVMTradeReporter.Repository
                 query = query.Where(a => (a.Params?.Name?.ToLowerInvariant().Contains(s) ?? false) || (a.Params?.UnitName?.ToLowerInvariant().Contains(s) ?? false));
             }
 
-            return query.OrderBy(a => a.Index).Skip(offset).Take(size).ToArray();
+            return query.OrderByDescending(a => a.TVL_USD).Skip(offset).Take(size).ToArray();
         }
 
         private async Task PersistToRedisAsync(BiatecAsset asset, CancellationToken cancellationToken)
