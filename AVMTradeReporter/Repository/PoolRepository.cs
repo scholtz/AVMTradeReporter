@@ -27,11 +27,15 @@ namespace AVMTradeReporter.Repository
         private readonly IDatabase? _redisDatabase;
         private readonly AppConfiguration _appConfig;
         private readonly IServiceProvider _serviceProvider;
+        private readonly IAssetRepository? _assetRepository; // optional asset repository to enrich decimals
 
         // In-memory cache for pools
         private static readonly ConcurrentDictionary<string, Pool> _poolsCache = new();
         private readonly SemaphoreSlim _initializationSemaphore = new(1, 1);
         private bool _isInitialized = false;
+
+        // Per-pool load locks to prevent duplicate concurrent enrichment
+        private static readonly ConcurrentDictionary<string, SemaphoreSlim> _poolLoadSemaphores = new();
 
         public PoolRepository(
             ElasticsearchClient elasticClient,
@@ -40,7 +44,8 @@ namespace AVMTradeReporter.Repository
             AggregatedPoolRepository aggregatedPoolRepository,
             IOptions<AppConfiguration> appConfig,
             IServiceProvider serviceProvider,
-            IDatabase? redisDatabase = null
+            IDatabase? redisDatabase = null,
+            IAssetRepository? assetRepository = null
             )
         {
             _elasticClient = elasticClient;
@@ -50,6 +55,7 @@ namespace AVMTradeReporter.Repository
             _redisDatabase = redisDatabase;
             _appConfig = appConfig.Value;
             _serviceProvider = serviceProvider;
+            _assetRepository = assetRepository;
 
             CreatePoolIndexTemplateAsync().Wait();
         }
@@ -98,6 +104,50 @@ namespace AVMTradeReporter.Repository
             finally
             {
                 _initializationSemaphore.Release();
+            }
+        }
+
+        private SemaphoreSlim GetPoolSemaphore(string poolAddress)
+        {
+            return _poolLoadSemaphores.GetOrAdd(poolAddress, _ => new SemaphoreSlim(1, 1));
+        }
+
+        private async Task EnsurePoolAssetDecimalsAsync(Pool pool, CancellationToken cancellationToken)
+        {
+            if (pool == null) return;
+            if (pool.AssetADecimals.HasValue && pool.AssetBDecimals.HasValue) return; // already enriched
+            if (_assetRepository == null) return; // asset repository not supplied
+            // ensure asset ids present
+            if (!pool.AssetIdA.HasValue || !pool.AssetIdB.HasValue) return;
+            var sem = GetPoolSemaphore(pool.PoolAddress);
+            await sem.WaitAsync(cancellationToken);
+            try
+            {
+                // double check after acquiring lock
+                if (pool.AssetADecimals.HasValue && pool.AssetBDecimals.HasValue) return;
+                if (_assetRepository != null)
+                {
+                    var assetA = await _assetRepository.GetAssetAsync(pool.AssetIdA.Value, cancellationToken);
+                    var assetB = await _assetRepository.GetAssetAsync(pool.AssetIdB.Value, cancellationToken);
+                    if (!pool.AssetADecimals.HasValue && assetA?.Params?.Decimals != null)
+                    {
+                        pool.AssetADecimals = (ulong?)assetA.Params.Decimals;
+                    }
+                    if (!pool.AssetBDecimals.HasValue && assetB?.Params?.Decimals != null)
+                    {
+                        pool.AssetBDecimals = (ulong?)assetB.Params.Decimals;
+                    }
+                    // update cache with enriched pool
+                    _poolsCache[pool.PoolAddress] = pool;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to enrich decimals for pool {pool}", pool.PoolAddress);
+            }
+            finally
+            {
+                sem.Release();
             }
         }
 
@@ -245,7 +295,16 @@ namespace AVMTradeReporter.Repository
         public async Task<Pool?> GetPoolAsync(string poolAddress, CancellationToken cancellationToken)
         {
             await EnsureInitialized(cancellationToken);
-            return _poolsCache.TryGetValue(poolAddress, out var pool) ? pool : null;
+            if (_poolsCache.TryGetValue(poolAddress, out var pool))
+            {
+                await EnsurePoolAssetDecimalsAsync(pool, cancellationToken);
+                if (pool.AssetADecimals.HasValue && pool.AssetBDecimals.HasValue)
+                {
+                    return pool;
+                }
+                return null; // not yet ready
+            }
+            return null;
         }
         /// <summary>
         /// Stores the specified pool in memory, Redis, and Elasticsearch, and updates related aggregated data.
@@ -275,6 +334,9 @@ namespace AVMTradeReporter.Repository
 
                 // Update in-memory cache
                 _poolsCache[pool.PoolAddress] = pool;
+
+                // Attempt to enrich decimals immediately if possible so that first retrieval waits less
+                await EnsurePoolAssetDecimalsAsync(pool, token);
 
                 BiatecScanHub.RecentPoolUpdates.Enqueue(pool);
                 if (BiatecScanHub.RecentPoolUpdates.Count > 100)
@@ -325,8 +387,11 @@ namespace AVMTradeReporter.Repository
 
                 _logger.LogDebug("Pool updated in memory: {poolId}", pool.PoolAddress);
 
-                // Publish pool update to SignalR hub
-                await PublishPoolUpdateToHub(pool, token);
+                // Only publish if decimals are known
+                if (pool.AssetADecimals.HasValue && pool.AssetBDecimals.HasValue)
+                {
+                    await PublishPoolUpdateToHub(pool, token);
+                }
 
                 // Update aggregated view for this asset pair if asset ids are present
                 if (updateAggregated && pool.AssetIdA.HasValue && pool.AssetIdB.HasValue)
@@ -567,7 +632,16 @@ namespace AVMTradeReporter.Repository
                 .OrderByDescending(p => p.Timestamp ?? DateTimeOffset.MinValue)
                 .Take(size);
 
-            return filteredPools.ToList();
+            var result = new List<Pool>();
+            foreach (var p in filteredPools)
+            {
+                await EnsurePoolAssetDecimalsAsync(p, cancellationToken);
+                if (p.AssetADecimals.HasValue && p.AssetBDecimals.HasValue)
+                {
+                    result.Add(p);
+                }
+            }
+            return result;
         }
 
         public async Task<int> GetPoolCountAsync(CancellationToken cancellationToken = default)
