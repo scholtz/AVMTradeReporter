@@ -1,6 +1,7 @@
 ﻿using AVMTradeReporter.Processors.Image;
 using Microsoft.AspNetCore.Mvc;
 using System.Net;
+using AVMTradeReporter.Repository;
 
 namespace AVMTradeReporter.Controllers
 {
@@ -9,10 +10,62 @@ namespace AVMTradeReporter.Controllers
     public class AssetController : ControllerBase
     {
         private readonly ILogger<AssetController> _logger;
+        private readonly IAssetRepository _assetRepository;
 
-        public AssetController(ILogger<AssetController> logger)
+        public AssetController(ILogger<AssetController> logger, IAssetRepository assetRepository)
         {
             _logger = logger;
+            _assetRepository = assetRepository;
+        }
+
+        /// <summary>
+        /// List assets from the in-memory cache (prefilled from Redis) or filter by IDs / search term.
+        /// </summary>
+        /// <param name="ids">Comma separated list of asset IDs to include. Missing IDs will be fetched on-demand.</param>
+        /// <param name="search">Case-insensitive substring filter applied to asset name or unit name.</param>
+        /// <param name="size">Maximum number of results to return (default 100, max 500).</param>
+        /// <returns>List of matching assets with basic metadata.</returns>
+        [HttpGet]
+        [ProducesResponseType(typeof(IEnumerable<object>), 200)]
+        public async Task<IActionResult> GetAssets([FromQuery] string? ids = null, [FromQuery] string? search = null, [FromQuery] int size = 100)
+        {
+            try
+            {
+                size = Math.Clamp(size, 1, 500);
+                IEnumerable<ulong>? parsedIds = null;
+                if (!string.IsNullOrWhiteSpace(ids))
+                {
+                    parsedIds = ids.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                                    .Select(s => ulong.TryParse(s, out var v) ? v : (ulong?)null)
+                                    .Where(v => v.HasValue)
+                                    .Select(v => v!.Value)
+                                    .Distinct()
+                                    .ToArray();
+                }
+
+                var assets = await _assetRepository.GetAssetsAsync(parsedIds, search, size, HttpContext.RequestAborted);
+
+                var result = assets.Select(a => new
+                {
+                    id = a.Index,
+                    name = a.Params?.Name,
+                    unitName = a.Params?.UnitName,
+                    decimals = a.Params?.Decimals,
+                    total = a.Params?.Total,
+                    url = a.Params?.Url
+                });
+
+                return Ok(result);
+            }
+            catch (OperationCanceledException)
+            {
+                return StatusCode(499, new { error = "Request canceled" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to list assets");
+                return StatusCode(500, new { error = "Failed to list assets" });
+            }
         }
 
         /// Returns image for asset by id

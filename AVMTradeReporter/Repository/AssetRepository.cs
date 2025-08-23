@@ -1,6 +1,5 @@
 ﻿using Algorand.Algod;
 using Algorand.KMD;
-using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Processors.Pool;
 using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
@@ -14,7 +13,7 @@ namespace AVMTradeReporter.Repository
         private readonly IDefaultApi _algod;
         private readonly ILogger<AssetRepository> _logger;
         private readonly IDatabase? _redisDatabase;
-        private static readonly ConcurrentDictionary<ulong, BiatecAsset> _assetCache = new();
+        private static readonly ConcurrentDictionary<ulong, Algorand.Algod.Model.Asset> _assetCache = new();
         private static bool _initialized = false;
         private static readonly SemaphoreSlim _initLock = new(1, 1);
         private const string RedisKeyPrefix = "asset:";
@@ -52,7 +51,7 @@ namespace AVMTradeReporter.Repository
                                 {
                                     try
                                     {
-                                        var asset = JsonSerializer.Deserialize<BiatecAsset>(value!);
+                                        var asset = System.Text.Json.JsonSerializer.Deserialize<Algorand.Algod.Model.Asset>(value!);
                                         if (asset != null)
                                         {
                                             _assetCache[asset.Index] = asset;
@@ -98,7 +97,7 @@ namespace AVMTradeReporter.Repository
             }
         }
 
-        public async Task<BiatecAsset?> GetAssetAsync(ulong assetId, CancellationToken cancellationToken = default)
+        public async Task<Algorand.Algod.Model.Asset?> GetAssetAsync(ulong assetId, CancellationToken cancellationToken = default)
         {
             try
             {
@@ -107,7 +106,7 @@ namespace AVMTradeReporter.Repository
                 if (assetId == 0)
                 {
                     if (_assetCache.TryGetValue(0, out var native)) return native;
-                    var algo = new BiatecAsset()
+                    var algo = new Algorand.Algod.Model.Asset()
                     {
                         Index = 0,
                         Params = new Algorand.Algod.Model.AssetParams()
@@ -134,14 +133,13 @@ namespace AVMTradeReporter.Repository
                     return cached;
                 }
 
-                // Not in memory, load from algod
                 var asset = await _algod.GetAssetByIDAsync(cancellationToken, assetId);
                 if (asset != null)
                 {
-                    _assetCache[assetId] = Newtonsoft.Json.JsonConvert.DeserializeObject<BiatecAsset>(Newtonsoft.Json.JsonConvert.SerializeObject(asset) ?? throw new Exception($"Unable to serialize asset {asset.Index}")) ?? throw new Exception($"Unable to deserialize asset to biatec asset {asset.Index}");
-                    _ = PersistToRedisAsync(assetId, _assetCache[assetId]); // fire and forget
+                    _assetCache[assetId] = asset;
+                    _ = PersistToRedisAsync(assetId, asset);
                 }
-                return _assetCache[assetId];
+                return asset;
             }
             catch (Exception ex)
             {
@@ -150,7 +148,7 @@ namespace AVMTradeReporter.Repository
             }
         }
 
-        public async Task SetAssetAsync(BiatecAsset asset, CancellationToken cancellationToken = default)
+        public async Task SetAssetAsync(Algorand.Algod.Model.Asset asset, CancellationToken cancellationToken = default)
         {
             if (asset == null) return;
             await EnsureInitializedAsync(cancellationToken);
@@ -158,12 +156,37 @@ namespace AVMTradeReporter.Repository
             await PersistToRedisAsync(asset.Index, asset);
         }
 
-        private async Task PersistToRedisAsync(ulong assetId, BiatecAsset asset)
+        public async Task<IEnumerable<Algorand.Algod.Model.Asset>> GetAssetsAsync(IEnumerable<ulong>? ids, string? search, int size, CancellationToken cancellationToken)
+        {
+            await EnsureInitializedAsync(cancellationToken);
+
+            IEnumerable<Algorand.Algod.Model.Asset> query = _assetCache.Values;
+
+            if (ids != null && ids.Any())
+            {
+                var missing = ids.Where(id => !_assetCache.ContainsKey(id)).ToArray();
+                foreach (var id in missing)
+                {
+                    await GetAssetAsync(id, cancellationToken);
+                }
+                query = _assetCache.Where(kvp => ids.Contains(kvp.Key)).Select(kvp => kvp.Value);
+            }
+
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var s = search.Trim().ToLowerInvariant();
+                query = query.Where(a => (a.Params?.Name?.ToLowerInvariant().Contains(s) ?? false) || (a.Params?.UnitName?.ToLowerInvariant().Contains(s) ?? false));
+            }
+
+            return query.OrderBy(a => a.Index).Take(size).ToArray();
+        }
+
+        private async Task PersistToRedisAsync(ulong assetId, Algorand.Algod.Model.Asset asset)
         {
             if (_redisDatabase == null) return;
             try
             {
-                var json = JsonSerializer.Serialize(asset);
+                var json = System.Text.Json.JsonSerializer.Serialize(asset);
                 await _redisDatabase.StringSetAsync(RedisKeyPrefix + assetId, json);
             }
             catch (Exception ex)
