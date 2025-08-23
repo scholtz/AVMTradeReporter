@@ -33,6 +33,9 @@
     <None Update="Data\pool-3136517663.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Update="Data\pool-403797689.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <None Update="Data\pools-algo-usdc-big-20250820.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

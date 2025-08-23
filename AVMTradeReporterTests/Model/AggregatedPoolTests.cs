@@ -364,6 +364,27 @@ namespace AVMTradeReporterTests.Model
             Assert.That(priceLevel2, Is.EqualTo(0.2248087775069365526107028402m));
 
         }
+        [Test]
+        public async Task Pool403797689()
+        {
+            var pool = JsonConvert.DeserializeObject<AVMTradeReporter.Model.Data.Pool>(File.ReadAllText("Data/pool-403797689.json"));
+            var loggerPoolRepository = new LoggerFactory().CreateLogger<PoolRepository>();
+            var loggerAggregatedPoolRepository = new LoggerFactory().CreateLogger<AggregatedPoolRepository>();
+            var aggregatedPoolsRepository = new AggregatedPoolRepository(null!, loggerAggregatedPoolRepository, null!);
+            var config = new AppConfiguration() { };
+            var options = new OptionsWrapper<AppConfiguration>(config);
+            var repository = new PoolRepository(null!, loggerPoolRepository, null!, aggregatedPoolsRepository, options, null!, null!);
+            var cancellationTokenSource = new CancellationTokenSource();
+            Assert.That(pool, Is.Not.Null, "Pools should not be null");
+            await repository.StorePoolAsync(pool, false, cancellationTokenSource.Token);
+            await repository.UpdateAggregatedPool(403797689, 31566704, cancellationTokenSource.Token);
+            var aggregatedPool = aggregatedPoolsRepository.GetAggregatedPool(403797689, 31566704);
+            Assert.That(aggregatedPool, Is.Not.Null, "Aggregated pool should not be null");
+
+            Assert.That(aggregatedPool.AssetIdA, Is.EqualTo(31566704));
+            Assert.That(aggregatedPool.AssetIdB, Is.EqualTo(403797689));
+
+        }
 
     }
 }
