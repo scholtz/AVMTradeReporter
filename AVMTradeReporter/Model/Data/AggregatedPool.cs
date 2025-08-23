@@ -77,11 +77,19 @@ namespace AVMTradeReporter.Model.Data
         /// <summary>
         /// Aggregated sum of virtual amounts of level 1 and level 2 pools for asset A.
         /// </summary>
+#if RELEASE
+        public decimal VirtualSumA => VirtualSumALevel1;
+#else
         public decimal VirtualSumA => VirtualSumALevel1 + VirtualSumALevel2;
+#endif
         /// <summary>
         /// Aggregated sum of virtual amounts of level 1 and level 2 pools for asset B.
         /// </summary>
+#if RELEASE
+        public decimal VirtualSumB => VirtualSumBLevel1;
+#else
         public decimal VirtualSumB => VirtualSumBLevel1 + VirtualSumBLevel2;
+#endif
 
         /// <summary>
         /// Aggregates pools by (AssetIdA, AssetIdB) and computes the sum of A and B.
@@ -89,7 +97,7 @@ namespace AVMTradeReporter.Model.Data
         /// </summary>
         /// <param name="pools">Sequence of pools to aggregate.</param>
         /// <returns>Aggregated pools grouped by asset pair.</returns>
-        public static IEnumerable<AggregatedPool> FromPools(IEnumerable<Pool> pools)
+        public static IEnumerable<AggregatedPool> FromPools(IEnumerable<Pool> pools, bool level1Only = false)
         {
             var ret = new SortedDictionary<string, AggregatedPool>();
             if (pools == null) return ret.Values;
@@ -118,18 +126,29 @@ namespace AVMTradeReporter.Model.Data
                 };
                 ret[$"{g.Key.B}-{g.Key.A}"] = ret[$"{g.Key.A}-{g.Key.B}"].Reverse();
             }
-#if RELEASE
-// temporarily disabled 
-return ret.Values;
-#endif
+            //#if RELEASE
+            //// temporarily disabled 
+            //return ret.Values;
+            //#endif
+            if (level1Only)
+            {
+                // if only level 1 pools are requested, return them now
+                return ret.Values;
+            }
+
+
             // Add Level 2 pools
             // find intermediary pools for each aggregated pool
             // intermediary pool is the pool where exists aggreageted pool from asset A to asset C and from asset C to asset B
 
+            var lowFeePools = pools.Where(p => p.LPFee < 0.001m).ToList();
+            var tier1LowFeePools = FromPools(lowFeePools, true);
+
             foreach (var kv in ret)
             {
                 var pool = ret[kv.Key];
-                var intermediaryPools = ret.Values.Where(p =>
+
+                var intermediaryPools = tier1LowFeePools.Where(p =>
                     (p.AssetIdA == pool.AssetIdA || p.AssetIdA == pool.AssetIdB || p.AssetIdB == pool.AssetIdA || p.AssetIdB == pool.AssetIdB) &&
                     !((p.AssetIdA == pool.AssetIdA && p.AssetIdB == pool.AssetIdB) ||
                         (p.AssetIdA == pool.AssetIdB && p.AssetIdB == pool.AssetIdA))
@@ -163,53 +182,34 @@ return ret.Values;
                         }
 
                         var minAssetCVirtual = Math.Min(aggregatedPoolAC.VirtualSumBLevel1, aggregatedPoolCB.VirtualSumALevel1);
+                        if (aggregatedPoolAC.VirtualSumBLevel1 > aggregatedPoolCB.VirtualSumALevel1 * 100) continue;
+                        if (aggregatedPoolAC.VirtualSumALevel1 > aggregatedPoolCB.VirtualSumBLevel1 * 100) continue;
                         if (minAssetCVirtual > 0 && aggregatedPoolAC.VirtualSumBLevel1 > 0 && aggregatedPoolCB.VirtualSumALevel1 > 0)
                         {
                             var aggregatedPoolACAVirtual = aggregatedPoolAC.VirtualSumALevel1 * minAssetCVirtual / aggregatedPoolAC.VirtualSumBLevel1;
                             var aggregatedPoolCABBVirtual = aggregatedPoolCB.VirtualSumBLevel1 * minAssetCVirtual / aggregatedPoolCB.VirtualSumALevel1;
+
+                            if (aggregatedPoolACAVirtual == 0) continue;
+                            if (aggregatedPoolCABBVirtual == 0) continue;
+
                             pool.VirtualSumALevel2 += aggregatedPoolACAVirtual;
                             pool.VirtualSumBLevel2 += aggregatedPoolCABBVirtual;
+
+                            var p = aggregatedPoolCABBVirtual / aggregatedPoolACAVirtual;
+                            //if (pool.AssetIdA == 0 && pool.AssetIdB == 31566704)
+                            //{
+
+                            //}
                             foreach (var poolAddress in aggregatedPoolAC.Level1Pools)
                             {
-                                pool.Level2Pools.Add(poolAddress);
+                                pool.Level2Pools.Add(poolAddress + "|" + p);
                             }
                             foreach (var poolAddress in aggregatedPoolCB.Level1Pools)
                             {
-                                pool.Level2Pools.Add(poolAddress);
+                                pool.Level2Pools.Add(poolAddress + "|" + p);
                             }
                         }
                     }
-                    //var keyBC = $"{pool.AssetIdB}-{assetC}";
-                    //var keyCA = $"{assetC}-{pool.AssetIdA}";
-                    //if (ret.TryGetValue(keyBC, out var aggregatedPoolBC) && ret.TryGetValue(keyCA, out var aggregatedPoolCA))
-                    //{
-                    //    if (aggregatedPoolBC.AssetIdA != pool.AssetIdB)
-                    //    {
-                    //        aggregatedPoolBC = aggregatedPoolBC.Reverse();
-                    //    }
-                    //    if (aggregatedPoolCA.AssetIdB != pool.AssetIdA)
-                    //    {
-                    //        aggregatedPoolCA = aggregatedPoolCA.Reverse();
-                    //    }
-                    //    var minAssetCVirtual = Math.Min(aggregatedPoolBC.VirtualSumBLevel1, aggregatedPoolCA.VirtualSumALevel1);
-                    //    if (minAssetCVirtual > 0 && aggregatedPoolBC.VirtualSumBLevel1 > 0 && aggregatedPoolCA.VirtualSumALevel1 > 0)
-                    //    {
-                    //        var aggregatedPoolBCAVirtual = aggregatedPoolBC.VirtualSumALevel1 * minAssetCVirtual / aggregatedPoolBC.VirtualSumBLevel1;
-                    //        var aggregatedPoolCABBBVirtual = aggregatedPoolCA.VirtualSumBLevel1 * minAssetCVirtual / aggregatedPoolCA.VirtualSumALevel1;
-                    //        pool.VirtualSumALevel2 += aggregatedPoolBCAVirtual;
-                    //        pool.VirtualSumBLevel2 += aggregatedPoolCABBBVirtual;
-                    //        foreach (var poolAddress in aggregatedPoolBC.Level1Pools)
-                    //        {
-                    //            pool.Level2Pools.Add(poolAddress);
-                    //        }
-                    //        foreach (var poolAddress in aggregatedPoolCA.Level1Pools)
-                    //        {
-                    //            pool.Level2Pools.Add(poolAddress);
-                    //        }
-                    //    }
-                    //}
-
-
                 }
             }
 

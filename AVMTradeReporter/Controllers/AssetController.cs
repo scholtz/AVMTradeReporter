@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using AVMTradeReporter.Processors.Image;
+using Microsoft.AspNetCore.Mvc;
 using System.Net;
 
 namespace AVMTradeReporter.Controllers
@@ -15,42 +16,22 @@ namespace AVMTradeReporter.Controllers
         }
 
         /// Returns image for asset by id
-        [HttpGet("{assetId}")]
+        [HttpGet("image/{assetId}")]
         public async Task<IActionResult> GetAssetImage(ulong assetId)
         {
             try
             {
                 var cancellationToken = HttpContext.RequestAborted;
 
-                var imagesDir = Path.Combine(AppContext.BaseDirectory, "images");
-                Directory.CreateDirectory(imagesDir);
-
-                var imagePath = Path.Combine(imagesDir, $"{assetId}.png");
-
-                if (System.IO.File.Exists(imagePath))
+                var processor = new MainnetImageProcessor();
+                var data = await processor.LoadImageAsync(assetId, cancellationToken);
+                if (data.Length > 100)
                 {
-                    var imageBytes = await System.IO.File.ReadAllBytesAsync(imagePath, cancellationToken);
-                    return File(imageBytes, "image/png");
+                    // add cache headers to cache for 1 week
+                    Response.Headers["Cache-Control"] = "public,max-age=604800"; // 1
+                    Response.Headers["Expires"] = DateTime.UtcNow.AddDays(7).ToString("R");
                 }
-
-                var remoteUrl = $"https://asa-list.tinyman.org/assets/{assetId}/icon.png";
-                using var httpClient = new HttpClient();
-
-                using var response = await httpClient.GetAsync(remoteUrl, cancellationToken);
-
-                if (response.StatusCode == HttpStatusCode.NotFound)
-                {
-                    // if not found, return transparent 1x1 pixel PNG
-                    return File(Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="), "image/png");
-                }
-
-                response.EnsureSuccessStatusCode();
-
-                var imageBytesFromRemote = await response.Content.ReadAsByteArrayAsync(cancellationToken);
-
-                await System.IO.File.WriteAllBytesAsync(imagePath, imageBytesFromRemote, cancellationToken);
-
-                return File(imageBytesFromRemote, "image/png");
+                return File(data, "image/png");
             }
             catch (HttpRequestException ex)
             {

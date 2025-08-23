@@ -6,6 +6,7 @@ namespace AVMTradeReporter.Model.Data.Enums
     public enum AMMType
     {
         OldAMM,
+        StableSwap,
         ConcentratedLiquidityAMM
     }
 }

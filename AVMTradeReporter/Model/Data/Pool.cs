@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 
 namespace AVMTradeReporter.Model.Data
 {
-    
+
     public class Pool
     {
         public string PoolAddress { get; set; } = string.Empty;
@@ -15,6 +15,8 @@ namespace AVMTradeReporter.Model.Data
         public ulong? AssetIdLP { get; set; }
         public ulong? A { get; set; }
         public ulong? B { get; set; }
+        public ulong? StableA { get; set; }
+        public ulong? StableB { get; set; }
         // protocol fees in A asset
         public ulong? AF { get; set; }
         // protocol fees in B asset
@@ -55,7 +57,7 @@ namespace AVMTradeReporter.Model.Data
                         // calculate virtual amount for concentrated liquidity AMM
                         if (PMin.HasValue && PMax.HasValue && A.HasValue && B.HasValue)
                         {
-                            if(PMin == PMax)
+                            if (PMin == PMax)
                             {
                                 // special case when PMin == PMax, we can calculate the virtual amount directly
 
