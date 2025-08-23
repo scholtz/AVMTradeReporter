@@ -1,4 +1,5 @@
 ﻿using Algorand.Algod.Model;
+using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Repository;
 using System.Collections.Concurrent;
 
@@ -6,12 +7,12 @@ namespace AVMTradeReporterTests
 {
     public class MockAssetRepository : IAssetRepository
     {
-        private readonly ConcurrentDictionary<ulong, Asset> _assets = new();
+        private readonly ConcurrentDictionary<ulong, BiatecAsset> _assets = new();
 
-        public Task<Asset?> GetAssetAsync(ulong assetId, CancellationToken cancellationToken = default)
+        public Task<BiatecAsset?> GetAssetAsync(ulong assetId, CancellationToken cancellationToken = default)
         {
-            if (_assets.TryGetValue(assetId, out var a)) return Task.FromResult<Asset?>(a);
-            var asset = new Asset
+            if (_assets.TryGetValue(assetId, out var a)) return Task.FromResult<BiatecAsset?>(a);
+            var asset = new BiatecAsset
             {
                 Index = assetId,
                 Params = new AssetParams
@@ -27,21 +28,23 @@ namespace AVMTradeReporterTests
                     Reserve = null,
                     Freeze = null,
                     Clawback = null
-                }
+                },
+                PriceUSD = 0,
+                TVL_USD = 0
             };
             _assets[assetId] = asset;
-            return Task.FromResult<Asset?>(asset);
+            return Task.FromResult<BiatecAsset?>(asset);
         }
 
-        public Task SetAssetAsync(Asset asset, CancellationToken cancellationToken = default)
+        public Task SetAssetAsync(BiatecAsset asset, CancellationToken cancellationToken = default)
         {
             _assets[asset.Index] = asset;
             return Task.CompletedTask;
         }
 
-        public Task<IEnumerable<Asset>> GetAssetsAsync(IEnumerable<ulong>? ids, string? search, int size, CancellationToken cancellationToken)
+        public Task<IEnumerable<BiatecAsset>> GetAssetsAsync(IEnumerable<ulong>? ids, string? search, int offset, int size, CancellationToken cancellationToken)
         {
-            IEnumerable<Asset> query = _assets.Values;
+            IEnumerable<BiatecAsset> query = _assets.Values;
             if (ids != null && ids.Any())
             {
                 query = query.Where(a => ids.Contains(a.Index));
@@ -51,7 +54,7 @@ namespace AVMTradeReporterTests
                 var s = search.ToLowerInvariant();
                 query = query.Where(a => (a.Params?.Name?.ToLowerInvariant().Contains(s) ?? false) || (a.Params?.UnitName?.ToLowerInvariant().Contains(s) ?? false));
             }
-            return Task.FromResult(query.Take(size));
+            return Task.FromResult(query.Skip(offset).Take(size));
         }
     }
 }

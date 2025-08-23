@@ -15,17 +15,20 @@ namespace AVMTradeReporter.Repository
         private readonly ElasticsearchClient _elasticClient;
         private readonly ILogger<AggregatedPoolRepository> _logger;
         private readonly IHubContext<BiatecScanHub> _hubContext;
+        private readonly IAssetRepository? _assetRepository; // optional asset repository for price/tvl updates
 
         private static readonly ConcurrentDictionary<(ulong A, ulong B), AggregatedPool> _cache = new();
 
         public AggregatedPoolRepository(
             ElasticsearchClient elasticClient,
             ILogger<AggregatedPoolRepository> logger,
-            IHubContext<BiatecScanHub> hubContext)
+            IHubContext<BiatecScanHub> hubContext,
+            IAssetRepository? assetRepository = null)
         {
             _elasticClient = elasticClient;
             _logger = logger;
             _hubContext = hubContext;
+            _assetRepository = assetRepository;
 
             CreateIndexTemplateAsync().Wait();
         }
@@ -251,10 +254,136 @@ namespace AVMTradeReporter.Repository
                     BiatecScanHub.ALGOUSD = send;
                 }
 
+                // Update related asset prices / tvl
+                await UpdateRelatedAssetsAsync(agg, cancellationToken);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to publish AggregatedPoolUpdated for {a}-{b}", agg.AssetIdA, agg.AssetIdB);
+            }
+        }
+
+        private async Task UpdateRelatedAssetsAsync(AggregatedPool updatedPool, CancellationToken cancellationToken)
+        {
+            if (_assetRepository == null) return; // Feature disabled if repository not supplied
+            try
+            {
+                // Assets potentially affected: both sides plus reference assets (ALGO=0, USDC=31566704)
+                var affected = new HashSet<ulong> { updatedPool.AssetIdA, updatedPool.AssetIdB, 0UL, 31566704UL };
+                // Ensure ALGO/USDC prices first so that derived prices can use them
+                var ordered = affected.OrderBy(a => a == 0 ? 0 : a == 31566704 ? 1 : 2).ToArray();
+
+                // Cache for quick price lookup
+                var priceCache = new Dictionary<ulong, decimal>();
+
+                foreach (var assetId in ordered)
+                {
+                    var asset = await _assetRepository.GetAssetAsync(assetId, cancellationToken);
+                    if (asset == null) continue;
+                    bool changed = false;
+
+                    // Calculate PriceUSD
+                    decimal newPrice = asset.PriceUSD;
+                    if (assetId == 31566704UL)
+                    {
+                        newPrice = 1m; // USDC assumed $1
+                    }
+                    else if (assetId == 0UL)
+                    {
+                        // ALGO price from ALGO/USDC pair (orientation A=0, B=USDC if possible)
+                        var algoUsdc = GetAggregatedPool(0, 31566704);
+                        if (algoUsdc != null)
+                        {
+                            var orient = algoUsdc.AssetIdB == 31566704 ? algoUsdc : algoUsdc.Reverse();
+                            if (orient.VirtualSumALevel1 > 0)
+                            {
+                                newPrice = orient.VirtualSumBLevel1 / orient.VirtualSumALevel1; // USDC per ALGO
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // 1. Try direct asset-USDC pair
+                        var pairUsdc = GetAggregatedPool(assetId, 31566704);
+                        if (pairUsdc != null)
+                        {
+                            var orient = pairUsdc.AssetIdB == 31566704 ? pairUsdc : pairUsdc.Reverse();
+                            if (orient.VirtualSumALevel1 > 0)
+                            {
+                                newPrice = orient.VirtualSumBLevel1 / orient.VirtualSumALevel1; // USDC per asset
+                            }
+                        }
+                        else
+                        {
+                            // 2. Derive via ALGO if available (asset-ALGO)
+                            var algoAsset = await _assetRepository.GetAssetAsync(0, cancellationToken);
+                            var pairAlgo = GetAggregatedPool(assetId, 0);
+                            if (algoAsset?.PriceUSD > 0 && pairAlgo != null)
+                            {
+                                var orient = pairAlgo.AssetIdA == assetId ? pairAlgo : pairAlgo.Reverse();
+                                if (orient.VirtualSumALevel1 > 0)
+                                {
+                                    var algoPerAsset = orient.VirtualSumBLevel1 / orient.VirtualSumALevel1; // ALGO per asset
+                                    newPrice = algoPerAsset * algoAsset.PriceUSD; // USD per asset
+                                }
+                            }
+                        }
+                    }
+
+                    if (newPrice > 0 && newPrice != asset.PriceUSD)
+                    {
+                        asset.PriceUSD = newPrice;
+                        changed = true;
+                    }
+                    priceCache[assetId] = asset.PriceUSD;
+
+                    // Calculate TVL_USD using trusted reference pairs (ALGO=0, USDC=31566704)
+                    ulong[] refs = new[] {
+                        0UL, 31566704UL, 1134696561UL, 2537013734UL, 1185173782UL,
+                        386192725UL,1058926737UL,2400334372UL,760037151UL,386195940UL, 386195940UL,
+                        246516580UL, 246519683UL,227855942UL, 2320775407UL, 887406851UL,887648583UL,
+                        1241945177UL, 1241944285UL, 2320804780UL
+                    };
+                    decimal tvlUsd = 0m;
+                    foreach (var refAsset in refs)
+                    {
+                        if (refAsset == assetId) continue; // skip self
+                        var pair = GetAggregatedPool(assetId, refAsset);
+                        if (pair == null) continue;
+                        var orient = pair.AssetIdA == assetId ? pair : pair.Reverse();
+                        // Prices
+                        decimal priceAsset = priceCache.TryGetValue(assetId, out var pA) ? pA : (asset.PriceUSD > 0 ? asset.PriceUSD : 0);
+                        decimal priceRef = 0m;
+                        if (refAsset == 31566704UL) priceRef = 1m; // USDC
+                        else if (refAsset == 0UL)
+                        {
+                            if (!priceCache.TryGetValue(0UL, out priceRef))
+                            {
+                                var algoAsset = await _assetRepository.GetAssetAsync(0, cancellationToken);
+                                priceRef = algoAsset?.PriceUSD ?? 0m;
+                                priceCache[0UL] = priceRef;
+                            }
+                        }
+                        if (priceAsset <= 0 || priceRef <= 0) continue; // need both prices
+                        // TVL contribution = USD value of both sides
+                        var poolUsd = orient.TVL_A * priceAsset + orient.TVL_B * priceRef;
+                        if (poolUsd > 0) tvlUsd += poolUsd;
+                    }
+                    if (tvlUsd > 0 && tvlUsd != asset.TVL_USD)
+                    {
+                        asset.TVL_USD = tvlUsd;
+                        changed = true;
+                    }
+
+                    if (changed)
+                    {
+                        await _assetRepository.SetAssetAsync(asset, cancellationToken);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to update asset prices/TVL after aggregated pool update {a}-{b}", updatedPool.AssetIdA, updatedPool.AssetIdB);
             }
         }
     }
