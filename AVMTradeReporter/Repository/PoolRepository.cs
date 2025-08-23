@@ -486,9 +486,9 @@ namespace AVMTradeReporter.Repository
                     return;
                 }
 
-                existingPool.AssetIdA = liquidity.AssetIdA;
-                existingPool.AssetIdB = liquidity.AssetIdB;
-                existingPool.AssetIdLP = liquidity.AssetIdLP;
+                //existingPool.AssetIdA = liquidity.AssetIdA;
+                //existingPool.AssetIdB = liquidity.AssetIdB;
+                //existingPool.AssetIdLP = liquidity.AssetIdLP;
                 existingPool.A = liquidity.A;
                 existingPool.B = liquidity.B;
                 if (liquidity.L > 0)
@@ -629,20 +629,9 @@ namespace AVMTradeReporter.Repository
                     await UpdatePoolFromLiquidity(liquidity, cancellationTokenSource.Token);
                     return _poolsCache[pool.PoolAddress];
                 }
+                throw new Exception($"Processor did not process {liquidity?.PoolAddress}");
             }
-            return new Pool
-            {
-                PoolAddress = liquidity.PoolAddress,
-                PoolAppId = liquidity.PoolAppId,
-                AssetIdA = liquidity.AssetIdA,
-                AssetIdB = liquidity.AssetIdB,
-                AssetIdLP = liquidity.AssetIdLP,
-                A = liquidity.A,
-                B = liquidity.B,
-                L = liquidity.L,
-                Protocol = liquidity.Protocol,
-                Timestamp = liquidity.Timestamp
-            };
+            throw new Exception("Processor not found");
         }
 
         private async Task PublishPoolUpdateToHub(Pool pool, CancellationToken cancellationToken)
