@@ -92,6 +92,14 @@ namespace AVMTradeReporter.Model.Data
 #endif
 
         /// <summary>
+        /// Total USD value for asset A side of this pool (RealAmountA * AssetA USD price). To be populated by services after asset prices are updated.
+        /// </summary>
+        public decimal? TotalTVLAssetAInUSD { get; set; }
+        /// <summary>
+        /// Total USD value for asset B side of this pool (RealAmountB * AssetB USD price). To be populated by services after asset prices are updated.
+        /// </summary>
+        public decimal? TotalTVLAssetBInUSD { get; set; }
+        /// <summary>
         /// Aggregates pools by (AssetIdA, AssetIdB) and computes the sum of A and B.
         /// Pools missing asset ids or amounts are ignored or treated as zero respectively.
         /// </summary>
@@ -118,6 +126,8 @@ namespace AVMTradeReporter.Model.Data
                     AssetIdB = g.Key.B,
                     VirtualSumALevel1 = g.Sum(p => p.VirtualAmountA),
                     VirtualSumBLevel1 = g.Sum(p => p.VirtualAmountB),
+                    TotalTVLAssetAInUSD = g.Sum(p => p.TotalTVLAssetAInUSD ?? 0),
+                    TotalTVLAssetBInUSD = g.Sum(p => p.TotalTVLAssetBInUSD ?? 0),
                     TVL_A = g.Sum(p => p.RealAmountA),
                     TVL_B = g.Sum(p => p.RealAmountB),
                     PoolCount = g.Count(),
@@ -236,7 +246,8 @@ namespace AVMTradeReporter.Model.Data
                 LastUpdated = LastUpdated,
                 Level1Pools = Level1Pools,
                 Level2Pools = Level2Pools,
-
+                TotalTVLAssetAInUSD = TotalTVLAssetBInUSD,
+                TotalTVLAssetBInUSD = TotalTVLAssetAInUSD,
             };
         }
     }

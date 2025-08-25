@@ -367,7 +367,7 @@ namespace AVMTradeReporter.Repository
                         if (priceAsset <= 0 || priceRef <= 0) continue; // need both prices
                         // TVL contribution = USD value of trusted reference side. Do not count the asset itself.
                         var poolUsd = 0m;
-                        if(orient.AssetIdA != assetId && refs.Contains(orient.AssetIdA))
+                        if (orient.AssetIdA != assetId && refs.Contains(orient.AssetIdA))
                         {
                             poolUsd += orient.TVL_A * priceRef;
                         }
@@ -380,6 +380,16 @@ namespace AVMTradeReporter.Repository
                     if (tvlUsd > 0 && tvlUsd != asset.TVL_USD)
                     {
                         asset.TVL_USD = tvlUsd;
+                        changed = true;
+                    }
+
+                    // update TotalTVLAssetInUSD 
+                    // get all aggregated pools containing this asset and sum their TVL in USD
+
+                    var totalTVL = _cache.Values.Where(p => p.AssetIdA == assetId && p.TotalTVLAssetAInUSD > 0).Sum(p => p.TotalTVLAssetAInUSD) + _cache.Values.Where(p => p.AssetIdB == assetId && p.TotalTVLAssetBInUSD > 0).Sum(p => p.TotalTVLAssetBInUSD);
+                    if (totalTVL > 0 && totalTVL != asset.TotalTVLAssetInUSD)
+                    {
+                        asset.TotalTVLAssetInUSD = totalTVL;
                         changed = true;
                     }
 
