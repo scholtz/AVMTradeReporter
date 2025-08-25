@@ -385,7 +385,7 @@ namespace AVMTradeReporter.Repository
 
                     if (changed)
                     {
-                        asset.Timestamp = updatedPool.LastUpdated;
+                        asset.Timestamp = updatedPool.LastUpdated > asset.Timestamp ? updatedPool.LastUpdated : asset.Timestamp;
                         await _assetRepository.SetAssetAsync(asset, cancellationToken);
                     }
                 }
