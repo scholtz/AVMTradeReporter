@@ -338,7 +338,7 @@ namespace AVMTradeReporter.Repository
                     priceCache[assetId] = asset.PriceUSD;
 
                     // Calculate TVL_USD using trusted reference pairs (ALGO=0, USDC=31566704)
-                    ulong[] refs = new[] {
+                    HashSet<ulong> refs = new HashSet<ulong>() {
                         0UL, 31566704UL, 1134696561UL, 2537013734UL, 1185173782UL,
                         386192725UL,1058926737UL,2400334372UL,760037151UL,386195940UL, 386195940UL,
                         246516580UL, 246519683UL,227855942UL, 2320775407UL, 887406851UL,887648583UL,
@@ -365,8 +365,16 @@ namespace AVMTradeReporter.Repository
                             }
                         }
                         if (priceAsset <= 0 || priceRef <= 0) continue; // need both prices
-                        // TVL contribution = USD value of both sides
-                        var poolUsd = orient.TVL_A * priceAsset + orient.TVL_B * priceRef;
+                        // TVL contribution = USD value of trusted reference side. Do not count the asset itself.
+                        var poolUsd = 0m;
+                        if(orient.AssetIdA != assetId && refs.Contains(orient.AssetIdA))
+                        {
+                            poolUsd += orient.TVL_A * priceRef;
+                        }
+                        if (orient.AssetIdB != assetId && refs.Contains(orient.AssetIdB))
+                        {
+                            poolUsd += orient.TVL_B * priceRef;
+                        }
                         if (poolUsd > 0) tvlUsd += poolUsd;
                     }
                     if (tvlUsd > 0 && tvlUsd != asset.TVL_USD)
