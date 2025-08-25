@@ -151,6 +151,31 @@ namespace AVMTradeReporter.Repository
             }
         }
 
+        private async Task UpdatePoolUsdTvlAsync(Pool pool, CancellationToken cancellationToken)
+        {
+            if (_assetRepository == null) return;
+            if (pool.AssetIdA == null || pool.AssetIdB == null) return;
+            try
+            {
+                var assetA = await _assetRepository.GetAssetAsync(pool.AssetIdA.Value, cancellationToken);
+                var assetB = await _assetRepository.GetAssetAsync(pool.AssetIdB.Value, cancellationToken);
+                var priceA = assetA?.PriceUSD ?? 0m;
+                var priceB = assetB?.PriceUSD ?? 0m;
+                var tvlAUsd = priceA > 0 ? pool.RealAmountA * priceA : (decimal?)null;
+                var tvlBUsd = priceB > 0 ? pool.RealAmountB * priceB : (decimal?)null;
+                if (tvlAUsd != pool.TotalTVLAssetAInUSD || tvlBUsd != pool.TotalTVLAssetBInUSD)
+                {
+                    pool.TotalTVLAssetAInUSD = tvlAUsd;
+                    pool.TotalTVLAssetBInUSD = tvlBUsd;
+                    _poolsCache[pool.PoolAddress] = pool; // persist updated values
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed computing USD TVL for pool {pool}", pool.PoolAddress);
+            }
+        }
+
         private async Task<int> LoadPoolsFromRedis(CancellationToken cancellationToken)
         {
             if (_redisDatabase == null || !_appConfig.Redis.Enabled)
@@ -390,6 +415,7 @@ namespace AVMTradeReporter.Repository
                 // Only publish if decimals are known
                 if (pool.AssetADecimals.HasValue && pool.AssetBDecimals.HasValue)
                 {
+                    await UpdatePoolUsdTvlAsync(pool, token);
                     await PublishPoolUpdateToHub(pool, token);
                 }
 

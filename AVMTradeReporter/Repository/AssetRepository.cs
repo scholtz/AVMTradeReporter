@@ -34,7 +34,7 @@ namespace AVMTradeReporter.Repository
             _hubContext = hubContext;
         }
 
-        private async Task EnsureInitializedAsync(CancellationToken cancellationToken)
+        public async Task EnsureInitializedAsync(CancellationToken cancellationToken)
         {
             if (_initialized) return;
             await _initLock.WaitAsync(cancellationToken);

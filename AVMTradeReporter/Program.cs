@@ -245,6 +245,27 @@ namespace AVMTradeReporter
             app.MapControllers();
             app.MapHub<BiatecScanHub>("/biatecScanHub");
 
+            // initialize all singletons
+
+            using var cancellationTokenSource = new CancellationTokenSource();
+
+            var assetRepo = app.Services.GetService<IAssetRepository>() as AssetRepository ?? throw new Exception("AssetRepository not initialized");
+            assetRepo.EnsureInitializedAsync(cancellationTokenSource.Token).Wait();
+            _ = app.Services.GetService<AggregatedPoolRepository>() ?? throw new Exception("aggregatedPoolRepository not initialized");
+            var poolRepository = app.Services.GetService<IPoolRepository>() as PoolRepository ?? throw new Exception("Pool repository not initialized");
+            poolRepository.InitializeAsync(cancellationTokenSource.Token).Wait();
+
+            _ = app.Services.GetService<IDefaultApi>();
+            _ = app.Services.GetService<BlockRepository>();
+            _ = app.Services.GetService<IndexerRepository>();
+            _ = app.Services.GetService<TradeRepository>();
+            _ = app.Services.GetService<LiquidityRepository>();
+            _ = app.Services.GetService<TransactionProcessor>();
+            _ = app.Services.GetService<PactPoolProcessor>();
+            _ = app.Services.GetService<TinyPoolProcessor>();
+            _ = app.Services.GetService<BiatecPoolProcessor>();
+
+
             var bw = app.Services.GetService<TradeReporterBackgroundService>();
             bw?.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
             var bwG = app.Services.GetService<GossipBackgroundService>();

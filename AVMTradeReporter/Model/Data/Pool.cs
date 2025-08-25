@@ -45,6 +45,14 @@ namespace AVMTradeReporter.Model.Data
         /// If LP fee is 0,3%, and protocol fee is 50%, 0,15% is for the liquidity providers, and 0,15% fee is taken by the protocol owner
         /// </summary>
         public decimal? ProtocolFeePortion { get; set; }
+        /// <summary>
+        /// Total USD value for asset A side of this pool (RealAmountA * AssetA USD price). To be populated by services after asset prices are updated.
+        /// </summary>
+        public decimal? TotalTVLAssetAInUSD { get; set; }
+        /// <summary>
+        /// Total USD value for asset B side of this pool (RealAmountB * AssetB USD price). To be populated by services after asset prices are updated.
+        /// </summary>
+        public decimal? TotalTVLAssetBInUSD { get; set; }
 
         public decimal VirtualAmountA
         {
@@ -186,7 +194,9 @@ namespace AVMTradeReporter.Model.Data
                 AMMType = AMMType,
                 ApprovalProgramHash = ApprovalProgramHash,
                 LPFee = LPFee,
-                ProtocolFeePortion = ProtocolFeePortion
+                ProtocolFeePortion = ProtocolFeePortion,
+                TotalTVLAssetAInUSD = TotalTVLAssetBInUSD, // swapped
+                TotalTVLAssetBInUSD = TotalTVLAssetAInUSD
             };
         }
     }
