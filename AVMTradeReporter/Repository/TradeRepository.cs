@@ -15,18 +15,21 @@ namespace AVMTradeReporter.Repository
         private readonly ILogger<TradeRepository> _logger;
         private readonly IHubContext<BiatecScanHub> _hubContext;
         private readonly PoolRepository _poolRepository;
+        private readonly OHLCRepository _ohlcRepository; // new dependency
 
         public TradeRepository(
             ElasticsearchClient elasticClient,
             ILogger<TradeRepository> logger,
             IHubContext<BiatecScanHub> hubContext,
-            PoolRepository poolRepository
+            PoolRepository poolRepository,
+            OHLCRepository ohlcRepository
             )
         {
             _elasticClient = elasticClient;
             _logger = logger;
             _hubContext = hubContext;
             _poolRepository = poolRepository;
+            _ohlcRepository = ohlcRepository;
             CreateTradeIndexTemplateAsync().Wait();
         }
 
@@ -113,6 +116,7 @@ namespace AVMTradeReporter.Repository
                         foreach (var trade in trades)
                         {
                             await _poolRepository.UpdatePoolFromTrade(trade, cancellationToken);
+                            await _ohlcRepository.UpdateFromTradeAsync(trade, cancellationToken);
                         }
                     }, cancellationToken);
                     return false;
@@ -152,12 +156,13 @@ namespace AVMTradeReporter.Repository
                                 }
                             }
 
-                            // Update pools from confirmed trades in background
+                            // Update pools and OHLC from confirmed trades in background
                             _ = Task.Run(async () =>
                             {
                                 foreach (var trade in successfulTrades)
                                 {
                                     await _poolRepository.UpdatePoolFromTrade(trade, cancellationToken);
+                                    await _ohlcRepository.UpdateFromTradeAsync(trade, cancellationToken);
                                 }
                             }, cancellationToken);
                         }
