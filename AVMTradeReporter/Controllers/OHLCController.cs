@@ -10,16 +10,18 @@ namespace AVMTradeReporter.Controllers
     public class OHLCController : ControllerBase
     {
         private readonly ElasticsearchClient _elastic;
-        private static readonly Dictionary<string, string> _resolutionMap = new(StringComparer.OrdinalIgnoreCase)
+        // Use case-sensitive comparer so '1m' (minute) and '1M' (month) are distinct.
+        // Remove duplicate identical keys that caused ArgumentException at type initialization.
+        private static readonly Dictionary<string, string> _resolutionMap = new(StringComparer.Ordinal)
         {
             {"1","1m"}, {"1m","1m"},
             {"5","5m"}, {"5m","5m"},
             {"15","15m"}, {"15m","15m"},
             {"60","1h"}, {"1h","1h"},
             {"240","4h"}, {"4h","4h"},
-            {"D","1d"}, {"1D","1d"}, {"1d","1d"},
-            {"W","1w"}, {"1W","1w"}, {"1w","1w"},
-            {"M","1M"}, {"1M","1M"}
+            {"D","1d"}, {"1D","1d"}, {"1d","1d"}, // day synonyms
+            {"W","1w"}, {"1W","1w"}, {"1w","1w"}, // week synonyms
+            {"M","1M"}, {"1M","1M"} // month
         };
 
         public OHLCController(ElasticsearchClient elastic)
