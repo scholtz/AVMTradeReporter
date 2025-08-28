@@ -56,7 +56,7 @@ namespace AVMTradeReporter.Controllers
 
             // Query ES
             var search = await _elastic.SearchAsync<OHLC>(s => s
-                .Index("ohlc")
+                .Indices("ohlc")
                 .Size(5000) // upper limit
                 .Sort(ss => ss.Field(f => f.StartTime))
                 .Query(q => q.Bool(bq => bq
