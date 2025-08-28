@@ -171,7 +171,6 @@ namespace AVMTradeReporter.Repository
                 {
                     Id = b.DocId,
                     Index = "ohlc",
-                    DocAsUpsert = true,
                     Script = new Script
                     {
                         Source = script,
