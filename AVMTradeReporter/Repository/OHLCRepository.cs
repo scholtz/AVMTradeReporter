@@ -2,8 +2,11 @@ using AVMTradeReporter.Model.Data;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Mapping;
 using Elastic.Clients.Elasticsearch.IndexManagement;
+using Elastic.Clients.Elasticsearch.Core.Bulk;
 using Microsoft.Extensions.Logging;
+using System.Runtime.CompilerServices;
 
+[assembly: InternalsVisibleTo("AVMTradeReporterTests")]
 namespace AVMTradeReporter.Repository
 {
     public class OHLCRepository
@@ -11,7 +14,7 @@ namespace AVMTradeReporter.Repository
         private readonly ElasticsearchClient _elasticClient;
         private readonly ILogger<OHLCRepository> _logger;
 
-        private static readonly (string code, TimeSpan span)[] _intervals = new[]
+        internal static readonly (string code, TimeSpan span)[] Intervals = new[]
         {
             ("1m", TimeSpan.FromMinutes(1)),
             ("5m", TimeSpan.FromMinutes(5)),
@@ -20,7 +23,7 @@ namespace AVMTradeReporter.Repository
             ("4h", TimeSpan.FromHours(4)),
             ("1d", TimeSpan.FromDays(1)),
             ("1w", TimeSpan.FromDays(7)),
-            ("1M", TimeSpan.FromDays(31)) // approximate month bucket
+            ("1M", TimeSpan.FromDays(31))
         };
 
         public OHLCRepository(ElasticsearchClient client, ILogger<OHLCRepository> logger)
@@ -32,7 +35,7 @@ namespace AVMTradeReporter.Repository
 
         private async Task CreateTemplateAsync()
         {
-            if (_elasticClient == null) return; // elastic disabled
+            if (_elasticClient == null) return;
             var request = new PutIndexTemplateRequest
             {
                 Name = "ohlc_template",
@@ -75,13 +78,12 @@ namespace AVMTradeReporter.Repository
 
         private static DateTimeOffset GetBucketStart(DateTimeOffset ts, TimeSpan interval)
         {
-            if (interval.TotalDays >= 7) // week or month approximation
+            if (interval.TotalDays >= 7)
             {
-                if (interval.TotalDays >= 30) // month approx: first day of month
+                if (interval.TotalDays >= 30)
                 {
                     return new DateTimeOffset(new DateTime(ts.Year, ts.Month, 1, 0,0,0, DateTimeKind.Utc));
                 }
-                // week: Monday as start (ISO)
                 int diff = (7 + (int)ts.UtcDateTime.DayOfWeek - (int)DayOfWeek.Monday) % 7;
                 var monday = ts.UtcDateTime.Date.AddDays(-diff);
                 return new DateTimeOffset(monday, TimeSpan.Zero);
@@ -96,25 +98,19 @@ namespace AVMTradeReporter.Repository
                 var minutes = (int)(Math.Floor(ts.UtcDateTime.Minute / interval.TotalMinutes) * interval.TotalMinutes);
                 return new DateTimeOffset(new DateTime(ts.Year, ts.Month, ts.Day, ts.Hour, minutes, 0, DateTimeKind.Utc));
             }
-            return new DateTimeOffset(ts.UtcDateTime.Date); // fallback
+            return new DateTimeOffset(ts.UtcDateTime.Date);
         }
 
-        public async Task UpdateFromTradeAsync(Trade trade, CancellationToken cancellationToken)
-        {
-            if (_elasticClient == null) return; // disabled
-            if (trade.TradeState != Model.Data.Enums.TxState.Confirmed) return;
-            if (!trade.Timestamp.HasValue) return;
-            // Build canonical pair (low id is asset A)
-            var inId = trade.AssetIdIn;
-            var outId = trade.AssetIdOut;
-            // we only create OHLC if both have ids (native ALGO is 0 allowed)
-            var aId = Math.Min(inId, outId);
-            var bId = Math.Max(inId, outId);
-            if (aId == bId) return;
+        internal record BucketSpec(string Interval, DateTimeOffset BucketStart, string DocId, decimal Price, decimal VolumeBase, decimal VolumeQuote, ulong AssetIdA, ulong AssetIdB);
 
-            // Determine base/quote orientation for price. Use canonical A as base.
-            // Trade volumes: we need how much base and quote were traded in this trade.
-            decimal volBase = 0; decimal volQuote = 0; decimal? tradePrice = null;
+        internal static IEnumerable<BucketSpec> GetIntervalBuckets(Trade trade)
+        {
+            if (!trade.Timestamp.HasValue) yield break;
+            var aId = Math.Min(trade.AssetIdIn, trade.AssetIdOut);
+            var bId = Math.Max(trade.AssetIdIn, trade.AssetIdOut);
+            if (aId == bId) yield break;
+
+            decimal volBase; decimal volQuote;
             if (trade.AssetIdIn == aId && trade.AssetIdOut == bId)
             {
                 volBase = trade.AssetAmountIn;
@@ -122,73 +118,85 @@ namespace AVMTradeReporter.Repository
             }
             else if (trade.AssetIdIn == bId && trade.AssetIdOut == aId)
             {
-                volBase = trade.AssetAmountOut; // amount of A acquired
-                volQuote = trade.AssetAmountIn; // amount of B spent
+                volBase = trade.AssetAmountOut;
+                volQuote = trade.AssetAmountIn;
             }
-            else
-            {
-                // Unexpected orientation with 0 asset? If one side equals aId/bId we handle above.
-                return;
-            }
-            if (volBase > 0)
-            {
-                tradePrice = volQuote / volBase; // B per A
-            }
-            if (tradePrice == null) return;
-
+            else yield break;
+            if (volBase <= 0) yield break;
+            var price = volQuote / volBase;
             var ts = trade.Timestamp.Value.ToUniversalTime();
-
-            foreach (var (code, span) in _intervals)
+            foreach (var (code, span) in Intervals)
             {
                 var bucketStart = GetBucketStart(ts, span);
                 var docId = $"{aId}-{bId}-{code}-{bucketStart:yyyyMMddHHmmss}";
-                var indexName = "ohlc"; // base index name
+                yield return new BucketSpec(code, bucketStart, docId, price, volBase, volQuote, aId, bId);
+            }
+        }
 
-                var script = $@"if (ctx._source.open == null) {{ ctx._source.open = params.p; }} else if (ctx._source.open == 0) {{ ctx._source.open = params.p; }}
-if (ctx._source.high == null || ctx._source.high < params.p) {{ ctx._source.high = params.p; }}
-if (ctx._source.low == null || ctx._source.low > params.p) {{ ctx._source.low = params.p; }}
-ctx._source.close = params.p;
-ctx._source.volumeBase = (ctx._source.volumeBase == null ? 0 : ctx._source.volumeBase) + params.vb;
-ctx._source.volumeQuote = (ctx._source.volumeQuote == null ? 0 : ctx._source.volumeQuote) + params.vq;
-ctx._source.trades = (ctx._source.trades == null ? 0 : ctx._source.trades) + 1;
-ctx._source.lastUpdated = params.now;";
+        public async Task UpdateFromTradeAsync(Trade trade, CancellationToken cancellationToken)
+        {
+            if (_elasticClient == null) return;
+            if (trade.TradeState != Model.Data.Enums.TxState.Confirmed) return;
+            var buckets = GetIntervalBuckets(trade).ToList();
+            if (!buckets.Any()) return;
 
+            var bulkRequest = new BulkRequest("ohlc") { Operations = new BulkOperationsCollection() };
+            var now = DateTimeOffset.UtcNow.UtcDateTime;
+            foreach (var b in buckets)
+            {
+                var script = "if (ctx._source.open == null) { ctx._source.open = params.p; } else if (ctx._source.open == 0) { ctx._source.open = params.p; }" +
+                             "if (ctx._source.high == null || ctx._source.high < params.p) { ctx._source.high = params.p; }" +
+                             "if (ctx._source.low == null || ctx._source.low > params.p) { ctx._source.low = params.p; }" +
+                             "ctx._source.close = params.p;" +
+                             "ctx._source.volumeBase = (ctx._source.volumeBase == null ? 0 : ctx._source.volumeBase) + params.vb;" +
+                             "ctx._source.volumeQuote = (ctx._source.volumeQuote == null ? 0 : ctx._source.volumeQuote) + params.vq;" +
+                             "ctx._source.trades = (ctx._source.trades == null ? 0 : ctx._source.trades) + 1;" +
+                             "ctx._source.lastUpdated = params.now;";
                 var upsert = new OHLC
                 {
-                    AssetIdA = aId,
-                    AssetIdB = bId,
-                    Interval = code,
-                    StartTime = bucketStart,
-                    Open = tradePrice,
-                    High = tradePrice,
-                    Low = tradePrice,
-                    Close = tradePrice,
-                    VolumeBase = volBase,
-                    VolumeQuote = volQuote,
+                    AssetIdA = b.AssetIdA,
+                    AssetIdB = b.AssetIdB,
+                    Interval = b.Interval,
+                    StartTime = b.BucketStart,
+                    Open = b.Price,
+                    High = b.Price,
+                    Low = b.Price,
+                    Close = b.Price,
+                    VolumeBase = b.VolumeBase,
+                    VolumeQuote = b.VolumeQuote,
                     Trades = 1,
-                    LastUpdated = ts
+                    LastUpdated = b.BucketStart
                 };
-
-                try
+                bulkRequest.Operations.Add(new BulkUpdateOperation<OHLC, object>(upsert)
                 {
-                    var response = await _elasticClient.UpdateAsync<OHLC, object>(indexName, docId, u => u
-                        .DocAsUpsert(true)
-                        .Script(s => s.Source(script).Params(p => p
-                            .Add("p", (double)tradePrice.Value)
-                            .Add("vb", (double)volBase)
-                            .Add("vq", (double)volQuote)
-                            .Add("now", DateTimeOffset.UtcNow.UtcDateTime)))
-                        .Upsert(upsert), cancellationToken);
-
-                    if (!response.IsValidResponse)
+                    Id = b.DocId,
+                    Index = "ohlc",
+                    DocAsUpsert = true,
+                    Script = new Script
                     {
-                        _logger.LogWarning("Failed to update OHLC {docId}: {info}", docId, response.DebugInformation);
-                    }
-                }
-                catch (Exception ex)
+                        Source = script,
+                        Params = new Dictionary<string, object>
+                        {
+                            {"p", (double)b.Price},
+                            {"vb", (double)b.VolumeBase},
+                            {"vq", (double)b.VolumeQuote},
+                            {"now", now}
+                        }
+                    },
+                    Upsert = upsert
+                });
+            }
+            try
+            {
+                var resp = await _elasticClient.BulkAsync(bulkRequest, cancellationToken);
+                if (!resp.IsValidResponse)
                 {
-                    _logger.LogError(ex, "Error updating OHLC {docId}", docId);
+                    _logger.LogWarning("Bulk OHLC update failure: {info}", resp.DebugInformation);
                 }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Bulk OHLC update exception");
             }
         }
     }
