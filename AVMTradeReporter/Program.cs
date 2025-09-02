@@ -84,6 +84,7 @@ namespace AVMTradeReporter
             builder.Services.AddSingleton<TradeRepository>();
             builder.Services.AddSingleton<LiquidityRepository>();
             builder.Services.AddSingleton<TransactionProcessor>();
+            builder.Services.AddSingleton<OHLCRepository>(); // register OHLC repository
 
             // Add Pool Processors
             builder.Services.AddSingleton<PactPoolProcessor>();
@@ -125,6 +126,9 @@ namespace AVMTradeReporter
                     .IdProperty(t => t.PoolAddress))
                 .DefaultMappingFor<Model.Data.Indexer>(m => m
                     .IndexName("indexers")
+                    .IdProperty(t => t.Id))
+                .DefaultMappingFor<Model.Data.OHLC>(m => m
+                    .IndexName("ohlc")
                     .IdProperty(t => t.Id))
                 ;
 
@@ -264,7 +268,7 @@ namespace AVMTradeReporter
             _ = app.Services.GetService<PactPoolProcessor>();
             _ = app.Services.GetService<TinyPoolProcessor>();
             _ = app.Services.GetService<BiatecPoolProcessor>();
-
+            _ = app.Services.GetService<OHLCRepository>();
 
             var bw = app.Services.GetService<TradeReporterBackgroundService>();
             bw?.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
