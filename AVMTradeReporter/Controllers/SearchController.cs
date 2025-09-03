@@ -38,6 +38,7 @@ namespace AVMTradeReporter.Controllers
             public List<AggregatedPool> AggregatedPools { get; set; } = new();
             public List<string> Addresses { get; set; } = new();
             public List<ulong> Blocks { get; set; } = new();
+            public List<Trade> Trades { get; set; } = new();
         }
 
         [HttpGet]
@@ -157,6 +158,38 @@ namespace AVMTradeReporter.Controllers
             catch (Exception ex)
             {
                 _logger.LogDebug(ex, "Aggregated pool search failed");
+            }
+
+            // Trade search (recent trades matching trader, pool address, asset ids or amounts)
+            try
+            {
+                if (_elastic != null)
+                {
+                    var esTrades = await _elastic.SearchAsync<Trade>(s => s
+                        .Indices("trades")
+                        .Size(10)
+                        .Sort(ss => ss.Field(f => f.Field(t => t.BlockId).Order(SortOrder.Desc)))
+                        .Query(qry => qry.Bool(b => b.Should(
+                            sh => sh.Wildcard(w => w.Field(f => f.Trader).Value($"*{q.ToLower()}*")),
+                            sh => sh.Wildcard(w => w.Field(f => f.PoolAddress).Value($"*{q.ToLower()}*")),
+                            isNumber ? sh => sh.Term(t => t.Field(f => f.AssetIdIn).Value(number)) : null,
+                            isNumber ? sh => sh.Term(t => t.Field(f => f.AssetIdOut).Value(number)) : null,
+                            isNumber ? sh => sh.Term(t => t.Field(f => f.AssetAmountIn).Value(number)) : null,
+                            isNumber ? sh => sh.Term(t => t.Field(f => f.AssetAmountOut).Value(number)) : null
+                        ))), ct);
+
+                    if (esTrades.IsValidResponse)
+                    {
+                        foreach (var t in esTrades.Documents)
+                        {
+                            res.Trades.Add(t);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Trade search failed");
             }
 
             return Ok(res);
