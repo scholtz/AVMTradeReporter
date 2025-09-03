@@ -33,11 +33,11 @@ namespace AVMTradeReporter.Controllers
 
         public class SearchResponse
         {
-            public List<object> Assets { get; set; } = new();
-            public List<object> Pools { get; set; } = new();
-            public List<object> AggregatedPools { get; set; } = new();
-            public List<object> Addresses { get; set; } = new();
-            public List<object> Blocks { get; set; } = new();
+            public List<BiatecAsset> Assets { get; set; } = new();
+            public List<Pool> Pools { get; set; } = new();
+            public List<AggregatedPool> AggregatedPools { get; set; } = new();
+            public List<string> Addresses { get; set; } = new();
+            public List<ulong> Blocks { get; set; } = new();
         }
 
         [HttpGet]
@@ -55,7 +55,7 @@ namespace AVMTradeReporter.Controllers
                 var assets = await _assetRepository.GetAssetsAsync(null, q, 0, 10, ct);
                 foreach (var a in assets)
                 {
-                    res.Assets.Add(new { id = a.Index, name = a.Params?.Name, unit = a.Params?.UnitName, tvlUsd = a.TVL_USD, priceUsd = a.PriceUSD, type = "asset" });
+                    res.Assets.Add(a);
                 }
             }
             catch (Exception ex)
@@ -72,7 +72,7 @@ namespace AVMTradeReporter.Controllers
                 var idx = TradeReporterBackgroundService.Indexer;
                 if (isNumber && idx?.Round >= number)
                 {
-                    res.Blocks.Add(new { round = number, type = "block" });
+                    res.Blocks.Add(number);
                 }
             }
             catch (Exception ex)
@@ -81,10 +81,15 @@ namespace AVMTradeReporter.Controllers
             }
 
             // Address heuristic (Algorand addresses length ~58, Base32 A-Z2-7; accept broader alnum) – just echo back
-            if (q.Length >= 50 && q.Length <= 60 && q.All(c => char.IsLetterOrDigit(c)))
+            try
             {
-                res.Addresses.Add(new { address = q, type = "address" });
+                var address = new Algorand.Address(q);
+                if (address.EncodeAsString().Equals(q))
+                {
+                    res.Addresses.Add(q);
+                }
             }
+            catch { }
 
             // Pool search (by address exact + elastic wildcard if available)
             try
@@ -93,14 +98,14 @@ namespace AVMTradeReporter.Controllers
                 var exactPools = await _poolRepository.GetPoolsAsync(null, null, q, null, 10, ct);
                 foreach (var p in exactPools.Take(10))
                 {
-                    res.Pools.Add(new { address = p.PoolAddress, appId = p.PoolAppId, a = p.AssetIdA, b = p.AssetIdB, protocol = p.Protocol.ToString(), type = "pool" });
+                    res.Pools.Add(p);
                 }
 
                 if (_elastic != null && res.Pools.Count < 10)
                 {
                     // Wildcard search on poolAddress and term on asset ids
                     var esPools = await _elastic.SearchAsync<Pool>(s => s
-                        .Index("pools")
+                        .Indices("pools")
                         .Size(10)
                         .Query(qry => qry.Bool(b => b.Should(
                             sh => sh.Wildcard(w => w.Field(f => f.PoolAddress).Value($"*{q.ToLower()}*")),
@@ -111,7 +116,7 @@ namespace AVMTradeReporter.Controllers
                     {
                         foreach (var p in esPools.Documents.Where(d => !res.Pools.Any(r => ((dynamic)r).address == d.PoolAddress)).Take(10 - res.Pools.Count))
                         {
-                            res.Pools.Add(new { address = p.PoolAddress, appId = p.PoolAppId, a = p.AssetIdA, b = p.AssetIdB, protocol = p.Protocol.ToString(), type = "pool" });
+                            res.Pools.Add(p);
                         }
                     }
                 }
@@ -133,7 +138,7 @@ namespace AVMTradeReporter.Controllers
                         .ToList();
                     foreach (var ap in list)
                     {
-                        res.AggregatedPools.Add(new { a = ap.AssetIdA, b = ap.AssetIdB, pools = ap.PoolCount, type = "aggregatedPool" });
+                        res.AggregatedPools.Add(ap);
                     }
                 }
                 else if (q.Contains('-'))
@@ -144,7 +149,7 @@ namespace AVMTradeReporter.Controllers
                         var ap = _aggregatedPoolRepository.GetAggregatedPool(aId, bId);
                         if (ap != null)
                         {
-                            res.AggregatedPools.Add(new { a = ap.AssetIdA, b = ap.AssetIdB, pools = ap.PoolCount, type = "aggregatedPool" });
+                            res.AggregatedPools.Add(ap);
                         }
                     }
                 }
