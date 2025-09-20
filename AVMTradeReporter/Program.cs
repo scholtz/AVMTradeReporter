@@ -146,6 +146,7 @@ namespace AVMTradeReporter
                 builder =>
                 {
                     builder.WithOrigins(corsConfig)
+                        .SetIsOriginAllowedToAllowWildcardSubdomains()
                         .AllowAnyMethod()
                         .AllowAnyHeader()
                         .AllowCredentials();
