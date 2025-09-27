@@ -37,7 +37,7 @@ namespace AVMTradeReporter.Services
                     .From(offset)
                     .Size(size)
                     .Sort(ss => ss.Field(f => f.Field(t => t.BlockId).Order(SortOrder.Desc)))
-                    .Query(BuildQuery(assetIdIn, assetIdOut, txId)),
+                    .Query(q => BuildQuery(q, assetIdIn, assetIdOut, txId)),
                     cancellationToken);
 
                 if (searchResponse.IsValidResponse)
@@ -57,37 +57,38 @@ namespace AVMTradeReporter.Services
             return trades;
         }
 
-        private Action<Elastic.Clients.Elasticsearch.QueryDsl.QueryDescriptor<Trade>> BuildQuery(ulong? assetIdIn, ulong? assetIdOut, string? txId)
+        private static Elastic.Clients.Elasticsearch.QueryDsl.Query BuildQuery(
+            Elastic.Clients.Elasticsearch.QueryDsl.QueryDescriptor<Trade> q,
+            ulong? assetIdIn,
+            ulong? assetIdOut,
+            string? txId)
         {
-            return q =>
+            if (!string.IsNullOrWhiteSpace(txId))
             {
-                if (!string.IsNullOrWhiteSpace(txId))
-                {
-                    // If txId is provided, search only by txId
-                    return q.Term(t => t.Field(f => f.TxId).Value(txId));
-                }
+                // If txId is provided, search only by txId
+                return q.Term(t => t.Field(f => f.TxId).Value(txId));
+            }
 
-                if (assetIdIn.HasValue && assetIdOut.HasValue)
-                {
-                    // Both assets specified - require both conditions (AND logic)
-                    return q.Bool(b => b.Must(
-                        m => m.Term(t => t.Field(f => f.AssetIdIn).Value(assetIdIn.Value)),
-                        m => m.Term(t => t.Field(f => f.AssetIdOut).Value(assetIdOut.Value))
-                    ));
-                }
-                else if (assetIdIn.HasValue || assetIdOut.HasValue)
-                {
-                    // Single asset specified - match either assetIdIn OR assetIdOut
-                    var assetId = assetIdIn ?? assetIdOut!.Value;
-                    return q.Bool(b => b.Should(
-                        s => s.Term(t => t.Field(f => f.AssetIdIn).Value(assetId)),
-                        s => s.Term(t => t.Field(f => f.AssetIdOut).Value(assetId))
-                    ));
-                }
+            if (assetIdIn.HasValue && assetIdOut.HasValue)
+            {
+                // Both assets specified - require both conditions (AND logic)
+                return q.Bool(b => b.Must(
+                    m => m.Term(t => t.Field(f => f.AssetIdIn).Value(assetIdIn.Value)),
+                    m => m.Term(t => t.Field(f => f.AssetIdOut).Value(assetIdOut.Value))
+                ));
+            }
+            else if (assetIdIn.HasValue || assetIdOut.HasValue)
+            {
+                // Single asset specified - match either assetIdIn OR assetIdOut
+                var assetId = assetIdIn ?? assetIdOut!.Value;
+                return q.Bool(b => b.Should(
+                    s => s.Term(t => t.Field(f => f.AssetIdIn).Value(assetId)),
+                    s => s.Term(t => t.Field(f => f.AssetIdOut).Value(assetId))
+                ));
+            }
 
-                // No filters provided, return all trades
-                return q.MatchAll();
-            };
+            // No filters provided, return all trades
+            return q.MatchAll();
         }
     }
 }
