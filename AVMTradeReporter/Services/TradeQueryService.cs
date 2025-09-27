@@ -32,15 +32,12 @@ namespace AVMTradeReporter.Services
                     return trades;
                 }
 
-                // Build query based on parameters
-                var query = BuildQuery(assetIdIn, assetIdOut, txId);
-
                 var searchResponse = await _elastic.SearchAsync<Trade>(s => s
                     .Indices("trades")
-                    .Query(query)
                     .From(offset)
                     .Size(size)
-                    .Sort(ss => ss.Field(f => f.Field(t => t.BlockId).Order(SortOrder.Desc))),
+                    .Sort(ss => ss.Field(f => f.Field(t => t.BlockId).Order(SortOrder.Desc)))
+                    .Query(BuildQuery(assetIdIn, assetIdOut, txId)),
                     cancellationToken);
 
                 if (searchResponse.IsValidResponse)
@@ -60,7 +57,7 @@ namespace AVMTradeReporter.Services
             return trades;
         }
 
-        private Action<QueryDescriptor<Trade>> BuildQuery(ulong? assetIdIn, ulong? assetIdOut, string? txId)
+        private Action<Elastic.Clients.Elasticsearch.QueryDsl.QueryDescriptor<Trade>> BuildQuery(ulong? assetIdIn, ulong? assetIdOut, string? txId)
         {
             return q =>
             {
