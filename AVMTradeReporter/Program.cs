@@ -87,6 +87,7 @@ namespace AVMTradeReporter
             builder.Services.AddSingleton<OHLCRepository>(); // register OHLC repository
             builder.Services.AddSingleton<ISearchService, SearchService>();
             builder.Services.AddSingleton<ITradeQueryService, TradeQueryService>();
+            builder.Services.AddSingleton<ILiquidityQueryService, LiquidityQueryService>();
 
             // Add Pool Processors
             builder.Services.AddSingleton<PactPoolProcessor>();
