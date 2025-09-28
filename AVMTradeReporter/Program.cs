@@ -86,6 +86,7 @@ namespace AVMTradeReporter
             builder.Services.AddSingleton<TransactionProcessor>();
             builder.Services.AddSingleton<OHLCRepository>(); // register OHLC repository
             builder.Services.AddSingleton<ISearchService, SearchService>();
+            builder.Services.AddSingleton<ITradeQueryService, TradeQueryService>();
 
             // Add Pool Processors
             builder.Services.AddSingleton<PactPoolProcessor>();
@@ -272,6 +273,7 @@ namespace AVMTradeReporter
             _ = app.Services.GetService<BiatecPoolProcessor>();
             _ = app.Services.GetService<OHLCRepository>();
             _ = app.Services.GetService<ISearchService>();
+            _ = app.Services.GetService<ITradeQueryService>();
 
             var bw = app.Services.GetService<TradeReporterBackgroundService>();
             bw?.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
