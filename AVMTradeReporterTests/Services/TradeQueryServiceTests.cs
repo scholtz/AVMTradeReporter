@@ -71,6 +71,20 @@ namespace AVMTradeReporterTests.Services
             Assert.DoesNotThrowAsync(async () => await _tradeQueryService.GetTradesAsync(txId: "abc123"));
             Assert.DoesNotThrowAsync(async () => await _tradeQueryService.GetTradesAsync(assetIdIn: 123, assetIdOut: 456));
         }
+
+        [Test]
+        public async Task GetTradesAsync_WithTxId_ReturnsEmptyWhenElasticsearchUnavailable()
+        {
+            // Arrange
+            const string testTxId = "test-transaction-id";
+
+            // Act
+            var result = await _tradeQueryService.GetTradesAsync(txId: testTxId);
+
+            // Assert - Without Elasticsearch, should return empty list but not throw
+            Assert.That(result, Is.Not.Null);
+            Assert.That(result.Count(), Is.EqualTo(0));
+        }
     }
 
     // Mock classes for testing

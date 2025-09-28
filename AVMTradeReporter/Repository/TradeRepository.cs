@@ -38,7 +38,7 @@ namespace AVMTradeReporter.Repository
             var templateRequest = new PutIndexTemplateRequest
             {
                 Name = "trades_template",          // Name of the index template
-                IndexPatterns = new[] { "trades-*" },    // Pattern to match indexes
+                IndexPatterns = new[] { "trades" },    // Pattern to match indexes
                 DataStream = new DataStreamVisibility(),
                 Template = new IndexTemplateMapping
                 {
