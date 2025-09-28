@@ -157,6 +157,7 @@ namespace AVMTradeReporter.Services
                         .Query(qry => qry.Bool(b => b.Should(
                             sh => sh.Wildcard(w => w.Field(f => f.Trader).Value($"*{q.ToLower()}*")),
                             sh => sh.Wildcard(w => w.Field(f => f.PoolAddress).Value($"*{q.ToLower()}*")),
+                            sh => sh.Term(t => t.Field(f => f.TxId).Value(q)),
                             isNumber ? sh => sh.Term(t => t.Field(f => f.AssetIdIn).Value(number)) : null,
                             isNumber ? sh => sh.Term(t => t.Field(f => f.AssetIdOut).Value(number)) : null,
                             isNumber ? sh => sh.Term(t => t.Field(f => f.AssetAmountIn).Value(number)) : null,
