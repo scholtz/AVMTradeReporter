@@ -1,4 +1,5 @@
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Repository;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.QueryDsl;
 using Microsoft.AspNetCore.Mvc;
@@ -10,6 +11,8 @@ namespace AVMTradeReporter.Controllers
     public class OHLCController : ControllerBase
     {
         private readonly ElasticsearchClient _elastic;
+        private readonly IAssetRepository _assetRepository;
+        private readonly AggregatedPoolRepository _aggregatedPoolRepository;
         // Use case-sensitive comparer so '1m' (minute) and '1M' (month) are distinct.
         // Remove duplicate identical keys that caused ArgumentException at type initialization.
         private static readonly Dictionary<string, string> _resolutionMap = new(StringComparer.Ordinal)
@@ -23,10 +26,149 @@ namespace AVMTradeReporter.Controllers
             {"W","1w"}, {"1W","1w"}, {"1w","1w"}, // week synonyms
             {"M","1M"}, {"1M","1M"} // month
         };
+        private static readonly string[] _supportedResolutions = new[] { "1", "5", "15", "60", "240", "1D", "1W", "1M" };
 
-        public OHLCController(ElasticsearchClient elastic)
+        public OHLCController(ElasticsearchClient elastic, IAssetRepository assetRepository, AggregatedPoolRepository aggregatedPoolRepository)
         {
             _elastic = elastic;
+            _assetRepository = assetRepository;
+            _aggregatedPoolRepository = aggregatedPoolRepository;
+        }
+
+        [HttpGet("config")]
+        public IActionResult GetConfig()
+        {
+            return Ok(new
+            {
+                supports_search = true,
+                supports_group_request = false,
+                supports_marks = false,
+                supports_timescale_marks = false,
+                supports_time = true,
+                supported_resolutions = _supportedResolutions
+            });
+        }
+
+        [HttpGet("time")]
+        public IActionResult GetTime()
+        {
+            var epoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            return Ok(epoch);
+        }
+
+        private (ulong a, ulong b)? ParseSymbol(string? symbol)
+        {
+            if (string.IsNullOrWhiteSpace(symbol)) return null;
+            var parts = symbol.Replace("_", "-").Split('-', '/', ':');
+            if (parts.Length < 2) return null;
+            if (ulong.TryParse(parts[0], out var a) && ulong.TryParse(parts[1], out var b))
+            {
+                return (a, b);
+            }
+            return null;
+        }
+
+        [HttpGet("symbols")]
+        public async Task<IActionResult> GetSymbol([FromQuery] string symbol, CancellationToken ct)
+        {
+            var parsed = ParseSymbol(symbol);
+            if (parsed == null) return NotFound();
+            var (a, b) = parsed.Value;
+            var assetA = await _assetRepository.GetAssetAsync(a, ct);
+            var assetB = await _assetRepository.GetAssetAsync(b, ct);
+            if (assetA == null || assetB == null) return NotFound();
+
+            // Price scale derived from max decimals (TradingView expects integer price values / pricescale)
+            var decA = assetA.Params?.Decimals ?? 6;
+            var decB = assetB.Params?.Decimals ?? 6;
+            var priceScale = (int)Math.Pow(10, Math.Max(decA, decB));
+
+            var name = $"{a}-{b}";
+            return Ok(new
+            {
+                name,
+                ticker = name,
+                description = $"{assetA.Params?.UnitName ?? a.ToString()} / {assetB.Params?.UnitName ?? b.ToString()}",
+                type = "crypto",
+                session = "24x7",
+                exchange = "ALG",
+                listed_exchange = "ALG",
+                timezone = "Etc/UTC",
+                format = "price",
+                minmov = 1,
+                minmov2 = 0,
+                pricescale = priceScale,
+                has_intraday = true,
+                has_no_volume = false,
+                volume_precision = 6,
+                supported_resolutions = _supportedResolutions,
+                data_status = "streaming"
+            });
+        }
+
+        [HttpGet("search")]
+        public async Task<IActionResult> Search([FromQuery] string query, [FromQuery] string? type, [FromQuery] int limit = 30, CancellationToken ct = default)
+        {
+            query = query?.Trim() ?? string.Empty;
+            if (string.IsNullOrEmpty(query)) return Ok(Array.Empty<object>());
+            // Search assets by unit name or name
+            var assets = await _assetRepository.GetAssetsAsync(null, query, 0, limit, ct);
+            var res = assets.Select(a => new
+            {
+                symbol = a.Index.ToString(),
+                full_name = a.Index.ToString(),
+                description = a.Params?.Name ?? a.Params?.UnitName ?? a.Index.ToString(),
+                ticker = a.Index.ToString(),
+                type = "crypto",
+                exchange = "ALG"
+            });
+            return Ok(res);
+        }
+
+        [HttpGet("marks")]
+        public IActionResult GetMarks() => Ok(Array.Empty<object>());
+
+        [HttpGet("timescale_marks")]
+        public IActionResult GetTimescaleMarks() => Ok(Array.Empty<object>());
+
+        [HttpGet("quotes")]
+        public IActionResult GetQuotes([FromQuery] string symbols)
+        {
+            // symbols is JSON array or comma separated; support simple comma separated list of pair ids like "123-0,0-31566704"
+            var list = symbols?.Trim().Trim('[', ']').Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) ?? Array.Empty<string>();
+            var data = new List<object>();
+            foreach (var raw in list)
+            {
+                var sym = raw.Replace("\"", "").Trim();
+                var parsed = ParseSymbol(sym);
+                if (parsed == null) continue;
+                var (a, b) = parsed.Value;
+                var pool = _aggregatedPoolRepository.GetAggregatedPool(a, b);
+                if (pool == null) continue;
+                AggregatedPool oriented = pool;
+                if (pool.AssetIdA != a || pool.AssetIdB != b) oriented = (pool.AssetIdA == b && pool.AssetIdB == a) ? pool.Reverse() : pool;
+                decimal price = oriented.VirtualSumALevel1 > 0 ? oriented.VirtualSumBLevel1 / oriented.VirtualSumALevel1 : 0m;
+                data.Add(new
+                {
+                    s = "ok",
+                    n = sym,
+                    v = new
+                    {
+                        ch = 0m,
+                        chp = 0m,
+                        short_name = sym,
+                        exchange = "ALG",
+                        description = sym,
+                        price,
+                        volume = oriented.TVL_A + oriented.TVL_B,
+                        bid = price,
+                        ask = price,
+                        high_price = price,
+                        low_price = price
+                    }
+                });
+            }
+            return Ok(new { s = "ok", d = data });
         }
 
         /// <summary>
