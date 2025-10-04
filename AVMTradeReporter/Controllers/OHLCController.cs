@@ -33,6 +33,14 @@ namespace AVMTradeReporter.Controllers
             return Ok(res);
         }
 
+        [HttpGet("symbol_info")]
+        public async Task<IActionResult> GetSymbolInfo([FromQuery] string group, CancellationToken ct)
+        {
+            // TradingView passes symbols as comma separated in 'group' or 'symbol'
+            var res = await _ohlcService.GetSymbolInfoAsync(group, ct);
+            return Ok(res);
+        }
+
         [HttpGet("search")]
         public async Task<IActionResult> Search([FromQuery] string query, [FromQuery] string? type, [FromQuery] int limit = 30, CancellationToken ct = default)
         {

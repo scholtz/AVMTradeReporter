@@ -189,5 +189,64 @@ namespace AVMTradeReporter.Services
             if (resp.T.Count == 0) return new HistoryResponseDto { S = "no_data" };
             return resp;
         }
+
+        public async Task<SymbolInfoDto> GetSymbolInfoAsync(string symbols, CancellationToken ct)
+        {
+            var list = symbols.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var symList = new List<string>();
+            var tickers = new List<string>();
+            var desc = new List<string>();
+            var types = new List<string>();
+            var exchListed = new List<string>();
+            var exchTraded = new List<string>();
+            var sessions = new List<string>();
+            var timezones = new List<string>();
+            var minmov = new List<int>();
+            var pricescales = new List<int>();
+            var hasIntraday = new List<bool>();
+            var supportedRes = new List<string[]>();
+
+            foreach (var raw in list)
+            {
+                var parsed = ParseSymbol(raw);
+                if (parsed == null) continue;
+                var (a, b) = parsed.Value;
+                var assetA = await _assetRepo.GetAssetAsync(a, ct);
+                var assetB = await _assetRepo.GetAssetAsync(b, ct);
+                if (assetA == null || assetB == null) continue;
+                var decA = assetA.Params?.Decimals ?? 6;
+                var decB = assetB.Params?.Decimals ?? 6;
+                var priceScale = (int)Math.Pow(10, Math.Max(decA, decB));
+                var name = $"{a}-{b}";
+                symList.Add(name);
+                tickers.Add(name);
+                desc.Add($"{assetA.Params?.UnitName ?? a.ToString()} / {assetB.Params?.UnitName ?? b.ToString()}");
+                types.Add("crypto");
+                exchListed.Add("ALG");
+                exchTraded.Add("ALG");
+                sessions.Add("24x7");
+                timezones.Add("Etc/UTC");
+                minmov.Add(1);
+                pricescales.Add(priceScale);
+                hasIntraday.Add(true);
+                supportedRes.Add(_supportedResolutions);
+            }
+
+            return new SymbolInfoDto
+            {
+                Symbols = symList.ToArray(),
+                Tickers = tickers.ToArray(),
+                Description = desc.ToArray(),
+                Type = types.ToArray(),
+                ExchangeListed = exchListed.ToArray(),
+                ExchangeTraded = exchTraded.ToArray(),
+                Session = sessions.ToArray(),
+                Timezone = timezones.ToArray(),
+                Minmov = minmov.ToArray(),
+                Pricescale = pricescales.ToArray(),
+                HasIntraday = hasIntraday.ToArray(),
+                SupportedResolutions = supportedRes.ToArray()
+            };
+        }
     }
 }
