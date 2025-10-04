@@ -234,7 +234,14 @@ namespace AVMTradeReporter.Repository
             if (!string.IsNullOrWhiteSpace(search))
             {
                 var s = search.Trim().ToLowerInvariant();
-                query = query.Where(a => (a.Params?.Name?.ToLowerInvariant().Contains(s) ?? false) || (a.Params?.UnitName?.ToLowerInvariant().Contains(s) ?? false));
+                if (ulong.TryParse(s, out var asset))
+                {
+                    query = query.Where(a => a.Index == asset || (a.Params?.Name?.ToLowerInvariant().Contains(s) ?? false) || (a.Params?.UnitName?.ToLowerInvariant().Contains(s) ?? false));
+                }
+                else
+                {
+                    query = query.Where(a => (a.Params?.Name?.ToLowerInvariant().Contains(s) ?? false) || (a.Params?.UnitName?.ToLowerInvariant().Contains(s) ?? false));
+                }
             }
 
             return query.OrderByDescending(a => a.TVL_USD).Skip(offset).Take(size).ToArray();

@@ -29,6 +29,12 @@ namespace AVMTradeReporter.Services
         private readonly TransactionProcessor _transactionProcessor;
         private readonly BlockRepository _blockRepository;
 
+        // Async processing support
+        private readonly SemaphoreSlim _concurrentTasksSemaphore;
+        private readonly List<Task> _runningTasks = new List<Task>();
+        private readonly object _tasksLock = new object();
+        private DateTime _lastMemoryCheck = DateTime.MinValue;
+
 
         public static Indexer? Indexer { get; set; }
 
@@ -51,6 +57,9 @@ namespace AVMTradeReporter.Services
             _poolRepository = poolRepository;
             _transactionProcessor = transactionProcessor;
             _blockRepository = blockRepository;
+
+            // Initialize semaphore for concurrent task management
+            _concurrentTasksSemaphore = new SemaphoreSlim(_appConfig.Value.BlockProcessing.MaxConcurrentTasks, _appConfig.Value.BlockProcessing.MaxConcurrentTasks);
 
             _httpClient = HttpClientConfigurator.ConfigureHttpClient(appConfig.Value.Algod.Host, appConfig.Value.Algod.ApiKey, appConfig.Value.Algod.Header);
             _algod = new DefaultApi(_httpClient);
@@ -170,7 +179,40 @@ namespace AVMTradeReporter.Services
                         }
                     }
 #endif
-                    await ProcessBlockWorkAsync(Indexer.Round, stoppingToken);
+                    // Clean up completed tasks
+                    CleanupCompletedTasks();
+
+                    // Determine if we should process asynchronously
+                    bool useAsyncProcessing = _appConfig.Value.BlockProcessing.EnableAsyncProcessing &&
+                                            !IsMemoryPressureHigh();
+
+                    if (useAsyncProcessing)
+                    {
+                        // Try to acquire semaphore without blocking
+                        if (_concurrentTasksSemaphore.CurrentCount > 0)
+                        {
+                            // Start async processing
+                            var blockTask = ProcessBlockAsyncWrapper(Indexer.Round, stoppingToken);
+                            lock (_tasksLock)
+                            {
+                                _runningTasks.Add(blockTask);
+                            }
+                            _logger.LogDebug("Started async processing for block {blockId}. Running tasks: {taskCount}",
+                                Indexer.Round, _runningTasks.Count);
+                        }
+                        else
+                        {
+                            _logger.LogDebug("Max concurrent tasks reached, processing block {blockId} synchronously", Indexer.Round);
+                            await ProcessBlockWorkAsync(Indexer.Round, stoppingToken);
+                        }
+                    }
+                    else
+                    {
+                        // Process synchronously
+                        _logger.LogDebug("Processing block {blockId} synchronously (async disabled or memory pressure)", Indexer.Round);
+                        await ProcessBlockWorkAsync(Indexer.Round, stoppingToken);
+                    }
+
                     await IncrementIndexer(stoppingToken);
 
                     if (_appConfig.Value.DelayMs.HasValue && _appConfig.Value.DelayMs > 0)
@@ -212,6 +254,48 @@ namespace AVMTradeReporter.Services
         {
             _liquidityUpdates[liquidityUpdate.TxId] = liquidityUpdate;
             return Task.CompletedTask;
+        }
+
+        private bool IsMemoryPressureHigh()
+        {
+            var now = DateTime.Now;
+            if ((now - _lastMemoryCheck).TotalMilliseconds < _appConfig.Value.BlockProcessing.MemoryCheckIntervalMs)
+            {
+                // Don't check memory too frequently, return false to allow processing
+                return false;
+            }
+
+            _lastMemoryCheck = now;
+
+            try
+            {
+                var process = System.Diagnostics.Process.GetCurrentProcess();
+                var memoryUsageMB = process.WorkingSet64 / 1024 / 1024;
+                
+                if (memoryUsageMB > _appConfig.Value.BlockProcessing.MemoryThresholdMB)
+                {
+                    _logger.LogWarning("High memory usage detected: {memoryUsageMB} MB (threshold: {threshold} MB). Disabling async processing temporarily.",
+                        memoryUsageMB, _appConfig.Value.BlockProcessing.MemoryThresholdMB);
+                    return true;
+                }
+
+                _logger.LogDebug("Memory usage: {memoryUsageMB} MB (threshold: {threshold} MB)", 
+                    memoryUsageMB, _appConfig.Value.BlockProcessing.MemoryThresholdMB);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to check memory usage, assuming normal memory pressure");
+                return false;
+            }
+        }
+
+        private void CleanupCompletedTasks()
+        {
+            lock (_tasksLock)
+            {
+                _runningTasks.RemoveAll(task => task.IsCompleted);
+            }
         }
 
         private async Task IncrementIndexer(CancellationToken cancellationToken)
@@ -301,7 +385,71 @@ namespace AVMTradeReporter.Services
         public override async Task StopAsync(CancellationToken stoppingToken)
         {
             _logger.LogInformation("Trade Reporter Background Service is stopping...");
+
+            // Wait for all running tasks to complete or timeout after 30 seconds
+            try
+            {
+                List<Task> tasksToWait;
+                lock (_tasksLock)
+                {
+                    tasksToWait = new List<Task>(_runningTasks);
+                }
+
+                if (tasksToWait.Count > 0)
+                {
+                    _logger.LogInformation("Waiting for {taskCount} running block processing tasks to complete...", tasksToWait.Count);
+                    using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                    using var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, timeoutCts.Token);
+                    
+                    try
+                    {
+                        await Task.WhenAll(tasksToWait).WaitAsync(combinedCts.Token);
+                        _logger.LogInformation("All block processing tasks completed successfully");
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        _logger.LogWarning("Some block processing tasks did not complete within timeout");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error while stopping background service");
+            }
+
+            _concurrentTasksSemaphore?.Dispose();
             await base.StopAsync(stoppingToken);
+        }
+
+        private async Task ProcessBlockAsyncWrapper(ulong blockId, CancellationToken cancellationToken)
+        {
+            bool semaphoreAcquired = false;
+            try
+            {
+                // Acquire semaphore to limit concurrent tasks
+                await _concurrentTasksSemaphore.WaitAsync(cancellationToken);
+                semaphoreAcquired = true;
+
+                _logger.LogDebug("Processing block {blockId} asynchronously", blockId);
+                await ProcessBlockWorkAsync(blockId, cancellationToken);
+                _logger.LogDebug("Completed async processing for block {blockId}", blockId);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogDebug("Async processing for block {blockId} was cancelled", blockId);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in async processing for block {blockId}", blockId);
+            }
+            finally
+            {
+                if (semaphoreAcquired)
+                {
+                    _concurrentTasksSemaphore.Release();
+                }
+            }
         }
 
         Task ITradeService.RegisterTrade(Trade trade, CancellationToken cancellationToken)

@@ -46,6 +46,11 @@ namespace AVMTradeReporter.Model.Configuration
         /// Pool refresh background service configuration
         /// </summary>
         public PoolRefreshConfiguration PoolRefresh { get; set; } = new PoolRefreshConfiguration();
+
+        /// <summary>
+        /// Block processing configuration
+        /// </summary>
+        public BlockProcessingConfiguration BlockProcessing { get; set; } = new BlockProcessingConfiguration();
     }
 
     public class RedisConfiguration
@@ -77,5 +82,28 @@ namespace AVMTradeReporter.Model.Configuration
         /// Initial delay before starting the first refresh (in minutes). Default is 1 minute.
         /// </summary>
         public int InitialDelayMinutes { get; set; } = 1;
+    }
+
+    public class BlockProcessingConfiguration
+    {
+        /// <summary>
+        /// Enable asynchronous block processing. When true, blocks are processed concurrently.
+        /// </summary>
+        public bool EnableAsyncProcessing { get; set; } = true;
+
+        /// <summary>
+        /// Maximum number of concurrent block processing tasks. Default is 3.
+        /// </summary>
+        public int MaxConcurrentTasks { get; set; } = 3;
+
+        /// <summary>
+        /// Memory threshold in MB above which async processing is disabled. Default is 1024 MB (1 GB).
+        /// </summary>
+        public long MemoryThresholdMB { get; set; } = 1024;
+
+        /// <summary>
+        /// How often to check memory usage in milliseconds. Default is 5000 ms (5 seconds).
+        /// </summary>
+        public int MemoryCheckIntervalMs { get; set; } = 5000;
     }
 }

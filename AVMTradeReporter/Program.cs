@@ -85,6 +85,9 @@ namespace AVMTradeReporter
             builder.Services.AddSingleton<LiquidityRepository>();
             builder.Services.AddSingleton<TransactionProcessor>();
             builder.Services.AddSingleton<OHLCRepository>(); // register OHLC repository
+            builder.Services.AddSingleton<ISearchService, SearchService>();
+            builder.Services.AddSingleton<ITradeQueryService, TradeQueryService>();
+            builder.Services.AddSingleton<ILiquidityQueryService, LiquidityQueryService>();
             builder.Services.AddSingleton<IOHLCService, OHLCService>();
 
             // Add Pool Processors
@@ -146,6 +149,7 @@ namespace AVMTradeReporter
                 builder =>
                 {
                     builder.WithOrigins(corsConfig)
+                        .SetIsOriginAllowedToAllowWildcardSubdomains()
                         .AllowAnyMethod()
                         .AllowAnyHeader()
                         .AllowCredentials();
@@ -270,6 +274,8 @@ namespace AVMTradeReporter
             _ = app.Services.GetService<TinyPoolProcessor>();
             _ = app.Services.GetService<BiatecPoolProcessor>();
             _ = app.Services.GetService<OHLCRepository>();
+            _ = app.Services.GetService<ISearchService>();
+            _ = app.Services.GetService<ITradeQueryService>();
 
             var bw = app.Services.GetService<TradeReporterBackgroundService>();
             bw?.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
