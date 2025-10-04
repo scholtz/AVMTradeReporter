@@ -340,56 +340,60 @@ namespace AVMTradeReporter.Repository
                     // Calculate TVL_USD using trusted reference pairs (ALGO=0, USDC=31566704)
                     HashSet<ulong> refs = new HashSet<ulong>() {
                         0UL, 31566704UL, 1134696561UL, 2537013734UL, 1185173782UL,
-                        386192725UL,1058926737UL,2400334372UL,760037151UL,386195940UL, 386195940UL,
+                        386192725UL,1058926737UL,2400334372UL,760037151UL,386195940UL,
                         246516580UL, 246519683UL,227855942UL, 2320775407UL, 887406851UL,887648583UL,
                         1241945177UL, 1241944285UL, 2320804780UL
-                    };
+                    }; // duplicates automatically removed by HashSet
                     decimal tvlUsd = 0m;
-                    foreach (var refAsset in refs)
+
+                    // Sum USD value of all aggregated pools where the other asset is trusted reference
+                    var processedPairs = new HashSet<string>();
+                    foreach (var ap in _cache.Values.Where(p => (p.AssetIdA == assetId && refs.Contains(p.AssetIdB)) || (p.AssetIdB == assetId && refs.Contains(p.AssetIdA))))
                     {
-                        if (refAsset == assetId) continue; // skip self
-                        var pair = GetAggregatedPool(assetId, refAsset);
-                        if (pair == null) continue;
-                        var orient = pair.AssetIdA == assetId ? pair : pair.Reverse();
-                        // Prices
-                        decimal priceAsset = priceCache.TryGetValue(assetId, out var pA) ? pA : (asset.PriceUSD > 0 ? asset.PriceUSD : 0);
-                        decimal priceRef = 0m;
-                        if (refAsset == 31566704UL) priceRef = 1m; // USDC
-                        else if (refAsset == 0UL)
+                        var key = ap.AssetIdA < ap.AssetIdB ? $"{ap.AssetIdA}-{ap.AssetIdB}" : $"{ap.AssetIdB}-{ap.AssetIdA}";
+                        if (!processedPairs.Add(key)) continue; // skip already counted (since _cache stores both directions)
+
+                        // Determine orientation
+                        ulong otherAssetId = ap.AssetIdA == assetId ? ap.AssetIdB : ap.AssetIdA;
+
+                        // Ensure we have prices for both sides
+                        if (!priceCache.TryGetValue(otherAssetId, out var otherPrice))
                         {
-                            if (!priceCache.TryGetValue(0UL, out priceRef))
+                            var otherAsset = await _assetRepository.GetAssetAsync(otherAssetId, cancellationToken);
+                            if (otherAsset != null && otherAsset.PriceUSD > 0)
                             {
-                                var algoAsset = await _assetRepository.GetAssetAsync(0, cancellationToken);
-                                priceRef = algoAsset?.PriceUSD ?? 0m;
-                                priceCache[0UL] = priceRef;
+                                otherPrice = otherAsset.PriceUSD;
+                                priceCache[otherAssetId] = otherPrice;
                             }
                         }
-                        if (priceAsset <= 0 || priceRef <= 0) continue; // need both prices
-                        // TVL contribution = USD value of trusted reference side. Do not count the asset itself.
-                        var poolUsd = 0m;
-                        if (orient.AssetIdA != assetId && refs.Contains(orient.AssetIdA))
+                        // Refresh priceAsset if not present (may have been updated earlier in loop)
+                        priceCache.TryGetValue(assetId, out var priceAssetCurrent);
+                        if (priceAssetCurrent <= 0) priceAssetCurrent = asset.PriceUSD;
+
+                        if (priceAssetCurrent <= 0 || otherPrice <= 0) continue; // skip until both prices known
+
+                        decimal poolUsd;
+                        if (ap.AssetIdA == assetId)
                         {
-                            poolUsd += orient.TVL_A * priceRef;
+                            poolUsd = ap.TVL_A * priceAssetCurrent + ap.TVL_B * otherPrice;
                         }
-                        if (orient.AssetIdB != assetId && refs.Contains(orient.AssetIdB))
+                        else
                         {
-                            poolUsd += orient.TVL_B * priceRef;
+                            poolUsd = ap.TVL_B * priceAssetCurrent + ap.TVL_A * otherPrice;
                         }
                         if (poolUsd > 0) tvlUsd += poolUsd;
                     }
+
                     if (tvlUsd > 0 && tvlUsd != asset.TVL_USD)
                     {
                         asset.TVL_USD = tvlUsd;
                         changed = true;
                     }
 
-                    // update TotalTVLAssetInUSD 
-                    // get all aggregated pools containing this asset and sum their TVL in USD
-
-                    var totalTVL = _cache.Values.Where(p => p.AssetIdA == assetId && p.TotalTVLAssetAInUSD > 0).Sum(p => p.TotalTVLAssetAInUSD) + _cache.Values.Where(p => p.AssetIdB == assetId && p.TotalTVLAssetBInUSD > 0).Sum(p => p.TotalTVLAssetBInUSD);
-                    if (totalTVL > 0 && totalTVL != asset.TotalTVLAssetInUSD)
+                    // Set TotalTVLAssetInUSD equal to computed tvlUsd (aggregated across trusted reference pools)
+                    if (tvlUsd > 0 && asset.TotalTVLAssetInUSD != tvlUsd)
                     {
-                        asset.TotalTVLAssetInUSD = totalTVL;
+                        asset.TotalTVLAssetInUSD = tvlUsd;
                         changed = true;
                     }
 
