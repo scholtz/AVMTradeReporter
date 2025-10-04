@@ -1,4 +1,5 @@
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Model.DTO.OHLC;
 using AVMTradeReporter.Repository;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.QueryDsl;
@@ -30,14 +31,14 @@ namespace AVMTradeReporter.Services
             _aggRepo = aggRepo;
         }
 
-        public object GetConfig() => new
+        public object GetConfig() => new OHLCConfigDto
         {
-            supports_search = true,
-            supports_group_request = false,
-            supports_marks = false,
-            supports_timescale_marks = false,
-            supports_time = true,
-            supported_resolutions = _supportedResolutions
+            Supports_Search = true,
+            Supports_Group_Request = false,
+            Supports_Marks = false,
+            Supports_Timescale_Marks = false,
+            Supports_Time = true,
+            Supported_Resolutions = _supportedResolutions
         };
 
         public long GetTime() => DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -64,25 +65,13 @@ namespace AVMTradeReporter.Services
             var decB = assetB.Params?.Decimals ?? 6;
             var priceScale = (int)Math.Pow(10, Math.Max(decA, decB));
             var name = $"{a}-{b}";
-            return new
+            return new SymbolDto
             {
-                name,
-                ticker = name,
-                description = $"{assetA.Params?.UnitName ?? a.ToString()} / {assetB.Params?.UnitName ?? b.ToString()}",
-                type = "crypto",
-                session = "24x7",
-                exchange = "ALG",
-                listed_exchange = "ALG",
-                timezone = "Etc/UTC",
-                format = "price",
-                minmov = 1,
-                minmov2 = 0,
-                pricescale = priceScale,
-                has_intraday = true,
-                has_no_volume = false,
-                volume_precision = 6,
-                supported_resolutions = _supportedResolutions,
-                data_status = "streaming"
+                Name = name,
+                Ticker = name,
+                Description = $"{assetA.Params?.UnitName ?? a.ToString()} / {assetB.Params?.UnitName ?? b.ToString()}",
+                Pricescale = priceScale,
+                Supported_Resolutions = _supportedResolutions
             };
         }
 
@@ -91,14 +80,12 @@ namespace AVMTradeReporter.Services
             query = query?.Trim() ?? string.Empty;
             if (string.IsNullOrEmpty(query)) return Array.Empty<object>();
             var assets = await _assetRepo.GetAssetsAsync(null, query, 0, limit, ct);
-            return assets.Select(a => (object)new
+            return assets.Select(a => (object)new SearchSymbolDto
             {
-                symbol = a.Index.ToString(),
-                full_name = a.Index.ToString(),
-                description = a.Params?.Name ?? a.Params?.UnitName ?? a.Index.ToString(),
-                ticker = a.Index.ToString(),
-                type = "crypto",
-                exchange = "ALG"
+                Symbol = a.Index.ToString(),
+                Full_Name = a.Index.ToString(),
+                Description = a.Params?.Name ?? a.Params?.UnitName ?? a.Index.ToString(),
+                Ticker = a.Index.ToString(),
             });
         }
 
@@ -108,7 +95,7 @@ namespace AVMTradeReporter.Services
         public object GetQuotes(string symbols)
         {
             var list = symbols?.Trim().Trim('[', ']').Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) ?? Array.Empty<string>();
-            var data = new List<object>();
+            var resp = new QuotesResponseDto();
             foreach (var raw in list)
             {
                 var sym = raw.Replace("\"", "").Trim();
@@ -121,38 +108,35 @@ namespace AVMTradeReporter.Services
                 if (pool.AssetIdA != a || pool.AssetIdB != b)
                     oriented = (pool.AssetIdA == b && pool.AssetIdB == a) ? pool.Reverse() : pool;
                 decimal price = oriented.VirtualSumALevel1 > 0 ? oriented.VirtualSumBLevel1 / oriented.VirtualSumALevel1 : 0m;
-                data.Add(new
+                resp.D.Add(new QuoteEntryDto
                 {
-                    s = "ok",
-                    n = sym,
-                    v = new
+                    S = "ok",
+                    N = sym,
+                    V = new QuoteValueDto
                     {
-                        ch = 0m,
-                        chp = 0m,
-                        short_name = sym,
-                        exchange = "ALG",
-                        description = sym,
-                        price,
-                        volume = oriented.TVL_A + oriented.TVL_B,
-                        bid = price,
-                        ask = price,
-                        high_price = price,
-                        low_price = price
+                        Short_Name = sym,
+                        Description = sym,
+                        Price = price,
+                        Volume = oriented.TVL_A + oriented.TVL_B,
+                        Bid = price,
+                        Ask = price,
+                        High_Price = price,
+                        Low_Price = price
                     }
                 });
             }
-            return new { s = "ok", d = data };
+            return resp;
         }
 
         public async Task<object> GetHistoryAsync(ulong assetA, ulong assetB, string resolution, long from, long to, CancellationToken ct)
         {
-            if (_elastic == null) return new { s = "no_data" };
-            if (assetA == assetB) return new { s = "no_data" };
-            if (!_resolutionMap.TryGetValue(resolution ?? string.Empty, out var interval)) return new { s = "error", error = "Unsupported resolution" };
+            if (_elastic == null) return new HistoryResponseDto { S = "no_data" };
+            if (assetA == assetB) return new HistoryResponseDto { S = "no_data" };
+            if (!_resolutionMap.TryGetValue(resolution ?? string.Empty, out var interval)) return new HistoryResponseDto { S = "error", Error = "Unsupported resolution" };
 
             var fromDt = DateTimeOffset.FromUnixTimeSeconds(from).UtcDateTime;
             var toDt = DateTimeOffset.FromUnixTimeSeconds(to).UtcDateTime;
-            if (toDt <= fromDt) return new { s = "no_data" };
+            if (toDt <= fromDt) return new HistoryResponseDto { S = "no_data" };
 
             var a = Math.Min(assetA, assetB);
             var b = Math.Max(assetA, assetB);
@@ -178,37 +162,32 @@ namespace AVMTradeReporter.Services
                     ))), ct);
 
             if (!search.IsValidResponse || search.Hits.Count == 0)
-                return new { s = "no_data" };
+                return new HistoryResponseDto { S = "no_data" };
 
-            var t = new List<long>();
-            var o = new List<decimal>();
-            var h = new List<decimal>();
-            var l = new List<decimal>();
-            var c = new List<decimal>();
-            var v = new List<decimal>();
+            var resp = new HistoryResponseDto { S = "ok", T = new(), O = new(), H = new(), L = new(), C = new(), V = new() };
 
             foreach (var doc in search.Documents.OrderBy(d => d.StartTime))
             {
                 if (doc.Open == null || doc.High == null || doc.Low == null || doc.Close == null) continue;
                 var ts = doc.StartTime.ToUnixTimeSeconds();
-                t.Add(ts);
+                resp.T.Add(ts);
                 if (!invert)
                 {
-                    o.Add(doc.Open.Value); h.Add(doc.High.Value); l.Add(doc.Low.Value); c.Add(doc.Close.Value);
-                    v.Add(doc.VolumeBase ?? 0);
+                    resp.O.Add(doc.Open.Value); resp.H.Add(doc.High.Value); resp.L.Add(doc.Low.Value); resp.C.Add(doc.Close.Value);
+                    resp.V.Add(doc.VolumeBase ?? 0);
                 }
                 else
                 {
                     decimal SafeInv(decimal x) => x == 0 ? 0 : 1 / x;
-                    o.Add(SafeInv(doc.Open.Value));
-                    h.Add(SafeInv(doc.Low.Value));
-                    l.Add(SafeInv(doc.High.Value));
-                    c.Add(SafeInv(doc.Close.Value));
-                    v.Add(doc.VolumeQuote ?? 0);
+                    resp.O.Add(SafeInv(doc.Open.Value));
+                    resp.H.Add(SafeInv(doc.Low.Value));
+                    resp.L.Add(SafeInv(doc.High.Value));
+                    resp.C.Add(SafeInv(doc.Close.Value));
+                    resp.V.Add(doc.VolumeQuote ?? 0);
                 }
             }
-            if (t.Count == 0) return new { s = "no_data" };
-            return new { s = "ok", t, o, h, l, c, v };
+            if (resp.T.Count == 0) return new HistoryResponseDto { S = "no_data" };
+            return resp;
         }
     }
 }
