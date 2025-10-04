@@ -337,14 +337,18 @@ namespace AVMTradeReporter.Repository
                     }
                     priceCache[assetId] = asset.PriceUSD;
 
-                    // Calculate TVL_USD using trusted reference pairs (ALGO=0, USDC=31566704)
+                    // Calculate Real TVL (TVL_USD) and Total TVL (TotalTVLAssetInUSD)
+                    // Real TVL: Only trusted tokens from pools paired with trusted references
+                    // Total TVL: All assets (both sides) from pools paired with trusted references
+                    // Trusted reference tokens: ALGO=0, USDC=31566704, and other stablecoins/major tokens
                     HashSet<ulong> refs = new HashSet<ulong>() {
                         0UL, 31566704UL, 1134696561UL, 2537013734UL, 1185173782UL,
                         386192725UL,1058926737UL,2400334372UL,760037151UL,386195940UL,
                         246516580UL, 246519683UL,227855942UL, 2320775407UL, 887406851UL,887648583UL,
                         1241945177UL, 1241944285UL, 2320804780UL
                     }; // duplicates automatically removed by HashSet
-                    decimal tvlUsd = 0m;
+                    decimal realTvlUsd = 0m;    // Real TVL: sum of trusted token values only
+                    decimal totalTvlUsd = 0m;   // Total TVL: sum of all asset values
 
                     // Sum USD value of all aggregated pools where the other asset is trusted reference
                     var processedPairs = new HashSet<string>();
@@ -372,28 +376,44 @@ namespace AVMTradeReporter.Repository
 
                         if (priceAssetCurrent <= 0 || otherPrice <= 0) continue; // skip until both prices known
 
-                        decimal poolUsd;
+                        // Calculate Real TVL: only the trusted token side (otherAssetId is the trusted reference)
+                        decimal trustedTokenValue;
                         if (ap.AssetIdA == assetId)
                         {
-                            poolUsd = ap.TVL_A * priceAssetCurrent + ap.TVL_B * otherPrice;
+                            // Asset is on side A, trusted token is on side B
+                            trustedTokenValue = ap.TVL_B * otherPrice;
                         }
                         else
                         {
-                            poolUsd = ap.TVL_B * priceAssetCurrent + ap.TVL_A * otherPrice;
+                            // Asset is on side B, trusted token is on side A
+                            trustedTokenValue = ap.TVL_A * otherPrice;
                         }
-                        if (poolUsd > 0) tvlUsd += poolUsd;
+                        if (trustedTokenValue > 0) realTvlUsd += trustedTokenValue;
+
+                        // Calculate Total TVL: both sides of the pool
+                        decimal poolTotalUsd;
+                        if (ap.AssetIdA == assetId)
+                        {
+                            poolTotalUsd = ap.TVL_A * priceAssetCurrent + ap.TVL_B * otherPrice;
+                        }
+                        else
+                        {
+                            poolTotalUsd = ap.TVL_B * priceAssetCurrent + ap.TVL_A * otherPrice;
+                        }
+                        if (poolTotalUsd > 0) totalTvlUsd += poolTotalUsd;
                     }
 
-                    if (tvlUsd > 0 && tvlUsd != asset.TVL_USD)
+                    // Set Real TVL (TVL_USD) - only trusted tokens
+                    if (realTvlUsd > 0 && realTvlUsd != asset.TVL_USD)
                     {
-                        asset.TVL_USD = tvlUsd;
+                        asset.TVL_USD = realTvlUsd;
                         changed = true;
                     }
 
-                    // Set TotalTVLAssetInUSD equal to computed tvlUsd (aggregated across trusted reference pools)
-                    if (tvlUsd > 0 && asset.TotalTVLAssetInUSD != tvlUsd)
+                    // Set Total TVL (TotalTVLAssetInUSD) - all assets
+                    if (totalTvlUsd > 0 && asset.TotalTVLAssetInUSD != totalTvlUsd)
                     {
-                        asset.TotalTVLAssetInUSD = tvlUsd;
+                        asset.TotalTVLAssetInUSD = totalTvlUsd;
                         changed = true;
                     }
 
