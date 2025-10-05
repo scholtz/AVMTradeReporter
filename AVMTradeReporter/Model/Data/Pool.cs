@@ -88,6 +88,11 @@ namespace AVMTradeReporter.Model.Data
                         }
                         return 0;
                     }
+                    else if (AMMType == Enums.AMMType.StableSwap)
+                    {
+                        // for stable swap, we can return the minimum of the two amounts as the virtual amount.. so that the pool is balanced for price 1:1
+                        return Math.Min(RealAmountA, RealAmountB);
+                    }
                     else
                     {
                         return RealAmountA;
@@ -144,6 +149,11 @@ namespace AVMTradeReporter.Model.Data
                             //return Convert.ToDecimal(B.Value) / 1000000000 + Convert.ToDecimal((Convert.ToDouble(L.Value / 1000000000)) * Math.Sqrt(Convert.ToDouble(PMin.Value)));
                         }
                         return 0;
+                    }
+                    else if (AMMType == Enums.AMMType.StableSwap)
+                    {
+                        // for stable swap, we can return the minimum of the two amounts as the virtual amount.. so that the pool is balanced for price 1:1
+                        return Math.Min(RealAmountA, RealAmountB);
                     }
                     else
                     {
