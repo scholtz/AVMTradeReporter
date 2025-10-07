@@ -142,24 +142,27 @@ namespace AVMTradeReporter.Services
             var b = Math.Max(assetA, assetB);
             var invert = (a != assetA);
 
-            Query dateRange = new DateRangeQuery
+            // Explicit request object to avoid deep descriptor graphs
+            var request = new SearchRequest<OHLC>("ohlc")
             {
-                Field = Infer.Field<OHLC>(f => f.StartTime),
-                Gte = fromDt,
-                Lte = toDt
+                Size = 5000,
+                Sort = new List<SortOptions>
+                {
+                    new SortOptions { Field = new FieldSort { Field = Infer.Field<OHLC>(f => f.StartTime) } }
+                },
+                Query = new BoolQuery
+                {
+                    Filter = new List<Query>
+                    {
+                        new TermQuery { Field = Infer.Field<OHLC>(f => f.AssetIdA), Value = a },
+                        new TermQuery { Field = Infer.Field<OHLC>(f => f.AssetIdB), Value = b },
+                        new TermQuery { Field = Infer.Field<OHLC>(f => f.Interval), Value = interval },
+                        new DateRangeQuery { Field = Infer.Field<OHLC>(f => f.StartTime), Gte = fromDt, Lte = toDt }
+                    }
+                }
             };
 
-            var search = await _elastic.SearchAsync<OHLC>(s => s
-                .Indices("ohlc")
-                .Size(5000)
-                .Sort(ss => ss.Field(f => f.StartTime))
-                .Query(q => q.Bool(bq => bq
-                    .Filter(
-                        q.Term(t => t.Field(f => f.AssetIdA).Value(a)),
-                        q.Term(t => t.Field(f => f.AssetIdB).Value(b)),
-                        q.Term(t => t.Field(f => f.Interval).Value(interval)),
-                        dateRange
-                    ))), ct);
+            var search = await _elastic.SearchAsync<OHLC>(request, ct);
 
             if (!search.IsValidResponse || search.Hits.Count == 0)
                 return new HistoryResponseDto { S = "no_data" };

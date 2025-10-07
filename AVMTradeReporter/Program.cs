@@ -13,6 +13,7 @@ using Elastic.Transport;
 using Microsoft.Extensions.Options;
 using Microsoft.OpenApi.Models;
 using StackExchange.Redis;
+using System.Text.Json.Serialization; // added for ReferenceHandler (kept in case future customization)
 
 namespace AVMTradeReporter
 {
