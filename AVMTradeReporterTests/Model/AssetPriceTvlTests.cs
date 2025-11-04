@@ -1,6 +1,6 @@
 using AVMTradeReporter.Model.Configuration;
-using AVMTradeReporter.Model.Data;
-using AVMTradeReporter.Model.Data.Enums;
+using AVMTradeReporter.Models.Data;
+using AVMTradeReporter.Models.Data.Enums;
 using AVMTradeReporter.Repository;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -25,7 +25,7 @@ namespace AVMTradeReporterTests.Model
             const ulong TEST_ASSET = 1234UL;
             const ulong USDC = 31566704UL;
 
-            var pool = new AVMTradeReporter.Model.Data.Pool
+            var pool = new AVMTradeReporter.Models.Data.Pool
             {
                 PoolAddress = "pool-asset-usdc",
                 AssetIdA = TEST_ASSET,
@@ -80,7 +80,7 @@ namespace AVMTradeReporterTests.Model
             const ulong TEST_ASSET = 5678UL;
 
             // ALGO-USDC pool (ALGO price reference). 10 ALGO vs 2.5 USDC -> ALGO price 0.25
-            var algoUsdcPool = new AVMTradeReporter.Model.Data.Pool
+            var algoUsdcPool = new AVMTradeReporter.Models.Data.Pool
             {
                 PoolAddress = "pool-algo-usdc",
                 AssetIdA = ALGO,
@@ -96,7 +96,7 @@ namespace AVMTradeReporterTests.Model
             };
 
             // TEST_ASSET - ALGO pool: 4 asset vs 2 ALGO -> 0.5 ALGO per asset -> price 0.5 * 0.25 = 0.125 USD
-            var assetAlgoPool = new AVMTradeReporter.Model.Data.Pool
+            var assetAlgoPool = new AVMTradeReporter.Models.Data.Pool
             {
                 PoolAddress = "pool-asset-algo",
                 AssetIdA = TEST_ASSET,
@@ -150,7 +150,7 @@ namespace AVMTradeReporterTests.Model
 
             // Direct TEST_ASSET-USDC pool: 100 TEST_ASSET vs 50 USDC
             // Asset price = 50/100 = 0.5 USD per TEST_ASSET
-            var pool = new AVMTradeReporter.Model.Data.Pool
+            var pool = new AVMTradeReporter.Models.Data.Pool
             {
                 PoolAddress = "pool-test-usdc",
                 AssetIdA = TEST_ASSET,
@@ -199,7 +199,7 @@ namespace AVMTradeReporterTests.Model
             const ulong TEST_ASSET = 7777UL;
 
             // Setup ALGO-USDC pool for ALGO price: 4 ALGO vs 1 USDC -> ALGO = 0.25 USD
-            var algoUsdcPool = new AVMTradeReporter.Model.Data.Pool
+            var algoUsdcPool = new AVMTradeReporter.Models.Data.Pool
             {
                 PoolAddress = "pool-algo-usdc",
                 AssetIdA = ALGO,
@@ -215,7 +215,7 @@ namespace AVMTradeReporterTests.Model
             };
 
             // Pool 1: TEST_ASSET-USDC: 10 TEST_ASSET vs 20 USDC -> price = 2 USD
-            var pool1 = new AVMTradeReporter.Model.Data.Pool
+            var pool1 = new AVMTradeReporter.Models.Data.Pool
             {
                 PoolAddress = "pool1-asset-usdc",
                 AssetIdA = TEST_ASSET,
@@ -231,7 +231,7 @@ namespace AVMTradeReporterTests.Model
             };
 
             // Pool 2: TEST_ASSET-ALGO: 8 TEST_ASSET vs 64 ALGO -> price via ALGO = 64/8 * 0.25 = 2 USD (consistent)
-            var pool2 = new AVMTradeReporter.Model.Data.Pool
+            var pool2 = new AVMTradeReporter.Models.Data.Pool
             {
                 PoolAddress = "pool2-asset-algo",
                 AssetIdA = TEST_ASSET,

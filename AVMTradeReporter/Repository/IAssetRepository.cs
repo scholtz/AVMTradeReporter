@@ -1,4 +1,5 @@
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Models.Data;
 
 namespace AVMTradeReporter.Repository
 {

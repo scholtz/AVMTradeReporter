@@ -1,4 +1,4 @@
-using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Services;
 using Microsoft.Extensions.Logging;
 using NUnit.Framework;

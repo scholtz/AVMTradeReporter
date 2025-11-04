@@ -1,5 +1,6 @@
 using AVMTradeReporter.Hubs;
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Models.Data;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.IndexManagement;
 using Elastic.Clients.Elasticsearch.Mapping;
@@ -65,7 +66,7 @@ namespace AVMTradeReporter.Repository
             _logger.LogInformation("AggregatedPool index template created: {ok}", response.IsValidResponse);
         }
 
-        public Task InitializeFromExistingPoolsAsync(IEnumerable<Model.Data.Pool> pools, CancellationToken cancellationToken = default)
+        public Task InitializeFromExistingPoolsAsync(IEnumerable<Models.Data.Pool> pools, CancellationToken cancellationToken = default)
         {
             try
             {
@@ -99,7 +100,7 @@ namespace AVMTradeReporter.Repository
             return Task.CompletedTask;
         }
 
-        public async Task UpdateForPairAsync(ulong assetIdA, ulong assetIdB, IEnumerable<Model.Data.Pool> poolsForPair, CancellationToken cancellationToken = default)
+        public async Task UpdateForPairAsync(ulong assetIdA, ulong assetIdB, IEnumerable<Models.Data.Pool> poolsForPair, CancellationToken cancellationToken = default)
         {
             try
             {

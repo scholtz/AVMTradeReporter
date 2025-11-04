@@ -3,7 +3,8 @@ using Algorand.Algod.Model.Transactions;
 using AVM.ClientGenerator.Core;
 using AVMTradeReporter.Model;
 using AVMTradeReporter.Model.Data;
-using AVMTradeReporter.Model.Data.Enums;
+using AVMTradeReporter.Models.Data;
+using AVMTradeReporter.Models.Data.Enums;
 using System.Diagnostics;
 using System.Threading;
 

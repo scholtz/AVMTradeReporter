@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace AVMTradeReporter.Model.Data
+namespace AVMTradeReporter.Models.Data
 {
     /// <summary>
     /// Aggregated view of liquidity for a specific asset pair across all matching pools.

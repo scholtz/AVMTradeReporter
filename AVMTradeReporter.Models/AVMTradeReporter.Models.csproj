@@ -1,0 +1,24 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <PackageId>AVMTradeReporter.Models</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>AVM Trade Reporter</Authors>
+    <Company>Biatec</Company>
+    <Product>AVM Trade Reporter</Product>
+    <Description>Data models for AVM Trade Reporter - supports Pool, AggregatedPool, Trade, Liquidity, and OHLC data structures for Algorand DEX data</Description>
+    <PackageTags>algorand;dex;trade;pool;avm</PackageTags>
+    <RepositoryUrl>https://github.com/scholtz/AVMTradeReporter</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
+
+</Project>

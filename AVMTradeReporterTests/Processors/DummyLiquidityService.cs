@@ -1,5 +1,5 @@
 ﻿using AVMTradeReporter.Model;
-using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Models.Data;
 using System;
 using System.Collections.Generic;
 using System.Linq;

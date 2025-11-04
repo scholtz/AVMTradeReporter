@@ -1,6 +1,7 @@
 ﻿using Algorand.Algod;
 using AVMTradeReporter.Hubs;
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Models.Data;
 using Microsoft.AspNetCore.SignalR;
 using StackExchange.Redis;
 using System.Diagnostics;

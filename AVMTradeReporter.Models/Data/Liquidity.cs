@@ -1,7 +1,7 @@
-﻿using AVMTradeReporter.Model.Data.Enums;
+﻿using AVMTradeReporter.Models.Data.Enums;
 using System.Text.Json.Serialization;
 
-namespace AVMTradeReporter.Model.Data
+namespace AVMTradeReporter.Models.Data
 {
     
     public class Liquidity

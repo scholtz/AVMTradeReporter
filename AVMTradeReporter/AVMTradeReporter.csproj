@@ -25,4 +25,8 @@
     </None>
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\AVMTradeReporter.Models\AVMTradeReporter.Models.csproj" />
+  </ItemGroup>
+
 </Project>

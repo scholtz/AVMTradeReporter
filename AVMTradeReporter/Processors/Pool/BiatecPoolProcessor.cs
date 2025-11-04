@@ -1,6 +1,6 @@
 ﻿using Algorand.Algod;
 using AVMTradeReporter.Extensions;
-using AVMTradeReporter.Model.Data.Enums;
+using AVMTradeReporter.Models.Data.Enums;
 using AVMTradeReporter.Repository;
 using System.Text;
 using static Org.BouncyCastle.Math.EC.ECCurve;
@@ -38,7 +38,7 @@ namespace AVMTradeReporter.Processors.Pool
         public static string BasepMin = Convert.ToBase64String(Encoding.UTF8.GetBytes("pMin"));
         public static string BasepMax = Convert.ToBase64String(Encoding.UTF8.GetBytes("pMax"));
 
-        public async Task<AVMTradeReporter.Model.Data.Pool> LoadPoolAsync(string address, ulong appId)
+        public async Task<AVMTradeReporter.Models.Data.Pool> LoadPoolAsync(string address, ulong appId)
         {
             using var cancelationTokenSource = new CancellationTokenSource();
             var pool = await _poolRepository.GetPoolAsync(address, cancelationTokenSource.Token);
@@ -108,7 +108,7 @@ namespace AVMTradeReporter.Processors.Pool
 
             if (pool == null)
             {
-                pool = new AVMTradeReporter.Model.Data.Pool
+                pool = new AVMTradeReporter.Models.Data.Pool
                 {
                     PoolAddress = address,
                     PoolAppId = appId,

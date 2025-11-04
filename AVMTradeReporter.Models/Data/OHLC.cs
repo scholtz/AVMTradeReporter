@@ -1,7 +1,7 @@
 using System;
 using System.Text.Json.Serialization;
 
-namespace AVMTradeReporter.Model.Data
+namespace AVMTradeReporter.Models.Data
 {
     /// <summary>
     /// Represents OHLC (Open/High/Low/Close) candlestick data for a specific asset pair and interval bucket.

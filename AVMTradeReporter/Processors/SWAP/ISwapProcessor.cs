@@ -1,7 +1,8 @@
 ﻿using Algorand;
 using Algorand.Algod.Model.Transactions;
 using AVMTradeReporter.Model.Data;
-using AVMTradeReporter.Model.Data.Enums;
+using AVMTradeReporter.Models.Data;
+using AVMTradeReporter.Models.Data.Enums;
 
 namespace AVMTradeReporter.Processors.SWAP
 {

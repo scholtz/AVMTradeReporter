@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using AVMTradeReporter.Model.Data.Enums;
+using AVMTradeReporter.Models.Data.Enums;
 using Newtonsoft.Json;
 
 namespace AVMTradeReporterTests.Model
@@ -16,7 +16,7 @@ namespace AVMTradeReporterTests.Model
             var now = DateTimeOffset.UtcNow;
             var older = now.AddMinutes(-1);
 
-            var pool = new AVMTradeReporter.Model.Data.Pool
+            var pool = new AVMTradeReporter.Models.Data.Pool
             {
                 AssetIdA = 1,
                 AssetADecimals = 6,
@@ -43,7 +43,7 @@ namespace AVMTradeReporterTests.Model
             // Arrange
             var now = DateTimeOffset.UtcNow;
             var older = now.AddMinutes(-1);
-            var pool = JsonConvert.DeserializeObject<AVMTradeReporter.Model.Data.Pool>(File.ReadAllText("Data/pool-3136517663.json"));
+            var pool = JsonConvert.DeserializeObject<AVMTradeReporter.Models.Data.Pool>(File.ReadAllText("Data/pool-3136517663.json"));
             Assert.That(pool, Is.Not.Null, "Failed to deserialize pool data from JSON file.");
             Assert.That(pool.VirtualAmountA, Is.EqualTo(1423509.4775349025526735010167m));
             Assert.That(pool.VirtualAmountB, Is.EqualTo(9698934.902364655801809186706m));

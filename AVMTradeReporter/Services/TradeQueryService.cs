@@ -1,4 +1,5 @@
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Models.Data;
 using Elastic.Clients.Elasticsearch;
 
 namespace AVMTradeReporter.Services

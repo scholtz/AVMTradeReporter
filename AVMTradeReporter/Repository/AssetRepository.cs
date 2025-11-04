@@ -1,6 +1,7 @@
 ﻿using Algorand.Algod;
 using Algorand.KMD;
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Processors.Pool;
 using Microsoft.Extensions.Logging;
 using StackExchange.Redis;

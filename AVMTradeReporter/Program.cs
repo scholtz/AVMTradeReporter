@@ -117,22 +117,22 @@ namespace AVMTradeReporter
                 .EnableHttpCompression()
                 .PrettyJson()
                 .RequestTimeout(TimeSpan.FromMinutes(1))
-                .DefaultMappingFor<Model.Data.Trade>(m => m
+                .DefaultMappingFor<Models.Data.Trade>(m => m
                     .IndexName("trades")
                     .IdProperty(t => t.TxId))
-                .DefaultMappingFor<Model.Data.Liquidity>(m => m
+                .DefaultMappingFor<Models.Data.Liquidity>(m => m
                     .IndexName("liquidity")
                     .IdProperty(t => t.TxId))
-                .DefaultMappingFor<Model.Data.AggregatedPool>(m => m
+                .DefaultMappingFor<Models.Data.AggregatedPool>(m => m
                     .IndexName("liquidity")
                     .IdProperty(t => t.Id))
-                .DefaultMappingFor<Model.Data.Pool>(m => m
+                .DefaultMappingFor<Models.Data.Pool>(m => m
                     .IndexName("pools")
                     .IdProperty(t => t.PoolAddress))
-                .DefaultMappingFor<Model.Data.Indexer>(m => m
+                .DefaultMappingFor<Models.Data.Indexer>(m => m
                     .IndexName("indexers")
                     .IdProperty(t => t.Id))
-                .DefaultMappingFor<Model.Data.OHLC>(m => m
+                .DefaultMappingFor<Models.Data.OHLC>(m => m
                     .IndexName("ohlc")
                     .IdProperty(t => t.Id))
                 ;

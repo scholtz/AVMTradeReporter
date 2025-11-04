@@ -1,4 +1,5 @@
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Models.Data;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Mapping;
 using Elastic.Clients.Elasticsearch.IndexManagement;
@@ -136,7 +137,7 @@ namespace AVMTradeReporter.Repository
         public async Task UpdateFromTradeAsync(Trade trade, CancellationToken cancellationToken)
         {
             if (_elasticClient == null) return;
-            if (trade.TradeState != Model.Data.Enums.TxState.Confirmed) return;
+            if (trade.TradeState != Models.Data.Enums.TxState.Confirmed) return;
             var buckets = GetIntervalBuckets(trade).ToList();
             if (!buckets.Any()) return;
 

@@ -1,11 +1,11 @@
 ﻿using System.Text.Json.Serialization;
 
-namespace AVMTradeReporter.Model.Data.Enums
+namespace AVMTradeReporter.Models.Data.Enums
 {
     [JsonConverter(typeof(JsonStringEnumConverter))]
-    public enum AssetType
+    public enum TxState
     {
-        ASA,
-        ARC200
+        TxPool,
+        Confirmed
     }
 }

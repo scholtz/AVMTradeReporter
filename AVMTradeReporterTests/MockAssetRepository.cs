@@ -1,5 +1,6 @@
 ﻿using Algorand.Algod.Model;
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Repository;
 using System.Collections.Concurrent;
 
