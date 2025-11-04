@@ -380,6 +380,11 @@ namespace AVMTradeReporter.Repository
                             var redisKey = $"{_appConfig.Redis.KeyPrefix}{pool.PoolAddress}";
                             var poolJson = JsonSerializer.Serialize(pool);
                             await _redisDatabase.StringSetAsync(redisKey, poolJson);
+                            
+                            // Publish pool update to Redis PubSub channel
+                            var subscriber = _redisDatabase.Multiplexer.GetSubscriber();
+                            await subscriber.PublishAsync(RedisChannel.Literal(_appConfig.Redis.PoolUpdateChannel), poolJson);
+                            _logger.LogDebug("Published pool update to Redis PubSub channel: {channel}", _appConfig.Redis.PoolUpdateChannel);
                         }
                     }
                     catch (Exception ex)

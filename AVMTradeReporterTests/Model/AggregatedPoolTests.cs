@@ -259,7 +259,7 @@ namespace AVMTradeReporterTests.Model
             var pools = JsonConvert.DeserializeObject<AVMTradeReporter.Models.Data.Pool[]>(File.ReadAllText("Data/pools-vote-algo.json"));
             var loggerPoolRepository = new LoggerFactory().CreateLogger<PoolRepository>();
             var loggerAggregatedPoolRepository = new LoggerFactory().CreateLogger<AggregatedPoolRepository>();
-            var aggregatedPoolsRepository = new AggregatedPoolRepository(null!, loggerAggregatedPoolRepository, null!);
+            var aggregatedPoolsRepository = new AggregatedPoolRepository(null!, loggerAggregatedPoolRepository, null!, Options.Create(new AppConfiguration()));
             var config = new AppConfiguration() { };
             var options = new OptionsWrapper<AppConfiguration>(config);
             var repository = new PoolRepository(null!, loggerPoolRepository, null!, aggregatedPoolsRepository, options, null!, null!);
@@ -313,7 +313,7 @@ namespace AVMTradeReporterTests.Model
             var pools = JsonConvert.DeserializeObject<AVMTradeReporter.Models.Data.Pool[]>(File.ReadAllText("Data/pools-algo-usdc.json"));
             var loggerPoolRepository = new LoggerFactory().CreateLogger<PoolRepository>();
             var loggerAggregatedPoolRepository = new LoggerFactory().CreateLogger<AggregatedPoolRepository>();
-            var aggregatedPoolsRepository = new AggregatedPoolRepository(null!, loggerAggregatedPoolRepository, null!);
+            var aggregatedPoolsRepository = new AggregatedPoolRepository(null!, loggerAggregatedPoolRepository, null!, Options.Create(new AppConfiguration()));
             var config = new AppConfiguration() { };
             var options = new OptionsWrapper<AppConfiguration>(config);
             var repository = new PoolRepository(null!, loggerPoolRepository, null!, aggregatedPoolsRepository, options, null!, null!);
@@ -341,7 +341,7 @@ namespace AVMTradeReporterTests.Model
             var pools = JsonConvert.DeserializeObject<AVMTradeReporter.Models.Data.Pool[]>(File.ReadAllText("Data/pools-algo-usdc-big-20250820.json"));
             var loggerPoolRepository = new LoggerFactory().CreateLogger<PoolRepository>();
             var loggerAggregatedPoolRepository = new LoggerFactory().CreateLogger<AggregatedPoolRepository>();
-            var aggregatedPoolsRepository = new AggregatedPoolRepository(null!, loggerAggregatedPoolRepository, null!);
+            var aggregatedPoolsRepository = new AggregatedPoolRepository(null!, loggerAggregatedPoolRepository, null!, Options.Create(new AppConfiguration()));
             var config = new AppConfiguration() { };
             var options = new OptionsWrapper<AppConfiguration>(config);
             var repository = new PoolRepository(null!, loggerPoolRepository, null!, aggregatedPoolsRepository, options, null!, null!);
@@ -370,7 +370,7 @@ namespace AVMTradeReporterTests.Model
             var pool = JsonConvert.DeserializeObject<AVMTradeReporter.Models.Data.Pool>(File.ReadAllText("Data/pool-403797689.json"));
             var loggerPoolRepository = new LoggerFactory().CreateLogger<PoolRepository>();
             var loggerAggregatedPoolRepository = new LoggerFactory().CreateLogger<AggregatedPoolRepository>();
-            var aggregatedPoolsRepository = new AggregatedPoolRepository(null!, loggerAggregatedPoolRepository, null!);
+            var aggregatedPoolsRepository = new AggregatedPoolRepository(null!, loggerAggregatedPoolRepository, null!, Options.Create(new AppConfiguration()));
             var config = new AppConfiguration() { };
             var options = new OptionsWrapper<AppConfiguration>(config);
             var repository = new PoolRepository(null!, loggerPoolRepository, null!, aggregatedPoolsRepository, options, null!, null!);

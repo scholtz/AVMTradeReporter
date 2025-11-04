@@ -1,4 +1,5 @@
 using AVMTradeReporter.Hubs;
+using AVMTradeReporter.Model.Configuration;
 using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Models.Data;
 using Elastic.Clients.Elasticsearch;
@@ -7,7 +8,10 @@ using Elastic.Clients.Elasticsearch.Mapping;
 using Elastic.Clients.Elasticsearch.Nodes;
 using Elastic.Clients.Elasticsearch.Security;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Options;
+using StackExchange.Redis;
 using System.Collections.Concurrent;
+using System.Text.Json;
 
 namespace AVMTradeReporter.Repository
 {
@@ -17,6 +21,8 @@ namespace AVMTradeReporter.Repository
         private readonly ILogger<AggregatedPoolRepository> _logger;
         private readonly IHubContext<BiatecScanHub> _hubContext;
         private readonly IAssetRepository? _assetRepository; // optional asset repository for price/tvl updates
+        private readonly IDatabase? _redisDatabase;
+        private readonly AppConfiguration _appConfig;
 
         private static readonly ConcurrentDictionary<(ulong A, ulong B), AggregatedPool> _cache = new();
 
@@ -24,12 +30,16 @@ namespace AVMTradeReporter.Repository
             ElasticsearchClient elasticClient,
             ILogger<AggregatedPoolRepository> logger,
             IHubContext<BiatecScanHub> hubContext,
+            IOptions<AppConfiguration> appConfig,
+            IDatabase? redisDatabase = null,
             IAssetRepository? assetRepository = null)
         {
             _elasticClient = elasticClient;
             _logger = logger;
             _hubContext = hubContext;
             _assetRepository = assetRepository;
+            _redisDatabase = redisDatabase;
+            _appConfig = appConfig.Value;
 
             CreateIndexTemplateAsync().Wait();
         }
@@ -233,6 +243,22 @@ namespace AVMTradeReporter.Repository
                     if (!response.IsValidResponse)
                     {
                         _logger.LogWarning("Failed to index aggregated pool {id}: {error}", id, response.DebugInformation);
+                    }
+                }
+                
+                // Publish to Redis PubSub channel
+                if (_redisDatabase != null && _appConfig.Redis.Enabled)
+                {
+                    try
+                    {
+                        var aggregatedPoolJson = JsonSerializer.Serialize(agg);
+                        var subscriber = _redisDatabase.Multiplexer.GetSubscriber();
+                        await subscriber.PublishAsync(RedisChannel.Literal(_appConfig.Redis.AggregatedPoolUpdateChannel), aggregatedPoolJson);
+                        _logger.LogDebug("Published aggregated pool update to Redis PubSub channel: {channel}", _appConfig.Redis.AggregatedPoolUpdateChannel);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to publish aggregated pool to Redis PubSub: {a}-{b}", agg.AssetIdA, agg.AssetIdB);
                     }
                 }
             }

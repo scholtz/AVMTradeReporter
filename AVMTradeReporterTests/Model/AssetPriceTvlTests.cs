@@ -16,7 +16,7 @@ namespace AVMTradeReporterTests.Model
             var loggerPoolRepository = new LoggerFactory().CreateLogger<PoolRepository>();
             var loggerAggregatedPoolRepository = new LoggerFactory().CreateLogger<AggregatedPoolRepository>();
             var mockAssetRepo = new MockAssetRepository();
-            var aggregatedPoolsRepository = new AggregatedPoolRepository(null!, loggerAggregatedPoolRepository, null!, mockAssetRepo);
+            var aggregatedPoolsRepository = new AggregatedPoolRepository(null!, loggerAggregatedPoolRepository, null!, Options.Create(new AppConfiguration()), null, mockAssetRepo);
             var config = new AppConfiguration() { };
             var options = new OptionsWrapper<AppConfiguration>(config);
             var poolRepository = new PoolRepository(null!, loggerPoolRepository, null!, aggregatedPoolsRepository, options, null!, null!);
@@ -69,7 +69,7 @@ namespace AVMTradeReporterTests.Model
             var loggerPoolRepository = new LoggerFactory().CreateLogger<PoolRepository>();
             var loggerAggregatedPoolRepository = new LoggerFactory().CreateLogger<AggregatedPoolRepository>();
             var mockAssetRepo = new MockAssetRepository();
-            var aggregatedPoolsRepository = new AggregatedPoolRepository(null!, loggerAggregatedPoolRepository, null!, mockAssetRepo);
+            var aggregatedPoolsRepository = new AggregatedPoolRepository(null!, loggerAggregatedPoolRepository, null!, Options.Create(new AppConfiguration()), null, mockAssetRepo);
             var config = new AppConfiguration() { };
             var options = new OptionsWrapper<AppConfiguration>(config);
             var poolRepository = new PoolRepository(null!, loggerPoolRepository, null!, aggregatedPoolsRepository, options, null!, null!);
@@ -139,7 +139,7 @@ namespace AVMTradeReporterTests.Model
             var loggerPoolRepository = new LoggerFactory().CreateLogger<PoolRepository>();
             var loggerAggregatedPoolRepository = new LoggerFactory().CreateLogger<AggregatedPoolRepository>();
             var mockAssetRepo = new MockAssetRepository();
-            var aggregatedPoolsRepository = new AggregatedPoolRepository(null!, loggerAggregatedPoolRepository, null!, mockAssetRepo);
+            var aggregatedPoolsRepository = new AggregatedPoolRepository(null!, loggerAggregatedPoolRepository, null!, Options.Create(new AppConfiguration()), null, mockAssetRepo);
             var config = new AppConfiguration() { };
             var options = new OptionsWrapper<AppConfiguration>(config);
             var poolRepository = new PoolRepository(null!, loggerPoolRepository, null!, aggregatedPoolsRepository, options, null!, null!);
@@ -188,7 +188,7 @@ namespace AVMTradeReporterTests.Model
             var loggerPoolRepository = new LoggerFactory().CreateLogger<PoolRepository>();
             var loggerAggregatedPoolRepository = new LoggerFactory().CreateLogger<AggregatedPoolRepository>();
             var mockAssetRepo = new MockAssetRepository();
-            var aggregatedPoolsRepository = new AggregatedPoolRepository(null!, loggerAggregatedPoolRepository, null!, mockAssetRepo);
+            var aggregatedPoolsRepository = new AggregatedPoolRepository(null!, loggerAggregatedPoolRepository, null!, Options.Create(new AppConfiguration()), null, mockAssetRepo);
             var config = new AppConfiguration() { };
             var options = new OptionsWrapper<AppConfiguration>(config);
             var poolRepository = new PoolRepository(null!, loggerPoolRepository, null!, aggregatedPoolsRepository, options, null!, null!);
