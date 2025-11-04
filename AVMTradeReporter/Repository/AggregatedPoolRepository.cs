@@ -23,6 +23,7 @@ namespace AVMTradeReporter.Repository
         private readonly IAssetRepository? _assetRepository; // optional asset repository for price/tvl updates
         private readonly IDatabase? _redisDatabase;
         private readonly AppConfiguration _appConfig;
+        private readonly ISubscriber? _redisSubscriber; // cached Redis subscriber
 
         private static readonly ConcurrentDictionary<(ulong A, ulong B), AggregatedPool> _cache = new();
 
@@ -40,6 +41,7 @@ namespace AVMTradeReporter.Repository
             _assetRepository = assetRepository;
             _redisDatabase = redisDatabase;
             _appConfig = appConfig.Value;
+            _redisSubscriber = _redisDatabase?.Multiplexer.GetSubscriber();
 
             CreateIndexTemplateAsync().Wait();
         }
@@ -247,13 +249,12 @@ namespace AVMTradeReporter.Repository
                 }
                 
                 // Publish to Redis PubSub channel
-                if (_redisDatabase != null && _appConfig.Redis.Enabled)
+                if (_redisSubscriber != null && _appConfig.Redis.Enabled)
                 {
                     try
                     {
                         var aggregatedPoolJson = JsonSerializer.Serialize(agg);
-                        var subscriber = _redisDatabase.Multiplexer.GetSubscriber();
-                        await subscriber.PublishAsync(RedisChannel.Literal(_appConfig.Redis.AggregatedPoolUpdateChannel), aggregatedPoolJson);
+                        await _redisSubscriber.PublishAsync(RedisChannel.Literal(_appConfig.Redis.AggregatedPoolUpdateChannel), aggregatedPoolJson);
                         _logger.LogDebug("Published aggregated pool update to Redis PubSub channel: {channel}", _appConfig.Redis.AggregatedPoolUpdateChannel);
                     }
                     catch (Exception ex)
