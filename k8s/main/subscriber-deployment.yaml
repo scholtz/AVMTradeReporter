@@ -14,16 +14,16 @@ spec:
         app: avmtradereporter-subscriber
     spec:
       containers:
-      - name: subscriber
-        image: scholtz2/avm-trade-reporter-subscriber:1.2025.11.09-main
-        envFrom:
-          - secretRef:
-            name: avm-trade-reporter-subscriber-secret
-        resources:
-          requests:
-            memory: "128Mi"
-            cpu: "100m"
-          limits:
-            memory: "256Mi"
-            cpu: "200m"
+        - name: subscriber
+          image: scholtz2/avm-trade-reporter:1.2025.11.09-main
+          envFrom:
+            - secretRef:
+                name: avm-trade-reporter-subscriber-secret
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
       restartPolicy: Always
