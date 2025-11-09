@@ -3,6 +3,7 @@ using StackExchange.Redis;
 using System.Text.Json;
 using System.Collections.Concurrent;
 using System.IO; // added for optional seed file
+using System.Linq; // for Take()
 
 namespace AVMTradeReporter.Subscriber;
 
@@ -16,6 +17,8 @@ class Program
 
         // Configuration - can be overridden via command line arguments or environment variables
         var redisConnectionString = Environment.GetEnvironmentVariable("REDIS_CONNECTION") ?? "localhost:6379";
+        var redisDbIdStr = Environment.GetEnvironmentVariable("REDIS_DB") ?? Environment.GetEnvironmentVariable("REDIS_DATABASE_ID") ?? "0";
+        int redisDbId = int.TryParse(redisDbIdStr, out var parsedDb) ? parsedDb : 0;
         var poolChannel = Environment.GetEnvironmentVariable("POOL_CHANNEL") ?? "avmtrade:pool:updates";
         var aggregatedPoolChannel = Environment.GetEnvironmentVariable("AGGREGATED_POOL_CHANNEL") ?? "avmtrade:aggregatedpool:updates";
         var poolKeyPrefix = Environment.GetEnvironmentVariable("POOL_KEY_PREFIX") ?? "avmtrade:pools:"; // matches AppConfiguration.Redis.KeyPrefix
@@ -25,6 +28,7 @@ class Program
         var enableSeeding = (Environment.GetEnvironmentVariable("ENABLE_REDIS_SEEDING") ?? "false").Equals("true", StringComparison.OrdinalIgnoreCase);
 
         Console.WriteLine($"Connecting to Redis at: {redisConnectionString}");
+        Console.WriteLine($"Redis DB Id: {redisDbId}");
         Console.WriteLine($"Pool updates channel: {poolChannel}");
         Console.WriteLine($"Aggregated pool updates channel: {aggregatedPoolChannel}");
         Console.WriteLine($"Pool key prefix: {poolKeyPrefix}");
@@ -41,7 +45,7 @@ class Program
             }
             var redis = await ConnectionMultiplexer.ConnectAsync(redisConnectionString);
             var subscriber = redis.GetSubscriber();
-            var db = redis.GetDatabase();
+            var db = redis.GetDatabase(redisDbId);
 
             Console.WriteLine("Connected to Redis successfully!");
             Console.WriteLine();
@@ -103,7 +107,7 @@ class Program
                     {
                         Console.WriteLine($"No pool index found at {poolIndexKey}, trying key scan...");
                         int scannedKeys = 0;
-                        foreach (var key in server.Keys(pattern: poolKeyPrefix + "*"))
+                        foreach (var key in server.Keys(pattern: poolKeyPrefix + "*", database: redisDbId))
                         {
                             scannedKeys++;
                             try
@@ -192,7 +196,7 @@ class Program
                     }
                     else
                     {
-                        foreach (var key in server.Keys(pattern: aggregatedPoolKeyPrefix + "*"))
+                        foreach (var key in server.Keys(pattern: aggregatedPoolKeyPrefix + "*", database: redisDbId))
                         {
                             try
                             {
