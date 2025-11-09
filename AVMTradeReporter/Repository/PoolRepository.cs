@@ -732,8 +732,7 @@ namespace AVMTradeReporter.Repository
 
         private string GeneratePoolId(string poolAddress)
         {
-            return $"{poolAddress}";
-            //return $"{poolAddress}_{poolAppId}_{protocol}";
+            return poolAddress;
         }
 
         private async Task<Pool> CreatePoolFromTrade(Trade trade)

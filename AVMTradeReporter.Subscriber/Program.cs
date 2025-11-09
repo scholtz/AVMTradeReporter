@@ -73,7 +73,7 @@ class Program
                         {
                             try
                             {
-                                var redisKey = poolKeyPrefix + member;
+                                var redisKey = poolKeyPrefix + member.ToString();
                                 var val = await db.StringGetAsync(redisKey);
                                 if (!val.IsNullOrEmpty)
                                 {
@@ -109,7 +109,7 @@ class Program
                             try
                             {
                                 // skip index key if raw scan
-                                if (key.ToString().EndsWith("index")) continue;
+                                if (key.ToString().EndsWith(":index")) continue;
                                 var val = await db.StringGetAsync(key);
                                 if (!val.IsNullOrEmpty)
                                 {
@@ -170,7 +170,7 @@ class Program
                         {
                             try
                             {
-                                var redisKey = aggregatedPoolKeyPrefix + member;
+                                var redisKey = aggregatedPoolKeyPrefix + member.ToString();
                                 var val = await db.StringGetAsync(redisKey);
                                 if (!val.IsNullOrEmpty)
                                 {
@@ -196,7 +196,7 @@ class Program
                         {
                             try
                             {
-                                if (key.ToString().EndsWith("index")) continue;
+                                if (key.ToString().EndsWith(":index")) continue;
                                 var val = await db.StringGetAsync(key);
                                 if (!val.IsNullOrEmpty)
                                 {
