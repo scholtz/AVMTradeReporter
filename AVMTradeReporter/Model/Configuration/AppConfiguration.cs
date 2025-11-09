@@ -57,6 +57,7 @@ namespace AVMTradeReporter.Model.Configuration
     {
         public string ConnectionString { get; set; } = "localhost:6379";
         public string KeyPrefix { get; set; } = "avmtrade:pools:";
+        public string AggregatedPoolKeyPrefix { get; set; } = "avmtrade:aggregatedpools:"; // new prefix for persisted aggregated pools
         public bool Enabled { get; set; } = true;
         public int DatabaseId { get; set; } = 0;
         public string PoolUpdateChannel { get; set; } = "avmtrade:pool:updates";

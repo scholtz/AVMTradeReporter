@@ -247,7 +247,24 @@ namespace AVMTradeReporter.Repository
                         _logger.LogWarning("Failed to index aggregated pool {id}: {error}", id, response.DebugInformation);
                     }
                 }
-                
+
+                // Persist to Redis for subscriber preload
+                if (_redisDatabase != null && _appConfig.Redis.Enabled)
+                {
+                    try
+                    {
+                        var redisKey = $"{_appConfig.Redis.AggregatedPoolKeyPrefix}{agg.AssetIdA}-{agg.AssetIdB}";
+                        var indexKey = $"{_appConfig.Redis.AggregatedPoolKeyPrefix}index";
+                        var aggregatedPoolJson = JsonSerializer.Serialize(agg);
+                        await _redisDatabase.StringSetAsync(redisKey, aggregatedPoolJson);
+                        await _redisDatabase.SetAddAsync(indexKey, $"{agg.AssetIdA}-{agg.AssetIdB}");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to persist aggregated pool to Redis {a}-{b}", agg.AssetIdA, agg.AssetIdB);
+                    }
+                }
+
                 // Publish to Redis PubSub channel
                 if (_redisSubscriber != null && _appConfig.Redis.Enabled)
                 {

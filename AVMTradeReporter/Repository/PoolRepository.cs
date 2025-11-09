@@ -186,11 +186,43 @@ namespace AVMTradeReporter.Repository
 
             try
             {
+                var indexKey = $"{_appConfig.Redis.KeyPrefix}index";
+                int loadedCount = 0;
+
+                // Prefer index set if present for efficiency
+                if (await _redisDatabase.KeyExistsAsync(indexKey))
+                {
+                    var members = await _redisDatabase.SetMembersAsync(indexKey);
+                    foreach (var member in members)
+                    {
+                        var redisKey = $"{_appConfig.Redis.KeyPrefix}{member}";
+                        try
+                        {
+                            var poolJson = await _redisDatabase.StringGetAsync(redisKey);
+                            if (poolJson.HasValue)
+                            {
+                                var pool = JsonSerializer.Deserialize<Pool>(poolJson!);
+                                if (pool != null)
+                                {
+                                    var poolId = GeneratePoolId(pool.PoolAddress);
+                                    _poolsCache.TryAdd(poolId, pool);
+                                    loadedCount++;
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to deserialize pool from Redis key: {key}", redisKey);
+                        }
+                    }
+                    return loadedCount;
+                }
+
+                // Fallback to key scan if index missing
                 var pattern = $"{_appConfig.Redis.KeyPrefix}*";
                 var server = _redisDatabase.Multiplexer.GetServer(_redisDatabase.Multiplexer.GetEndPoints().First());
                 var keys = server.Keys(pattern: pattern);
 
-                int loadedCount = 0;
                 foreach (var key in keys)
                 {
                     try
@@ -265,12 +297,14 @@ namespace AVMTradeReporter.Repository
 
             try
             {
+                var indexKey = $"{_appConfig.Redis.KeyPrefix}index";
                 var tasks = _poolsCache.Values.Select(async pool =>
                 {
                     var poolId = GeneratePoolId(pool.PoolAddress);
                     var redisKey = $"{_appConfig.Redis.KeyPrefix}{poolId}";
                     var poolJson = JsonSerializer.Serialize(pool);
                     await _redisDatabase.StringSetAsync(redisKey, poolJson);
+                    await _redisDatabase.SetAddAsync(indexKey, pool.PoolAddress);
                 });
 
                 await Task.WhenAll(tasks);
@@ -380,9 +414,11 @@ namespace AVMTradeReporter.Repository
                         if (_redisDatabase != null && _appConfig.Redis.Enabled)
                         {
                             var redisKey = $"{_appConfig.Redis.KeyPrefix}{pool.PoolAddress}";
+                            var indexKey = $"{_appConfig.Redis.KeyPrefix}index"; // set of pool addresses for fast enumeration
                             var poolJson = JsonSerializer.Serialize(pool);
                             await _redisDatabase.StringSetAsync(redisKey, poolJson);
-                            
+                            await _redisDatabase.SetAddAsync(indexKey, pool.PoolAddress);
+
                             // Publish pool update to Redis PubSub channel
                             if (_redisSubscriber != null)
                             {
@@ -415,7 +451,7 @@ namespace AVMTradeReporter.Repository
                         }
                         catch (Exception ex)
                         {
-                            _logger.LogError(ex, "Failed to store pool in Elasticsearch: {poolId}", pool.PoolAddress);
+                            _logger.LogError(ex, "Failed to store pool in Elasticsearch: {pool.PoolAddress}");
                         }
                     }, token);
                 }

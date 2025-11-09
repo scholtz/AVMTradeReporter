@@ -44,66 +44,128 @@ class Program
             try
             {
                 var endpoints = redis.GetEndPoints();
-                if (endpoints.Length >0)
+                if (endpoints.Length > 0)
                 {
                     var server = redis.GetServer(endpoints[0]);
-                    // Load Pools
+                    // Load Pools using index set if available
                     Console.WriteLine("Preloading pools from Redis...");
-                    int poolCounter =0;
-                    foreach (var key in server.Keys(pattern: poolKeyPrefix + "*") )
+                    int poolCounter = 0;
+                    var poolIndexKey = poolKeyPrefix + "index";
+                    if (await db.KeyExistsAsync(poolIndexKey))
                     {
-                        try
+                        var members = await db.SetMembersAsync(poolIndexKey);
+                        foreach (var member in members)
                         {
-                            var val = await db.StringGetAsync(key);
-                            if (!val.IsNullOrEmpty)
+                            try
                             {
-                                var pool = JsonSerializer.Deserialize<Pool>(val!);
-                                if (pool != null)
+                                var redisKey = poolKeyPrefix + member;
+                                var val = await db.StringGetAsync(redisKey);
+                                if (!val.IsNullOrEmpty)
                                 {
-                                    preloadPools.Add(pool);
-                                    poolCounter++;
+                                    var pool = JsonSerializer.Deserialize<Pool>(val!);
+                                    if (pool != null)
+                                    {
+                                        preloadPools.Add(pool);
+                                        poolCounter++;
+                                    }
                                 }
                             }
+                            catch (Exception ex)
+                            {
+                                Console.ForegroundColor = ConsoleColor.DarkRed;
+                                Console.WriteLine($"  Failed to deserialize pool key {member}: {ex.Message}");
+                                Console.ResetColor();
+                            }
                         }
-                        catch (Exception ex)
+                    }
+                    else
+                    {
+                        foreach (var key in server.Keys(pattern: poolKeyPrefix + "*"))
                         {
-                            Console.ForegroundColor = ConsoleColor.DarkRed;
-                            Console.WriteLine($"  Failed to deserialize pool key {key}: {ex.Message}");
-                            Console.ResetColor();
+                            try
+                            {
+                                var val = await db.StringGetAsync(key);
+                                if (!val.IsNullOrEmpty)
+                                {
+                                    var pool = JsonSerializer.Deserialize<Pool>(val!);
+                                    if (pool != null)
+                                    {
+                                        preloadPools.Add(pool);
+                                        poolCounter++;
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.ForegroundColor = ConsoleColor.DarkRed;
+                                Console.WriteLine($"  Failed to deserialize pool key {key}: {ex.Message}");
+                                Console.ResetColor();
+                            }
                         }
                     }
                     Console.WriteLine($"Loaded {poolCounter} pools from Redis.");
 
-                    // Load Aggregated Pools (only if they are persisted)
+                    // Load Aggregated Pools using index set if available
                     Console.WriteLine("Preloading aggregated pools from Redis (if any)...");
-                    int aggCounter =0;
-                    foreach (var key in server.Keys(pattern: aggregatedPoolKeyPrefix + "*") )
+                    int aggCounter = 0;
+                    var aggIndexKey = aggregatedPoolKeyPrefix + "index";
+                    if (await db.KeyExistsAsync(aggIndexKey))
                     {
-                        try
+                        var members = await db.SetMembersAsync(aggIndexKey);
+                        foreach (var member in members)
                         {
-                            var val = await db.StringGetAsync(key);
-                            if (!val.IsNullOrEmpty)
+                            try
                             {
-                                var aggregatedPool = JsonSerializer.Deserialize<AggregatedPool>(val!);
-                                if (aggregatedPool != null)
+                                var redisKey = aggregatedPoolKeyPrefix + member;
+                                var val = await db.StringGetAsync(redisKey);
+                                if (!val.IsNullOrEmpty)
                                 {
-                                    preloadAggregatedPools.Add(aggregatedPool);
-                                    aggCounter++;
+                                    var aggregatedPool = JsonSerializer.Deserialize<AggregatedPool>(val!);
+                                    if (aggregatedPool != null)
+                                    {
+                                        preloadAggregatedPools.Add(aggregatedPool);
+                                        aggCounter++;
+                                    }
                                 }
                             }
+                            catch (Exception ex)
+                            {
+                                Console.ForegroundColor = ConsoleColor.DarkRed;
+                                Console.WriteLine($"  Failed to deserialize aggregated pool key {member}: {ex.Message}");
+                                Console.ResetColor();
+                            }
                         }
-                        catch (Exception ex)
+                    }
+                    else
+                    {
+                        foreach (var key in server.Keys(pattern: aggregatedPoolKeyPrefix + "*"))
                         {
-                            Console.ForegroundColor = ConsoleColor.DarkRed;
-                            Console.WriteLine($"  Failed to deserialize aggregated pool key {key}: {ex.Message}");
-                            Console.ResetColor();
+                            try
+                            {
+                                var val = await db.StringGetAsync(key);
+                                if (!val.IsNullOrEmpty)
+                                {
+                                    var aggregatedPool = JsonSerializer.Deserialize<AggregatedPool>(val!);
+                                    if (aggregatedPool != null)
+                                    {
+                                        preloadAggregatedPools.Add(aggregatedPool);
+                                        aggCounter++;
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.ForegroundColor = ConsoleColor.DarkRed;
+                                Console.WriteLine($"  Failed to deserialize aggregated pool key {key}: {ex.Message}");
+                                Console.ResetColor();
+                            }
                         }
                     }
                     Console.WriteLine($"Loaded {aggCounter} aggregated pools from Redis.");
                     Console.WriteLine();
 
                     // Optional summary output (limit to first 5 to avoid spam)
-                    if (poolCounter >0)
+                    if (poolCounter > 0)
                     {
                         Console.WriteLine("Sample preloaded pools (up to 5):");
                         foreach (var p in preloadPools.Take(5))
@@ -112,7 +174,7 @@ class Program
                         }
                         Console.WriteLine();
                     }
-                    if (aggCounter >0)
+                    if (aggCounter > 0)
                     {
                         Console.WriteLine("Sample preloaded aggregated pools (up to 5):");
                         foreach (var ap in preloadAggregatedPools.Take(5))
