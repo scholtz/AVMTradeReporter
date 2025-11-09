@@ -1,6 +1,7 @@
 using AVMTradeReporter.Models.Data;
 using StackExchange.Redis;
 using System.Text.Json;
+using System.Collections.Concurrent;
 
 namespace AVMTradeReporter.Subscriber;
 
@@ -16,10 +17,14 @@ class Program
         var redisConnectionString = Environment.GetEnvironmentVariable("REDIS_CONNECTION") ?? "localhost:6379";
         var poolChannel = Environment.GetEnvironmentVariable("POOL_CHANNEL") ?? "avmtrade:pool:updates";
         var aggregatedPoolChannel = Environment.GetEnvironmentVariable("AGGREGATED_POOL_CHANNEL") ?? "avmtrade:aggregatedpool:updates";
+        var poolKeyPrefix = Environment.GetEnvironmentVariable("POOL_KEY_PREFIX") ?? "avmtrade:pools:"; // matches AppConfiguration.Redis.KeyPrefix
+        var aggregatedPoolKeyPrefix = Environment.GetEnvironmentVariable("AGGREGATED_POOL_KEY_PREFIX") ?? "avmtrade:aggregatedpools:"; // assumed prefix for persisted aggregated pools if available
 
         Console.WriteLine($"Connecting to Redis at: {redisConnectionString}");
         Console.WriteLine($"Pool updates channel: {poolChannel}");
         Console.WriteLine($"Aggregated pool updates channel: {aggregatedPoolChannel}");
+        Console.WriteLine($"Pool key prefix: {poolKeyPrefix}");
+        Console.WriteLine($"Aggregated pool key prefix: {aggregatedPoolKeyPrefix}");
         Console.WriteLine();
 
         try
@@ -27,9 +32,107 @@ class Program
             // Connect to Redis
             var redis = await ConnectionMultiplexer.ConnectAsync(redisConnectionString);
             var subscriber = redis.GetSubscriber();
+            var db = redis.GetDatabase();
 
             Console.WriteLine("Connected to Redis successfully!");
             Console.WriteLine();
+
+            // Preload existing pools from Redis (if keys exist)
+            var preloadPools = new List<Pool>();
+            var preloadAggregatedPools = new List<AggregatedPool>();
+
+            try
+            {
+                var endpoints = redis.GetEndPoints();
+                if (endpoints.Length >0)
+                {
+                    var server = redis.GetServer(endpoints[0]);
+                    // Load Pools
+                    Console.WriteLine("Preloading pools from Redis...");
+                    int poolCounter =0;
+                    foreach (var key in server.Keys(pattern: poolKeyPrefix + "*") )
+                    {
+                        try
+                        {
+                            var val = await db.StringGetAsync(key);
+                            if (!val.IsNullOrEmpty)
+                            {
+                                var pool = JsonSerializer.Deserialize<Pool>(val!);
+                                if (pool != null)
+                                {
+                                    preloadPools.Add(pool);
+                                    poolCounter++;
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.ForegroundColor = ConsoleColor.DarkRed;
+                            Console.WriteLine($"  Failed to deserialize pool key {key}: {ex.Message}");
+                            Console.ResetColor();
+                        }
+                    }
+                    Console.WriteLine($"Loaded {poolCounter} pools from Redis.");
+
+                    // Load Aggregated Pools (only if they are persisted)
+                    Console.WriteLine("Preloading aggregated pools from Redis (if any)...");
+                    int aggCounter =0;
+                    foreach (var key in server.Keys(pattern: aggregatedPoolKeyPrefix + "*") )
+                    {
+                        try
+                        {
+                            var val = await db.StringGetAsync(key);
+                            if (!val.IsNullOrEmpty)
+                            {
+                                var aggregatedPool = JsonSerializer.Deserialize<AggregatedPool>(val!);
+                                if (aggregatedPool != null)
+                                {
+                                    preloadAggregatedPools.Add(aggregatedPool);
+                                    aggCounter++;
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.ForegroundColor = ConsoleColor.DarkRed;
+                            Console.WriteLine($"  Failed to deserialize aggregated pool key {key}: {ex.Message}");
+                            Console.ResetColor();
+                        }
+                    }
+                    Console.WriteLine($"Loaded {aggCounter} aggregated pools from Redis.");
+                    Console.WriteLine();
+
+                    // Optional summary output (limit to first 5 to avoid spam)
+                    if (poolCounter >0)
+                    {
+                        Console.WriteLine("Sample preloaded pools (up to 5):");
+                        foreach (var p in preloadPools.Take(5))
+                        {
+                            Console.WriteLine($"  {p.PoolAddress} | {p.AssetIdA}-{p.AssetIdB} | Protocol={p.Protocol} | RealA={p.RealAmountA:F4} RealB={p.RealAmountB:F4}");
+                        }
+                        Console.WriteLine();
+                    }
+                    if (aggCounter >0)
+                    {
+                        Console.WriteLine("Sample preloaded aggregated pools (up to 5):");
+                        foreach (var ap in preloadAggregatedPools.Take(5))
+                        {
+                            Console.WriteLine($"  {ap.AssetIdA}-{ap.AssetIdB} | Pools={ap.PoolCount} | VSumA(L1)={ap.VirtualSumALevel1:F4} VSumB(L1)={ap.VirtualSumBLevel1:F4}");
+                        }
+                        Console.WriteLine();
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("No Redis endpoints found to scan keys.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine($"Warning: Failed to preload pools from Redis: {ex.Message}");
+                Console.ResetColor();
+            }
 
             // Subscribe to pool updates
             await subscriber.SubscribeAsync(RedisChannel.Literal(poolChannel), (channel, message) =>
