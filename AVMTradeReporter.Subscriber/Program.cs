@@ -2,6 +2,7 @@ using AVMTradeReporter.Models.Data;
 using StackExchange.Redis;
 using System.Text.Json;
 using System.Collections.Concurrent;
+using System.IO; // added for optional seed file
 
 namespace AVMTradeReporter.Subscriber;
 
@@ -19,17 +20,25 @@ class Program
         var aggregatedPoolChannel = Environment.GetEnvironmentVariable("AGGREGATED_POOL_CHANNEL") ?? "avmtrade:aggregatedpool:updates";
         var poolKeyPrefix = Environment.GetEnvironmentVariable("POOL_KEY_PREFIX") ?? "avmtrade:pools:"; // matches AppConfiguration.Redis.KeyPrefix
         var aggregatedPoolKeyPrefix = Environment.GetEnvironmentVariable("AGGREGATED_POOL_KEY_PREFIX") ?? "avmtrade:aggregatedpools:"; // assumed prefix for persisted aggregated pools if available
+        var seedPoolsFile = Environment.GetEnvironmentVariable("SEED_POOLS_FILE") ?? "AVMTradeReporterTests/Data/pools-algo-usdc.json"; // optional
+        var seedAggregatedFile = Environment.GetEnvironmentVariable("SEED_AGGREGATED_POOLS_FILE") ?? string.Empty; // optional JSON array of AggregatedPool
+        var enableSeeding = (Environment.GetEnvironmentVariable("ENABLE_REDIS_SEEDING") ?? "false").Equals("true", StringComparison.OrdinalIgnoreCase);
 
         Console.WriteLine($"Connecting to Redis at: {redisConnectionString}");
         Console.WriteLine($"Pool updates channel: {poolChannel}");
         Console.WriteLine($"Aggregated pool updates channel: {aggregatedPoolChannel}");
         Console.WriteLine($"Pool key prefix: {poolKeyPrefix}");
         Console.WriteLine($"Aggregated pool key prefix: {aggregatedPoolKeyPrefix}");
+        Console.WriteLine($"Enable seeding: {enableSeeding}");
         Console.WriteLine();
 
         try
         {
-            // Connect to Redis
+            // Connect to Redis (add allowAdmin for key scan if not provided)
+            if (!redisConnectionString.Contains("allowAdmin", StringComparison.OrdinalIgnoreCase))
+            {
+                redisConnectionString = redisConnectionString.Contains(",") ? redisConnectionString + ",allowAdmin=true" : redisConnectionString + ",allowAdmin=true";
+            }
             var redis = await ConnectionMultiplexer.ConnectAsync(redisConnectionString);
             var subscriber = redis.GetSubscriber();
             var db = redis.GetDatabase();
@@ -84,6 +93,8 @@ class Program
                         {
                             try
                             {
+                                // skip index key if raw scan
+                                if (key.ToString().EndsWith("index")) continue;
                                 var val = await db.StringGetAsync(key);
                                 if (!val.IsNullOrEmpty)
                                 {
@@ -104,6 +115,33 @@ class Program
                         }
                     }
                     Console.WriteLine($"Loaded {poolCounter} pools from Redis.");
+
+                    // Optional seeding if no pools loaded
+                    if (poolCounter == 0 && enableSeeding && File.Exists(seedPoolsFile))
+                    {
+                        Console.WriteLine($"Seeding pools from file: {seedPoolsFile}");
+                        try
+                        {
+                            var json = await File.ReadAllTextAsync(seedPoolsFile);
+                            var seedPools = JsonSerializer.Deserialize<Pool[]>(json) ?? Array.Empty<Pool>();
+                            foreach (var p in seedPools)
+                            {
+                                var redisKey = poolKeyPrefix + p.PoolAddress;
+                                var poolJson = JsonSerializer.Serialize(p);
+                                await db.StringSetAsync(redisKey, poolJson);
+                                await db.SetAddAsync(poolIndexKey, p.PoolAddress);
+                                preloadPools.Add(p);
+                            }
+                            poolCounter = preloadPools.Count;
+                            Console.WriteLine($"Seeded {poolCounter} pools.");
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.ForegroundColor = ConsoleColor.Red;
+                            Console.WriteLine($"Failed to seed pools: {ex.Message}");
+                            Console.ResetColor();
+                        }
+                    }
 
                     // Load Aggregated Pools using index set if available
                     Console.WriteLine("Preloading aggregated pools from Redis (if any)...");
@@ -142,6 +180,7 @@ class Program
                         {
                             try
                             {
+                                if (key.ToString().EndsWith("index")) continue;
                                 var val = await db.StringGetAsync(key);
                                 if (!val.IsNullOrEmpty)
                                 {
@@ -162,6 +201,33 @@ class Program
                         }
                     }
                     Console.WriteLine($"Loaded {aggCounter} aggregated pools from Redis.");
+
+                    if (aggCounter == 0 && enableSeeding && !string.IsNullOrEmpty(seedAggregatedFile) && File.Exists(seedAggregatedFile))
+                    {
+                        Console.WriteLine($"Seeding aggregated pools from file: {seedAggregatedFile}");
+                        try
+                        {
+                            var json = await File.ReadAllTextAsync(seedAggregatedFile);
+                            var seedAggs = JsonSerializer.Deserialize<AggregatedPool[]>(json) ?? Array.Empty<AggregatedPool>();
+                            foreach (var ap in seedAggs)
+                            {
+                                var redisKey = aggregatedPoolKeyPrefix + ap.AssetIdA + "-" + ap.AssetIdB;
+                                var apJson = JsonSerializer.Serialize(ap);
+                                await db.StringSetAsync(redisKey, apJson);
+                                await db.SetAddAsync(aggIndexKey, ap.AssetIdA + "-" + ap.AssetIdB);
+                                preloadAggregatedPools.Add(ap);
+                            }
+                            aggCounter = preloadAggregatedPools.Count;
+                            Console.WriteLine($"Seeded {aggCounter} aggregated pools.");
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.ForegroundColor = ConsoleColor.Red;
+                            Console.WriteLine($"Failed to seed aggregated pools: {ex.Message}");
+                            Console.ResetColor();
+                        }
+                    }
+
                     Console.WriteLine();
 
                     // Optional summary output (limit to first 5 to avoid spam)
