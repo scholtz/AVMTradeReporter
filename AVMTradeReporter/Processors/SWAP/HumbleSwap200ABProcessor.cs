@@ -4,7 +4,8 @@ using AVM.ClientGenerator.ABI.ARC4;
 using AVM.ClientGenerator.Core;
 using AVMTradeReporter.Model;
 using AVMTradeReporter.Model.Data;
-using AVMTradeReporter.Model.Data.Enums;
+using AVMTradeReporter.Models.Data;
+using AVMTradeReporter.Models.Data.Enums;
 using System.Threading;
 
 namespace AVMTradeReporter.Processors.SWAP

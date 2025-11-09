@@ -1,4 +1,5 @@
 ﻿using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Processors.Image;
 using AVMTradeReporter.Repository;
 using Microsoft.AspNetCore.Mvc;

@@ -2,6 +2,6 @@
 {
     public interface IPoolProcessor
     {
-        public Task<AVMTradeReporter.Model.Data.Pool> LoadPoolAsync(string address, ulong appId);
+        public Task<AVMTradeReporter.Models.Data.Pool> LoadPoolAsync(string address, ulong appId);
     }
 }

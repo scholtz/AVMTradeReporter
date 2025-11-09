@@ -1,4 +1,4 @@
-﻿using AVMTradeReporter.Model.Data.Enums;
+﻿using AVMTradeReporter.Models.Data.Enums;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -13,16 +13,16 @@ namespace AVMTradeReporterTests.Pool
         [Test]
         public void CalculateVirtualAmounts()
         {
-            //    var pool = new AVMTradeReporter.Model.Data.Pool
+            //    var pool = new AVMTradeReporter.Models.Data.Pool
             //    {
-            //        AMMType = AVMTradeReporter.Model.Data.AMMType.ConcentratedLiquidityAMM,
+            //        AMMType = AVMTradeReporter.Models.Data.AMMType.ConcentratedLiquidityAMM,
             //        A = 419186_162941759,
             //        B = 31058_727092031,
             //        PMin = 1.4m,
             //        PMax = 1.6m,
             //        L = 3_715_598_743_719_791
             //    };
-            var pool = new AVMTradeReporter.Model.Data.Pool
+            var pool = new AVMTradeReporter.Models.Data.Pool
             {
                 AMMType = AMMType.ConcentratedLiquidityAMM,
                 A = 419186_162941759,

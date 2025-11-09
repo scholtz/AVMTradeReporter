@@ -1,6 +1,6 @@
 ﻿using Algorand;
 using Algorand.Algod;
-using AVMTradeReporter.Model.Data.Enums;
+using AVMTradeReporter.Models.Data.Enums;
 using AVMTradeReporter.Processors.Pool;
 using Microsoft.Extensions.Logging;
 using System;

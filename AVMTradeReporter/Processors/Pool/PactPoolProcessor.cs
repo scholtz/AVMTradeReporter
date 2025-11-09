@@ -1,6 +1,6 @@
 ﻿using Algorand.Algod;
 using AVMTradeReporter.Extensions;
-using AVMTradeReporter.Model.Data.Enums;
+using AVMTradeReporter.Models.Data.Enums;
 using AVMTradeReporter.Repository;
 using System.Text;
 
@@ -25,7 +25,7 @@ namespace AVMTradeReporter.Processors.Pool
             _assetRepository = assetRepository;
         }
 
-        public async Task<AVMTradeReporter.Model.Data.Pool> LoadPoolAsync(string address, ulong appId)
+        public async Task<AVMTradeReporter.Models.Data.Pool> LoadPoolAsync(string address, ulong appId)
         {
             using var cancelationTokenSource = new CancellationTokenSource();
             var pool = await _poolRepository.GetPoolAsync(address, cancelationTokenSource.Token);
@@ -83,7 +83,7 @@ namespace AVMTradeReporter.Processors.Pool
             var updated = false;
             if (pool == null)
             {
-                pool = new AVMTradeReporter.Model.Data.Pool
+                pool = new AVMTradeReporter.Models.Data.Pool
                 {
                     PoolAddress = address,
                     PoolAppId = appId,

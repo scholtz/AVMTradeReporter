@@ -1,4 +1,4 @@
-using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Repository;
 using Microsoft.Extensions.Logging;
 using NUnit.Framework;
@@ -17,7 +17,7 @@ namespace AVMTradeReporterTests.Repository
                 AssetAmountIn = 100,
                 AssetAmountOut = 250,
                 Timestamp = DateTimeOffset.Parse("2024-01-02T03:04:05Z"),
-                TradeState = AVMTradeReporter.Model.Data.Enums.TxState.Confirmed
+                TradeState = AVMTradeReporter.Models.Data.Enums.TxState.Confirmed
             };
 
             var buckets = OHLCRepository.GetIntervalBuckets(trade).ToList();
@@ -43,7 +43,7 @@ namespace AVMTradeReporterTests.Repository
                 AssetAmountIn = 300,
                 AssetAmountOut = 120,
                 Timestamp = DateTimeOffset.Parse("2024-05-06T07:08:09Z"),
-                TradeState = AVMTradeReporter.Model.Data.Enums.TxState.Confirmed
+                TradeState = AVMTradeReporter.Models.Data.Enums.TxState.Confirmed
             };
             var buckets = OHLCRepository.GetIntervalBuckets(trade).ToList();
             Assert.That(buckets, Is.Not.Empty);
@@ -63,7 +63,7 @@ namespace AVMTradeReporterTests.Repository
                 AssetAmountIn = 10,
                 AssetAmountOut = 10,
                 Timestamp = DateTimeOffset.UtcNow,
-                TradeState = AVMTradeReporter.Model.Data.Enums.TxState.Confirmed
+                TradeState = AVMTradeReporter.Models.Data.Enums.TxState.Confirmed
             };
             Assert.That(OHLCRepository.GetIntervalBuckets(trade), Is.Empty);
         }
@@ -78,7 +78,7 @@ namespace AVMTradeReporterTests.Repository
                 AssetAmountIn = 0,
                 AssetAmountOut = 0,
                 Timestamp = DateTimeOffset.UtcNow,
-                TradeState = AVMTradeReporter.Model.Data.Enums.TxState.Confirmed
+                TradeState = AVMTradeReporter.Models.Data.Enums.TxState.Confirmed
             };
             Assert.That(OHLCRepository.GetIntervalBuckets(trade), Is.Empty);
         }

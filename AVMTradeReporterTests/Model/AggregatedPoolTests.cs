@@ -1,6 +1,6 @@
 using AVMTradeReporter.Model.Configuration;
-using AVMTradeReporter.Model.Data;
-using AVMTradeReporter.Model.Data.Enums;
+using AVMTradeReporter.Models.Data;
+using AVMTradeReporter.Models.Data.Enums;
 using AVMTradeReporter.Processors.Pool;
 using AVMTradeReporter.Repository;
 using Microsoft.Extensions.Logging;
@@ -22,7 +22,7 @@ namespace AVMTradeReporterTests.Model
             Assert.That(resultNull.Length, Is.EqualTo(0));
 
             // Empty input
-            var resultEmpty = AggregatedPool.FromPools(Array.Empty<AVMTradeReporter.Model.Data.Pool>()).ToArray();
+            var resultEmpty = AggregatedPool.FromPools(Array.Empty<AVMTradeReporter.Models.Data.Pool>()).ToArray();
             Assert.That(resultEmpty.Length, Is.EqualTo(0));
         }
 
@@ -33,7 +33,7 @@ namespace AVMTradeReporterTests.Model
             var now = DateTimeOffset.UtcNow;
             var older = now.AddMinutes(-1);
 
-            var p1 = new AVMTradeReporter.Model.Data.Pool
+            var p1 = new AVMTradeReporter.Models.Data.Pool
             {
                 AssetIdA = 1,
                 AssetADecimals = 6,
@@ -47,7 +47,7 @@ namespace AVMTradeReporterTests.Model
                 Timestamp = older
             };
 
-            var p2 = new AVMTradeReporter.Model.Data.Pool
+            var p2 = new AVMTradeReporter.Models.Data.Pool
             {
                 AssetIdA = 2,
                 AssetADecimals = 6,
@@ -62,7 +62,7 @@ namespace AVMTradeReporterTests.Model
             };
 
             // Include one invalid pool to ensure it's ignored
-            var invalid = new AVMTradeReporter.Model.Data.Pool
+            var invalid = new AVMTradeReporter.Models.Data.Pool
             {
                 AssetIdA = 1,
                 AssetIdB = 3,
@@ -71,7 +71,7 @@ namespace AVMTradeReporterTests.Model
             };
 
             // Act
-            var result = AggregatedPool.FromPools(new AVMTradeReporter.Model.Data.Pool[] { p1, p2, invalid })
+            var result = AggregatedPool.FromPools(new AVMTradeReporter.Models.Data.Pool[] { p1, p2, invalid })
                 .OrderBy(r => r.AssetIdA).ThenBy(r => r.AssetIdB).ToArray();
 
             // Assert two aggregated entries: (1,2) and (2,1)
@@ -110,7 +110,7 @@ namespace AVMTradeReporterTests.Model
             var now = DateTimeOffset.UtcNow;
             var older = now.AddMinutes(-1);
 
-            var p1 = new AVMTradeReporter.Model.Data.Pool
+            var p1 = new AVMTradeReporter.Models.Data.Pool
             {
                 AssetIdA = 1,
                 AssetADecimals = 6,
@@ -125,7 +125,7 @@ namespace AVMTradeReporterTests.Model
                 Timestamp = older
             };
 
-            var p2 = new AVMTradeReporter.Model.Data.Pool
+            var p2 = new AVMTradeReporter.Models.Data.Pool
             {
                 AssetIdA = 1,
                 AssetADecimals = 6,
@@ -143,7 +143,7 @@ namespace AVMTradeReporterTests.Model
             };
 
             // Act
-            var result = AggregatedPool.FromPools(new AVMTradeReporter.Model.Data.Pool[] { p1, p2 })
+            var result = AggregatedPool.FromPools(new AVMTradeReporter.Models.Data.Pool[] { p1, p2 })
                 .OrderBy(r => r.AssetIdA).ThenBy(r => r.AssetIdB).ToArray();
 
             // Assert two aggregated entries: (1,2) and (2,1)
@@ -171,7 +171,7 @@ namespace AVMTradeReporterTests.Model
             var now = DateTimeOffset.UtcNow;
             var older = now.AddMinutes(-1);
 
-            var p1 = new AVMTradeReporter.Model.Data.Pool
+            var p1 = new AVMTradeReporter.Models.Data.Pool
             {
                 PoolAddress = "addr-1-2",
                 AssetIdA = 1,
@@ -186,7 +186,7 @@ namespace AVMTradeReporterTests.Model
                 Timestamp = older
             };
 
-            var p2 = new AVMTradeReporter.Model.Data.Pool
+            var p2 = new AVMTradeReporter.Models.Data.Pool
             {
                 PoolAddress = "addr-2-1",
                 AssetIdA = 2,
@@ -200,7 +200,7 @@ namespace AVMTradeReporterTests.Model
                 Protocol = DEXProtocol.Tiny,
                 Timestamp = now
             };
-            var p3 = new AVMTradeReporter.Model.Data.Pool
+            var p3 = new AVMTradeReporter.Models.Data.Pool
             {
                 PoolAddress = "addr-1-3",
                 AssetIdA = 1,
@@ -214,7 +214,7 @@ namespace AVMTradeReporterTests.Model
                 Protocol = DEXProtocol.Pact,
                 Timestamp = older
             };
-            var p4 = new AVMTradeReporter.Model.Data.Pool
+            var p4 = new AVMTradeReporter.Models.Data.Pool
             {
                 PoolAddress = "addr-3-2",
                 AssetIdA = 3,
@@ -231,7 +231,7 @@ namespace AVMTradeReporterTests.Model
 
 
             // Act
-            var result = AggregatedPool.FromPools(new AVMTradeReporter.Model.Data.Pool[] { p1, p2, p3, p4 })
+            var result = AggregatedPool.FromPools(new AVMTradeReporter.Models.Data.Pool[] { p1, p2, p3, p4 })
                 .OrderBy(r => r.AssetIdA).ThenBy(r => r.AssetIdB).ToArray();
 
             // Assert two aggregated entries: (1,2) and (2,1)
@@ -256,10 +256,10 @@ namespace AVMTradeReporterTests.Model
         [Test]
         public async Task GetAggregatedPoolVoteAlgo()
         {
-            var pools = JsonConvert.DeserializeObject<AVMTradeReporter.Model.Data.Pool[]>(File.ReadAllText("Data/pools-vote-algo.json"));
+            var pools = JsonConvert.DeserializeObject<AVMTradeReporter.Models.Data.Pool[]>(File.ReadAllText("Data/pools-vote-algo.json"));
             var loggerPoolRepository = new LoggerFactory().CreateLogger<PoolRepository>();
             var loggerAggregatedPoolRepository = new LoggerFactory().CreateLogger<AggregatedPoolRepository>();
-            var aggregatedPoolsRepository = new AggregatedPoolRepository(null!, loggerAggregatedPoolRepository, null!);
+            var aggregatedPoolsRepository = new AggregatedPoolRepository(null!, loggerAggregatedPoolRepository, null!, Options.Create(new AppConfiguration()));
             var config = new AppConfiguration() { };
             var options = new OptionsWrapper<AppConfiguration>(config);
             var repository = new PoolRepository(null!, loggerPoolRepository, null!, aggregatedPoolsRepository, options, null!, null!);
@@ -285,7 +285,7 @@ namespace AVMTradeReporterTests.Model
         public void FromPools_IgnoresPoolsMissingAmountsOrAssetIds()
         {
             // Arrange: only one valid pool, others invalid
-            var valid = new AVMTradeReporter.Model.Data.Pool
+            var valid = new AVMTradeReporter.Models.Data.Pool
             {
                 AssetIdA = 10,
                 AssetADecimals = 6,
@@ -295,12 +295,12 @@ namespace AVMTradeReporterTests.Model
                 B = 2_000_000
             };
 
-            var missingA = new AVMTradeReporter.Model.Data.Pool { AssetIdA = 10, AssetIdB = 20, A = null, B = 1 };
-            var missingB = new AVMTradeReporter.Model.Data.Pool { AssetIdA = 10, AssetIdB = 20, A = 1, B = null };
-            var missingIds = new AVMTradeReporter.Model.Data.Pool { AssetIdA = null, AssetIdB = 20, A = 1, B = 1 };
+            var missingA = new AVMTradeReporter.Models.Data.Pool { AssetIdA = 10, AssetIdB = 20, A = null, B = 1 };
+            var missingB = new AVMTradeReporter.Models.Data.Pool { AssetIdA = 10, AssetIdB = 20, A = 1, B = null };
+            var missingIds = new AVMTradeReporter.Models.Data.Pool { AssetIdA = null, AssetIdB = 20, A = 1, B = 1 };
 
             // Act
-            var result = AggregatedPool.FromPools(new AVMTradeReporter.Model.Data.Pool[] { valid, missingA, missingB, missingIds }).ToArray();
+            var result = AggregatedPool.FromPools(new AVMTradeReporter.Models.Data.Pool[] { valid, missingA, missingB, missingIds }).ToArray();
 
             // With reverse union we expect two entries: (10,20) and (20,10)
             Assert.That(result.Length, Is.EqualTo(2));
@@ -310,10 +310,10 @@ namespace AVMTradeReporterTests.Model
         [Test]
         public async Task GetAggregatedPoolAlgoUsdcLevel1()
         {
-            var pools = JsonConvert.DeserializeObject<AVMTradeReporter.Model.Data.Pool[]>(File.ReadAllText("Data/pools-algo-usdc.json"));
+            var pools = JsonConvert.DeserializeObject<AVMTradeReporter.Models.Data.Pool[]>(File.ReadAllText("Data/pools-algo-usdc.json"));
             var loggerPoolRepository = new LoggerFactory().CreateLogger<PoolRepository>();
             var loggerAggregatedPoolRepository = new LoggerFactory().CreateLogger<AggregatedPoolRepository>();
-            var aggregatedPoolsRepository = new AggregatedPoolRepository(null!, loggerAggregatedPoolRepository, null!);
+            var aggregatedPoolsRepository = new AggregatedPoolRepository(null!, loggerAggregatedPoolRepository, null!, Options.Create(new AppConfiguration()));
             var config = new AppConfiguration() { };
             var options = new OptionsWrapper<AppConfiguration>(config);
             var repository = new PoolRepository(null!, loggerPoolRepository, null!, aggregatedPoolsRepository, options, null!, null!);
@@ -338,10 +338,10 @@ namespace AVMTradeReporterTests.Model
         [Test]
         public async Task GetAggregatedPoolAlgoUsdcLevel2()
         {
-            var pools = JsonConvert.DeserializeObject<AVMTradeReporter.Model.Data.Pool[]>(File.ReadAllText("Data/pools-algo-usdc-big-20250820.json"));
+            var pools = JsonConvert.DeserializeObject<AVMTradeReporter.Models.Data.Pool[]>(File.ReadAllText("Data/pools-algo-usdc-big-20250820.json"));
             var loggerPoolRepository = new LoggerFactory().CreateLogger<PoolRepository>();
             var loggerAggregatedPoolRepository = new LoggerFactory().CreateLogger<AggregatedPoolRepository>();
-            var aggregatedPoolsRepository = new AggregatedPoolRepository(null!, loggerAggregatedPoolRepository, null!);
+            var aggregatedPoolsRepository = new AggregatedPoolRepository(null!, loggerAggregatedPoolRepository, null!, Options.Create(new AppConfiguration()));
             var config = new AppConfiguration() { };
             var options = new OptionsWrapper<AppConfiguration>(config);
             var repository = new PoolRepository(null!, loggerPoolRepository, null!, aggregatedPoolsRepository, options, null!, null!);
@@ -367,10 +367,10 @@ namespace AVMTradeReporterTests.Model
         [Test]
         public async Task Pool403797689()
         {
-            var pool = JsonConvert.DeserializeObject<AVMTradeReporter.Model.Data.Pool>(File.ReadAllText("Data/pool-403797689.json"));
+            var pool = JsonConvert.DeserializeObject<AVMTradeReporter.Models.Data.Pool>(File.ReadAllText("Data/pool-403797689.json"));
             var loggerPoolRepository = new LoggerFactory().CreateLogger<PoolRepository>();
             var loggerAggregatedPoolRepository = new LoggerFactory().CreateLogger<AggregatedPoolRepository>();
-            var aggregatedPoolsRepository = new AggregatedPoolRepository(null!, loggerAggregatedPoolRepository, null!);
+            var aggregatedPoolsRepository = new AggregatedPoolRepository(null!, loggerAggregatedPoolRepository, null!, Options.Create(new AppConfiguration()));
             var config = new AppConfiguration() { };
             var options = new OptionsWrapper<AppConfiguration>(config);
             var repository = new PoolRepository(null!, loggerPoolRepository, null!, aggregatedPoolsRepository, options, null!, null!);

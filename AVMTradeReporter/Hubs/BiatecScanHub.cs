@@ -1,4 +1,5 @@
 ﻿using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Model.Subscription;
 using Elastic.Clients.Elasticsearch.Security;
 using Microsoft.AspNetCore.Authorization;

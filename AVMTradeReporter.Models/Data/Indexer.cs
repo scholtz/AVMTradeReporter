@@ -1,4 +1,4 @@
-﻿namespace AVMTradeReporter.Model.Data
+﻿namespace AVMTradeReporter.Models.Data
 {
     public class Indexer
     {

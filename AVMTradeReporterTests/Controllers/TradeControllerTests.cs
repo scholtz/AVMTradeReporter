@@ -1,5 +1,5 @@
 using AVMTradeReporter.Controllers;
-using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;

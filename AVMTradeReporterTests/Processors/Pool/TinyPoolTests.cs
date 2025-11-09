@@ -1,6 +1,6 @@
 ﻿using Algorand;
 using Algorand.Algod;
-using AVMTradeReporter.Model.Data.Enums;
+using AVMTradeReporter.Models.Data.Enums;
 using AVMTradeReporter.Processors.Pool;
 using Microsoft.Extensions.Logging;
 using System;
@@ -52,7 +52,7 @@ namespace AVMTradeReporterTests.Processors.Pool
 
             var poolRepository = new MockPoolRepository();
 
-            await poolRepository.StorePoolAsync(new AVMTradeReporter.Model.Data.Pool()
+            await poolRepository.StorePoolAsync(new AVMTradeReporter.Models.Data.Pool()
             {
                 PoolAddress = "2PIFZW53RHCSFSYMCFUBW4XOCXOMB7XOYQSQ6KGT3KVGJTL4HM6COZRNMM",
                 PoolAppId = 1002541853,
@@ -89,7 +89,7 @@ namespace AVMTradeReporterTests.Processors.Pool
 
             var poolRepository = new MockPoolRepository();
 
-            await poolRepository.StorePoolAsync(new AVMTradeReporter.Model.Data.Pool()
+            await poolRepository.StorePoolAsync(new AVMTradeReporter.Models.Data.Pool()
             {
                 PoolAddress = "E3CM5G2PMOS2IDKWLQDUSXUKUPJNY4HM4XOS4GJD2STQB7EJJC4HJLIXFE",
                 PoolAppId = 1002541853,

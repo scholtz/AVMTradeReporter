@@ -1,5 +1,6 @@
 ﻿using AVMTradeReporter.Hubs;
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Models.Data;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Core.Bulk;
 using Elastic.Clients.Elasticsearch.Security;

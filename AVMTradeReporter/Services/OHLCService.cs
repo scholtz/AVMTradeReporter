@@ -1,4 +1,5 @@
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Model.DTO.OHLC;
 using AVMTradeReporter.Repository;
 using Elastic.Clients.Elasticsearch;

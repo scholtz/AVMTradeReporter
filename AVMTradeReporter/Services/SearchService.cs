@@ -1,5 +1,6 @@
 using Algorand;
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Repository;
 using Microsoft.Extensions.Logging;
 using Elastic.Clients.Elasticsearch;

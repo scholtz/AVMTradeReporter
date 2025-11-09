@@ -1,6 +1,6 @@
 ﻿using System.Text.Json.Serialization;
 
-namespace AVMTradeReporter.Model.Data.Enums
+namespace AVMTradeReporter.Models.Data.Enums
 {
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public enum AMMType

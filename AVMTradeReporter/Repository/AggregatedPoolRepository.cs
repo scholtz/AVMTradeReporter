@@ -1,12 +1,17 @@
 using AVMTradeReporter.Hubs;
+using AVMTradeReporter.Model.Configuration;
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Models.Data;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.IndexManagement;
 using Elastic.Clients.Elasticsearch.Mapping;
 using Elastic.Clients.Elasticsearch.Nodes;
 using Elastic.Clients.Elasticsearch.Security;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Options;
+using StackExchange.Redis;
 using System.Collections.Concurrent;
+using System.Text.Json;
 
 namespace AVMTradeReporter.Repository
 {
@@ -16,6 +21,9 @@ namespace AVMTradeReporter.Repository
         private readonly ILogger<AggregatedPoolRepository> _logger;
         private readonly IHubContext<BiatecScanHub> _hubContext;
         private readonly IAssetRepository? _assetRepository; // optional asset repository for price/tvl updates
+        private readonly IDatabase? _redisDatabase;
+        private readonly AppConfiguration _appConfig;
+        private readonly ISubscriber? _redisSubscriber; // cached Redis subscriber
 
         private static readonly ConcurrentDictionary<(ulong A, ulong B), AggregatedPool> _cache = new();
 
@@ -23,12 +31,17 @@ namespace AVMTradeReporter.Repository
             ElasticsearchClient elasticClient,
             ILogger<AggregatedPoolRepository> logger,
             IHubContext<BiatecScanHub> hubContext,
+            IOptions<AppConfiguration> appConfig,
+            IDatabase? redisDatabase = null,
             IAssetRepository? assetRepository = null)
         {
             _elasticClient = elasticClient;
             _logger = logger;
             _hubContext = hubContext;
             _assetRepository = assetRepository;
+            _redisDatabase = redisDatabase;
+            _appConfig = appConfig.Value;
+            _redisSubscriber = _redisDatabase?.Multiplexer.GetSubscriber();
 
             CreateIndexTemplateAsync().Wait();
         }
@@ -65,7 +78,7 @@ namespace AVMTradeReporter.Repository
             _logger.LogInformation("AggregatedPool index template created: {ok}", response.IsValidResponse);
         }
 
-        public Task InitializeFromExistingPoolsAsync(IEnumerable<Model.Data.Pool> pools, CancellationToken cancellationToken = default)
+        public Task InitializeFromExistingPoolsAsync(IEnumerable<Models.Data.Pool> pools, CancellationToken cancellationToken = default)
         {
             try
             {
@@ -99,7 +112,7 @@ namespace AVMTradeReporter.Repository
             return Task.CompletedTask;
         }
 
-        public async Task UpdateForPairAsync(ulong assetIdA, ulong assetIdB, IEnumerable<Model.Data.Pool> poolsForPair, CancellationToken cancellationToken = default)
+        public async Task UpdateForPairAsync(ulong assetIdA, ulong assetIdB, IEnumerable<Models.Data.Pool> poolsForPair, CancellationToken cancellationToken = default)
         {
             try
             {
@@ -232,6 +245,21 @@ namespace AVMTradeReporter.Repository
                     if (!response.IsValidResponse)
                     {
                         _logger.LogWarning("Failed to index aggregated pool {id}: {error}", id, response.DebugInformation);
+                    }
+                }
+                
+                // Publish to Redis PubSub channel
+                if (_redisSubscriber != null && _appConfig.Redis.Enabled)
+                {
+                    try
+                    {
+                        var aggregatedPoolJson = JsonSerializer.Serialize(agg);
+                        await _redisSubscriber.PublishAsync(RedisChannel.Literal(_appConfig.Redis.AggregatedPoolUpdateChannel), aggregatedPoolJson);
+                        _logger.LogDebug("Published aggregated pool update to Redis PubSub channel: {channel}", _appConfig.Redis.AggregatedPoolUpdateChannel);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to publish aggregated pool to Redis PubSub: {a}-{b}", agg.AssetIdA, agg.AssetIdB);
                     }
                 }
             }

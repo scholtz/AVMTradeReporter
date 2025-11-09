@@ -6,6 +6,7 @@ using AVMIndexReporter.Repository;
 using AVMTradeReporter.Model;
 using AVMTradeReporter.Model.Configuration;
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Repository;
 using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;

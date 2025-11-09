@@ -2,7 +2,7 @@
 using Algorand.Algod.Model;
 using Algorand.Algod.Model.Transactions;
 using AVMTradeReporter.Model;
-using AVMTradeReporter.Model.Data.Enums;
+using AVMTradeReporter.Models.Data.Enums;
 using AVMTradeReporter.Processors;
 using AVMTradeReporter.Processors.Liqudity;
 using AVMTradeReporter.Processors.SWAP;

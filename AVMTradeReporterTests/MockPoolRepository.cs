@@ -1,4 +1,4 @@
-﻿using AVMTradeReporter.Model.Data;
+﻿using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Repository;
 using AVMTradeReporter.Processors.Pool;
 using System;
@@ -6,13 +6,13 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using AVMTradeReporter.Model.Data.Enums;
+using AVMTradeReporter.Models.Data.Enums;
 
 namespace AVMTradeReporterTests
 {
     public class MockPoolRepository : IPoolRepository
     {
-        private List<AVMTradeReporter.Model.Data.Pool> pools = new List<AVMTradeReporter.Model.Data.Pool>();
+        private List<AVMTradeReporter.Models.Data.Pool> pools = new List<AVMTradeReporter.Models.Data.Pool>();
 
         public Task InitializeAsync(CancellationToken cancellationToken = default)
         {
@@ -20,13 +20,13 @@ namespace AVMTradeReporterTests
             return Task.CompletedTask;
         }
 
-        public Task<AVMTradeReporter.Model.Data.Pool?> GetPoolAsync(string poolAddress, CancellationToken cancellationToken)
+        public Task<AVMTradeReporter.Models.Data.Pool?> GetPoolAsync(string poolAddress, CancellationToken cancellationToken)
         {
             var pool = pools.FirstOrDefault(p => p.PoolAddress == poolAddress);
-            return Task.FromResult<AVMTradeReporter.Model.Data.Pool?>(pool);
+            return Task.FromResult<AVMTradeReporter.Models.Data.Pool?>(pool);
         }
 
-        public Task<bool> StorePoolAsync(AVMTradeReporter.Model.Data.Pool pool, bool updateAggregated = true, CancellationToken? cancellationToken = null)
+        public Task<bool> StorePoolAsync(AVMTradeReporter.Models.Data.Pool pool, bool updateAggregated = true, CancellationToken? cancellationToken = null)
         {
             var existing = pools.FirstOrDefault(p => p.PoolAddress == pool.PoolAddress);
             if (existing != null)
@@ -49,7 +49,7 @@ namespace AVMTradeReporterTests
             return Task.CompletedTask;
         }
 
-        public async Task<List<AVMTradeReporter.Model.Data.Pool>> GetPoolsAsync(ulong? assetIdA, ulong? assetIdB, string? address, DEXProtocol? protocol = null, int size = 100, CancellationToken cancellationToken = default)
+        public async Task<List<AVMTradeReporter.Models.Data.Pool>> GetPoolsAsync(ulong? assetIdA, ulong? assetIdB, string? address, DEXProtocol? protocol = null, int size = 100, CancellationToken cancellationToken = default)
         {
             var filteredPools = pools.AsEnumerable();
 

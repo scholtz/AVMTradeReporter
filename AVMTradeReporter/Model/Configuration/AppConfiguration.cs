@@ -59,6 +59,8 @@ namespace AVMTradeReporter.Model.Configuration
         public string KeyPrefix { get; set; } = "avmtrade:pools:";
         public bool Enabled { get; set; } = true;
         public int DatabaseId { get; set; } = 0;
+        public string PoolUpdateChannel { get; set; } = "avmtrade:pool:updates";
+        public string AggregatedPoolUpdateChannel { get; set; } = "avmtrade:aggregatedpool:updates";
     }
 
     public class PoolRefreshConfiguration

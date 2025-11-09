@@ -1,7 +1,8 @@
 using AVMTradeReporter.Hubs;
 using AVMTradeReporter.Model.Configuration;
 using AVMTradeReporter.Model.Data;
-using AVMTradeReporter.Model.Data.Enums;
+using AVMTradeReporter.Models.Data;
+using AVMTradeReporter.Models.Data.Enums;
 using AVMTradeReporter.Processors.Pool;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Core.Bulk;
@@ -28,6 +29,7 @@ namespace AVMTradeReporter.Repository
         private readonly AppConfiguration _appConfig;
         private readonly IServiceProvider _serviceProvider;
         private readonly IAssetRepository? _assetRepository; // optional asset repository to enrich decimals
+        private readonly ISubscriber? _redisSubscriber; // cached Redis subscriber
 
         // In-memory cache for pools
         private static readonly ConcurrentDictionary<string, Pool> _poolsCache = new();
@@ -56,6 +58,7 @@ namespace AVMTradeReporter.Repository
             _appConfig = appConfig.Value;
             _serviceProvider = serviceProvider;
             _assetRepository = assetRepository;
+            _redisSubscriber = _redisDatabase?.Multiplexer.GetSubscriber();
 
             CreatePoolIndexTemplateAsync().Wait();
         }
@@ -379,11 +382,18 @@ namespace AVMTradeReporter.Repository
                             var redisKey = $"{_appConfig.Redis.KeyPrefix}{pool.PoolAddress}";
                             var poolJson = JsonSerializer.Serialize(pool);
                             await _redisDatabase.StringSetAsync(redisKey, poolJson);
+                            
+                            // Publish pool update to Redis PubSub channel
+                            if (_redisSubscriber != null)
+                            {
+                                await _redisSubscriber.PublishAsync(RedisChannel.Literal(_appConfig.Redis.PoolUpdateChannel), poolJson);
+                                _logger.LogDebug("Published pool update to Redis PubSub channel: {channel}", _appConfig.Redis.PoolUpdateChannel);
+                            }
                         }
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "Failed to save pool to Redis: {poolId}", pool.PoolAddress);
+                        _logger.LogError(ex, "Failed to save pool to Redis or publish to PubSub: {poolId}", pool.PoolAddress);
                     }
                 }, token);
 
