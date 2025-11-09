@@ -60,9 +60,15 @@ class Program
                     Console.WriteLine("Preloading pools from Redis...");
                     int poolCounter = 0;
                     var poolIndexKey = poolKeyPrefix + "index";
+                    
+                    Console.WriteLine($"Checking for pool index at key: {poolIndexKey}");
+                    
                     if (await db.KeyExistsAsync(poolIndexKey))
                     {
+                        Console.WriteLine($"Pool index found at {poolIndexKey}");
                         var members = await db.SetMembersAsync(poolIndexKey);
+                        Console.WriteLine($"Pool index contains {members.Length} members");
+                        
                         foreach (var member in members)
                         {
                             try
@@ -78,6 +84,12 @@ class Program
                                         poolCounter++;
                                     }
                                 }
+                                else
+                                {
+                                    Console.ForegroundColor = ConsoleColor.Yellow;
+                                    Console.WriteLine($"  Pool key {redisKey} in index but has no value");
+                                    Console.ResetColor();
+                                }
                             }
                             catch (Exception ex)
                             {
@@ -89,8 +101,11 @@ class Program
                     }
                     else
                     {
+                        Console.WriteLine($"No pool index found at {poolIndexKey}, trying key scan...");
+                        int scannedKeys = 0;
                         foreach (var key in server.Keys(pattern: poolKeyPrefix + "*"))
                         {
+                            scannedKeys++;
                             try
                             {
                                 // skip index key if raw scan
@@ -113,6 +128,7 @@ class Program
                                 Console.ResetColor();
                             }
                         }
+                        Console.WriteLine($"Scanned {scannedKeys} keys matching pattern {poolKeyPrefix}*");
                     }
                     Console.WriteLine($"Loaded {poolCounter} pools from Redis.");
 
