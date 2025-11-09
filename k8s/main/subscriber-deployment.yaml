@@ -16,9 +16,9 @@ spec:
       containers:
       - name: subscriber
         image: scholtz2/avm-trade-reporter-subscriber:1.2025.11.09-main
-        env:
-        - name: REDIS_CONNECTION
-          value: "redis-headless.redis:6379"
+        envFrom:
+          - secretRef:
+            name: avm-trade-reporter-subscriber-secret
         resources:
           requests:
             memory: "128Mi"
