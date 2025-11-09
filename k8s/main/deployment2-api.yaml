@@ -7,7 +7,7 @@ spec:
   selector:
     matchLabels:
       app: avm-trade-reporter2-app
-  replicas: 1
+  replicas: 0
   template:
     metadata:
       labels:

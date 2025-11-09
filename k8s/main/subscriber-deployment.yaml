@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: avmtradereporter-subscriber
+  namespace: biatec-scan
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: avmtradereporter-subscriber
+  template:
+    metadata:
+      labels:
+        app: avmtradereporter-subscriber
+    spec:
+      containers:
+      - name: subscriber
+        image: avmtradereporter-subscriber:latest
+        env:
+        - name: REDIS_CONNECTION
+          value: "redis-headless.redis:6379"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+      restartPolicy: Always
