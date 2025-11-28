@@ -451,7 +451,7 @@ namespace AVMTradeReporter.Repository
                         }
                         catch (Exception ex)
                         {
-                            _logger.LogError(ex, "Failed to store pool in Elasticsearch: {pool.PoolAddress}");
+                            _logger.LogError(ex, "Failed to store pool in Elasticsearch: {PoolAddress}", pool.PoolAddress);
                         }
                     }, token);
                 }

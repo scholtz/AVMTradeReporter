@@ -98,11 +98,16 @@ namespace AVMTradeReporter.Services
                     var esPools = await _elastic.SearchAsync<Pool>(s => s
                         .Indices("pools")
                         .Size(10)
-                        .Query(qry => qry.Bool(b => b.Should(
-                            sh => sh.Wildcard(w => w.Field(f => f.PoolAddress).Value($"*{q.ToLower()}*")),
-                            isNumber ? sh => sh.Term(t => t.Field(f => f.AssetIdA).Value(number)) : null,
-                            isNumber ? sh => sh.Term(t => t.Field(f => f.AssetIdB).Value(number)) : null
-                        ))), cancellationToken);
+                        .Query(qry => qry.Bool(b => {
+                            var shouldQueries = new List<Elastic.Clients.Elasticsearch.QueryDsl.Query>();
+                            shouldQueries.Add(new Elastic.Clients.Elasticsearch.QueryDsl.WildcardQuery { Field = "poolAddress", Value = $"*{q.ToLower()}*" });
+                            if (isNumber)
+                            {
+                                shouldQueries.Add(new Elastic.Clients.Elasticsearch.QueryDsl.TermQuery { Field = "assetIdA", Value = number });
+                                shouldQueries.Add(new Elastic.Clients.Elasticsearch.QueryDsl.TermQuery { Field = "assetIdB", Value = number });
+                            }
+                            b.Should(shouldQueries);
+                        })), cancellationToken);
 
                     if (esPools.IsValidResponse)
                     {
@@ -155,15 +160,20 @@ namespace AVMTradeReporter.Services
                         .Indices("trades")
                         .Size(10)
                         .Sort(ss => ss.Field(f => f.Field(t => t.BlockId).Order(SortOrder.Desc)))
-                        .Query(qry => qry.Bool(b => b.Should(
-                            sh => sh.Wildcard(w => w.Field(f => f.Trader).Value($"*{q.ToLower()}*")),
-                            sh => sh.Wildcard(w => w.Field(f => f.PoolAddress).Value($"*{q.ToLower()}*")),
-                            sh => sh.Term(t => t.Field(f => f.TxId).Value(q)),
-                            isNumber ? sh => sh.Term(t => t.Field(f => f.AssetIdIn).Value(number)) : null,
-                            isNumber ? sh => sh.Term(t => t.Field(f => f.AssetIdOut).Value(number)) : null,
-                            isNumber ? sh => sh.Term(t => t.Field(f => f.AssetAmountIn).Value(number)) : null,
-                            isNumber ? sh => sh.Term(t => t.Field(f => f.AssetAmountOut).Value(number)) : null
-                        ))), cancellationToken);
+                        .Query(qry => qry.Bool(b => {
+                            var shouldQueries = new List<Elastic.Clients.Elasticsearch.QueryDsl.Query>();
+                            shouldQueries.Add(new Elastic.Clients.Elasticsearch.QueryDsl.WildcardQuery { Field = "trader", Value = $"*{q.ToLower()}*" });
+                            shouldQueries.Add(new Elastic.Clients.Elasticsearch.QueryDsl.WildcardQuery { Field = "poolAddress", Value = $"*{q.ToLower()}*" });
+                            shouldQueries.Add(new Elastic.Clients.Elasticsearch.QueryDsl.TermQuery { Field = "txId", Value = q });
+                            if (isNumber)
+                            {
+                                shouldQueries.Add(new Elastic.Clients.Elasticsearch.QueryDsl.TermQuery { Field = "assetIdIn", Value = number });
+                                shouldQueries.Add(new Elastic.Clients.Elasticsearch.QueryDsl.TermQuery { Field = "assetIdOut", Value = number });
+                                shouldQueries.Add(new Elastic.Clients.Elasticsearch.QueryDsl.TermQuery { Field = "assetAmountIn", Value = number });
+                                shouldQueries.Add(new Elastic.Clients.Elasticsearch.QueryDsl.TermQuery { Field = "assetAmountOut", Value = number });
+                            }
+                            b.Should(shouldQueries);
+                        })), cancellationToken);
 
                     if (esTrades.IsValidResponse)
                     {
