@@ -12,7 +12,6 @@
     <PackageReference Include="Algorand4" Version="4.4.1.2025112221" />
     <PackageReference Include="AlgorandAuthentication" Version="2.0.4" />
     <PackageReference Include="Elastic.Clients.Elasticsearch" Version="9.2.2" />
-    <PackageReference Include="Microsoft.AspNetCore.SignalR" Version="1.2.0" />
     <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.22.1" />
     <PackageReference Include="StackExchange.Redis" Version="2.10.1" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="10.0.1" />
