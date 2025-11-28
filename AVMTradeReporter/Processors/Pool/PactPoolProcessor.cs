@@ -178,7 +178,7 @@ namespace AVMTradeReporter.Processors.Pool
                     pool.AssetBDecimals = assetBDecimals;
                     updated = true;
                 }
-                if (pool.AMMType != AMMType.OldAMM)
+                if (pool.AMMType != type)
                 {
                     pool.AMMType = type;
                     updated = true;

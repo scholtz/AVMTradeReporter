@@ -3,11 +3,6 @@ using Algorand.Algod;
 using AVMTradeReporter.Models.Data.Enums;
 using AVMTradeReporter.Processors.Pool;
 using Microsoft.Extensions.Logging;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace AVMTradeReporterTests.Processors.Pool
 {
@@ -92,6 +87,37 @@ namespace AVMTradeReporterTests.Processors.Pool
             Assert.That(pool.B, Is.GreaterThan(1));
             Assert.That(pool.LPFee, Is.EqualTo(0.0015m));
             Assert.That(pool.ProtocolFeePortion, Is.EqualTo(0.2));
+        }
+        [Test]
+        public async Task LoadPactPoolAsyncStableSwap2()
+        {
+            // Arrange
+
+            using var httpClient = HttpClientConfigurator.ConfigureHttpClient(AlgodConfiguration.MainNet);
+            DefaultApi algod = new DefaultApi(httpClient);
+            var logger = new LoggerFactory().CreateLogger<PactPoolProcessor>();
+
+            var poolRepository = new MockPoolRepository();
+            var processor = new AVMTradeReporter.Processors.Pool.PactPoolProcessor(algod, poolRepository, logger, new MockAssetRepository());
+            string address = "YHHVVYHF7NHZZOJOTT2ENRAOCSYIYF6RQLXKAY5N2QEFJESWXMRAXCNIZ4";
+            ulong appId = 2746842986;
+            // Act
+            var pool = await processor.LoadPoolAsync(address, appId);
+            // Assert
+            Assert.IsNotNull(pool);
+            Assert.That(pool.AMMType, Is.EqualTo(AMMType.StableSwap));
+            Assert.That(pool.PoolAddress, Is.EqualTo(address));
+            Assert.That(pool.PoolAppId, Is.EqualTo(appId));
+            Assert.That(pool.AssetIdA, Is.EqualTo(0));
+            Assert.That(pool.AssetIdB, Is.EqualTo(1185173782));
+            Assert.That(pool.A, Is.EqualTo(0));
+            Assert.That(pool.B, Is.EqualTo(0));
+            Assert.That(pool.LPFee, Is.EqualTo(0.0015m));
+            Assert.That(pool.ProtocolFeePortion, Is.EqualTo(0.2));
+            Assert.That(pool.RealAmountA, Is.GreaterThan(0));
+            Assert.That(pool.RealAmountB, Is.GreaterThan(0));
+            Assert.That(pool.VirtualAmountA, Is.GreaterThan(0));
+            Assert.That(pool.VirtualAmountB, Is.GreaterThan(0));
         }
     }
 }
