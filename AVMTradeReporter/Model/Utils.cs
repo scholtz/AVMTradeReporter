@@ -1,4 +1,5 @@
 ﻿using Org.BouncyCastle.Crypto.Digests;
+using System.Linq;
 using System.Text;
 
 namespace AVMTradeReporter.Model
@@ -27,9 +28,15 @@ namespace AVMTradeReporter.Model
         // extracting the least-significant 8 bytes. This matches the logic used in pool processors.
         public static ulong UInt256Base64DeltaToUlong(string base64)
         {
-            var bytes = Convert.FromBase64String(base64);
+            return UInt256Base64DeltaToUlong(Convert.FromBase64String(base64));
+        }
+
+        // Converts a base64-encoded 32-byte big-endian UInt256 delta value into a ulong by
+        // extracting the least-significant 8 bytes. This matches the logic used in pool processors.
+        public static ulong UInt256Base64DeltaToUlong(byte[] bytes)
+        {
             // Take last 8 bytes (least significant) and reverse for little-endian BitConverter
-            var last8 = bytes.Skip(24).Take(8).Reverse().ToArray();
+            var last8 = bytes.Skip(bytes.Length - 8).Take(8).Reverse().ToArray();
             return BitConverter.ToUInt64(last8, 0);
         }
 

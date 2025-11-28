@@ -88,7 +88,8 @@ namespace AVMTradeReporter.Processors.Liqudity
                 {
                     if(AItem.Value.Value.Bytes is string stringVal)
                     {
-                        A = Utils.UInt256Base64DeltaToUlong(stringVal);
+                        var asciiBytes = Model.Utils.DeltaValueStringToBytes(stringVal);
+                        A = Utils.UInt256Base64DeltaToUlong(asciiBytes);
                     }
                 }
                 var BItem = current.Detail?.GlobalDelta?.FirstOrDefault(kv => kv.Key.ToString() == "bb");
@@ -96,7 +97,8 @@ namespace AVMTradeReporter.Processors.Liqudity
                 {
                     if (BItem.Value.Value.Bytes is string stringVal)
                     {
-                        B = Utils.UInt256Base64DeltaToUlong(stringVal);
+                        var asciiBytes = Model.Utils.DeltaValueStringToBytes(stringVal);
+                        B = Utils.UInt256Base64DeltaToUlong(asciiBytes);
                     }
                 }
                 var LItem = current.Detail?.GlobalDelta?.FirstOrDefault(kv => kv.Key.ToString() == "L");
@@ -104,7 +106,8 @@ namespace AVMTradeReporter.Processors.Liqudity
                 {
                     if (LItem.Value.Value.Bytes is string stringVal)
                     {
-                        L = Utils.UInt256Base64DeltaToUlong(stringVal);
+                        var asciiBytes = Model.Utils.DeltaValueStringToBytes(stringVal);
+                        L = Utils.UInt256Base64DeltaToUlong(asciiBytes);
                     }
                 }
                 if (poolAddress == null) return null;
