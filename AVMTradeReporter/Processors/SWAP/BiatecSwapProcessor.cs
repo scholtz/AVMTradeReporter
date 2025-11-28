@@ -124,11 +124,7 @@ namespace AVMTradeReporter.Processors.SWAP
                 {
                     if (AItem.Value.Value.Bytes is string stringVal)
                     {
-                        //var asciiBytes = Algorand.Utils.Encoder.DeltaValueStringToBytes(stringVal);
-                        //var longVal = Algorand.Utils.Encoder.UInt256ToUlong(asciiBytes);
-                        var asciiBytes = Model.Utils.DeltaValueStringToBytes(stringVal);
-                        var longVal = Model.Utils.UInt256ToUlong(asciiBytes);
-                        A = longVal;
+                        A = Utils.UInt256Base64DeltaToUlong(stringVal);
                     }
                 }
                 var BItem = current.Detail?.GlobalDelta?.FirstOrDefault(kv => kv.Key.ToString() == "bb");
@@ -136,11 +132,7 @@ namespace AVMTradeReporter.Processors.SWAP
                 {
                     if (BItem.Value.Value.Bytes is string stringVal)
                     {
-                        //var asciiBytes = Algorand.Utils.Encoder.DeltaValueStringToBytes(stringVal);
-                        //var longVal = Algorand.Utils.Encoder.UInt256ToUlong(asciiBytes);
-                        var asciiBytes = Model.Utils.DeltaValueStringToBytes(stringVal);
-                        var longVal = Model.Utils.UInt256ToUlong(asciiBytes);
-                        B = longVal;
+                        B = Utils.UInt256Base64DeltaToUlong(stringVal);
                     }
                 }
                 var LItem = current.Detail?.GlobalDelta?.FirstOrDefault(kv => kv.Key.ToString() == "L");
@@ -148,11 +140,7 @@ namespace AVMTradeReporter.Processors.SWAP
                 {
                     if (LItem.Value.Value.Bytes is string stringVal)
                     {
-                        //var asciiBytes = Algorand.Utils.Encoder.DeltaValueStringToBytes(stringVal);
-                        //var longVal = Algorand.Utils.Encoder.UInt256ToUlong(asciiBytes);
-                        var asciiBytes = Model.Utils.DeltaValueStringToBytes(stringVal);
-                        var longVal = Model.Utils.UInt256ToUlong(asciiBytes);
-                        L = longVal;
+                        L = Utils.UInt256Base64DeltaToUlong(stringVal);
                     }
                 }
                 var trade = new Trade
