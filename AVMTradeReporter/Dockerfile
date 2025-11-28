@@ -13,6 +13,8 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 COPY ["AVMTradeReporter/AVMTradeReporter.csproj", "AVMTradeReporter/"]
+COPY ["AVMTradeReporter.Models", "AVMTradeReporter.Models/"]
+COPY ["AVMTradeReporter.Subscriber/", "AVMTradeReporter.Subscriber/"]
 RUN dotnet restore "./AVMTradeReporter/AVMTradeReporter.csproj"
 COPY . .
 WORKDIR "/src/AVMTradeReporter"
