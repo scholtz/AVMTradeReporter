@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>3c09cc44-8adb-4f2e-aa9f-d4eca1ff5e7b</UserSecretsId>
@@ -9,14 +9,15 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Algorand4" Version="4.1.2.2025080702" />
+    <PackageReference Include="Algorand4" Version="4.4.1.2025112221" />
     <PackageReference Include="AlgorandAuthentication" Version="2.0.4" />
-    <PackageReference Include="Elastic.Clients.Elasticsearch" Version="9.1.4" />
+    <PackageReference Include="Elastic.Clients.Elasticsearch" Version="9.2.2" />
     <PackageReference Include="Microsoft.AspNetCore.SignalR" Version="1.2.0" />
     <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.22.1" />
-    <PackageReference Include="StackExchange.Redis" Version="2.8.58" />
-    <PackageReference Include="Swashbuckle.AspNetCore" Version="9.0.3" />
-    <PackageReference Include="Swashbuckle.AspNetCore.Filters" Version="9.0.0" />
+    <PackageReference Include="StackExchange.Redis" Version="2.10.1" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="10.0.1" />
+    <PackageReference Include="Swashbuckle.AspNetCore.Filters" Version="10.0.1" />
+    <PackageReference Include="Microsoft.OpenApi" Version="2.3.0" />
   </ItemGroup>
 
   <ItemGroup>

@@ -201,7 +201,7 @@ namespace AVMTradeReporter.Repository
                             var poolJson = await _redisDatabase.StringGetAsync(redisKey);
                             if (poolJson.HasValue)
                             {
-                                var pool = JsonSerializer.Deserialize<Pool>(poolJson!);
+                                var pool = JsonSerializer.Deserialize<Pool>((string)poolJson!);
                                 if (pool != null)
                                 {
                                     var poolId = GeneratePoolId(pool.PoolAddress);
@@ -230,7 +230,7 @@ namespace AVMTradeReporter.Repository
                         var poolJson = await _redisDatabase.StringGetAsync(key);
                         if (poolJson.HasValue)
                         {
-                            var pool = JsonSerializer.Deserialize<Pool>(poolJson!);
+                            var pool = JsonSerializer.Deserialize<Pool>((string)poolJson!);
                             if (pool != null)
                             {
                                 var poolId = GeneratePoolId(pool.PoolAddress);

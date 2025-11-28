@@ -58,7 +58,7 @@ namespace AVMTradeReporter.Repository
                                 {
                                     try
                                     {
-                                        var asset = JsonSerializer.Deserialize<BiatecAsset>(value!);
+                                        var asset = JsonSerializer.Deserialize<BiatecAsset>((string)value!);
                                         if (asset != null)
                                         {
                                             if (asset.Timestamp == null)
