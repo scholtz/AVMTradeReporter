@@ -201,6 +201,8 @@ namespace AVMTradeReporter.Models.Data
                 AssetIdLP = AssetIdLP,
                 A = B,
                 B = A,
+                StableA = StableB,
+                StableB = StableA,
                 AF = BF,
                 BF = AF,
                 L = L,

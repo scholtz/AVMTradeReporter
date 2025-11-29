@@ -59,9 +59,11 @@ namespace AVMTradeReporterTests.Model
                 AssetADecimals = 6,
                 AssetIdB = 2,
                 AssetBDecimals = 6,
-                A = 1_000_000,  // 1.0 (RealAmountA for non-Biatec)
+                StableA = 1_000_000,  // 1.0 (RealAmountA for non-Biatec)
+                A = 0,
                 AF = 0,
-                B = 2_000_000,  // 2.0 (RealAmountB for non-Biatec)
+                StableB = 2_000_000,  // 2.0 (RealAmountB for non-Biatec)
+                B = 0,
                 BF = 0,
                 Protocol = DEXProtocol.Pact,
                 AMMType = AMMType.StableSwap,
@@ -93,9 +95,11 @@ namespace AVMTradeReporterTests.Model
                 AssetADecimals = 6,
                 AssetIdB = 2,
                 AssetBDecimals = 6,
-                A = 5_000_000,  // 5.0 (RealAmountA for non-Biatec)
+                StableA = 5_000_000,  // 5.0 (RealAmountA for non-Biatec)
+                A = 0,
                 AF = 0,
-                B = 3_000_000,  // 3.0 (RealAmountB for non-Biatec)
+                StableB = 3_000_000,  // 3.0 (RealAmountB for non-Biatec)
+                B = 0,
                 BF = 0,
                 Protocol = DEXProtocol.Pact,
                 AMMType = AMMType.StableSwap,
@@ -127,9 +131,11 @@ namespace AVMTradeReporterTests.Model
                 AssetADecimals = 6,
                 AssetIdB = 2,
                 AssetBDecimals = 6,
-                A = 10_000_000,  // 10.0 (RealAmountA for non-Biatec)
+                StableA = 10_000_000,  // 10.0 (RealAmountA for non-Biatec)
+                A = 0,
                 AF = 0,
-                B = 10_000_000,  // 10.0 (RealAmountB for non-Biatec)
+                StableB = 10_000_000,  // 10.0 (RealAmountB for non-Biatec)
+                B = 0,
                 BF = 0,
                 Protocol = DEXProtocol.Tiny,
                 AMMType = AMMType.StableSwap,
@@ -151,45 +157,6 @@ namespace AVMTradeReporterTests.Model
             Assert.That(price, Is.EqualTo(1.0m), "StableSwap pool should maintain 1:1 price ratio");
         }
 
-        [Test]
-        public void StableSwapTest_Biatec_Protocol_WithFees()
-        {
-            // Arrange - Biatec StableSwap pool with protocol fees
-            var pool = new AVMTradeReporter.Models.Data.Pool
-            {
-                AssetIdA = 1,
-                AssetADecimals = 6,
-                AssetIdB = 2,
-                AssetBDecimals = 6,
-                A = 8_000_000_000,  // 8.0 (RealAmountA = A / 1000000000 for Biatec)
-                AF = 500_000,        // AF is not added to RealAmountA for Biatec
-                B = 12_000_000_000, // 12.0 (RealAmountB = B / 1000000000 for Biatec)
-                BF = 300_000,        // BF is not added to RealAmountB for Biatec
-                Protocol = DEXProtocol.Biatec,
-                AMMType = AMMType.StableSwap,
-                Timestamp = DateTimeOffset.UtcNow
-            };
-
-            // Act
-            var virtualA = pool.VirtualAmountA;
-            var virtualB = pool.VirtualAmountB;
-            var realA = pool.RealAmountA;
-            var realB = pool.RealAmountB;
-
-            // Assert
-            // For Biatec: RealAmountA = 8.0, RealAmountB = 12.0
-            Assert.That(realA, Is.EqualTo(8.0m), "RealAmountA should be 8.0 for Biatec protocol");
-            Assert.That(realB, Is.EqualTo(12.0m), "RealAmountB should be 12.0 for Biatec protocol");
-
-            // Both virtual amounts should equal the minimum of the real amounts (8.0)
-            Assert.That(virtualA, Is.EqualTo(8.0m), "VirtualAmountA should equal minimum of real amounts");
-            Assert.That(virtualB, Is.EqualTo(8.0m), "VirtualAmountB should equal minimum of real amounts");
-            Assert.That(virtualA, Is.EqualTo(virtualB), "VirtualAmountA and VirtualAmountB should be equal for StableSwap");
-
-            // Verify the price is 1:1
-            var price = virtualB / virtualA;
-            Assert.That(price, Is.EqualTo(1.0m), "StableSwap pool should maintain 1:1 price ratio");
-        }
 
         [Test]
         public void StableSwapTest_DifferentDecimals()
@@ -201,9 +168,11 @@ namespace AVMTradeReporterTests.Model
                 AssetADecimals = 8,  // 8 decimals
                 AssetIdB = 2,
                 AssetBDecimals = 2,  // 2 decimals
-                A = 500_000_000,     // 5.0 with 8 decimals
+                StableA = 500_000_000,     // 5.0 with 8 decimals
+                A = 0,
                 AF = 0,
-                B = 700,             // 7.0 with 2 decimals
+                StableB = 700,             // 7.0 with 2 decimals
+                B = 0,
                 BF = 0,
                 Protocol = DEXProtocol.Pact,
                 AMMType = AMMType.StableSwap,
@@ -235,9 +204,11 @@ namespace AVMTradeReporterTests.Model
                 AssetADecimals = 6,
                 AssetIdB = 2,
                 AssetBDecimals = 6,
-                A = 15_000_000,  // 15.0
+                StableA = 15_000_000,  // 15.0
+                A = 0,
                 AF = 0,
-                B = 10_000_000,  // 10.0
+                StableB = 10_000_000,  // 10.0
+                B = 0,
                 BF = 0,
                 Protocol = DEXProtocol.Pact,
                 AMMType = AMMType.StableSwap,

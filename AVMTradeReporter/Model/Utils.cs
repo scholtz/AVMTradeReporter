@@ -6,9 +6,15 @@ namespace AVMTradeReporter.Model
 {
     public static class Utils
     {
-        public static byte[] DeltaValueStringToBytes(string data)
+        public static byte[] DeltaValueStringToBytes(string inputAsciiOrHex)
         {
-            return Encoding.ASCII.GetBytes(data);
+            if (inputAsciiOrHex.StartsWith("0x"))
+            {
+                // the input is in hex format, convert it to bytes
+                var hex = inputAsciiOrHex[2..];
+                return Convert.FromHexString(hex);
+            }
+            return Encoding.ASCII.GetBytes(inputAsciiOrHex);
         }
         public static string DeltaValueBytesToString(byte[] data)
         {
@@ -26,9 +32,16 @@ namespace AVMTradeReporter.Model
 
         // Converts a base64-encoded 32-byte big-endian UInt256 delta value into a ulong by
         // extracting the least-significant 8 bytes. This matches the logic used in pool processors.
-        public static ulong UInt256Base64DeltaToUlong(string base64)
+        // if input starts with "0x", treat it as hex
+        public static ulong UInt256Base64DeltaToUlong(string inputBase64OrHex)
         {
-            return UInt256Base64DeltaToUlong(Convert.FromBase64String(base64));
+            if (inputBase64OrHex.StartsWith("0x"))
+            {
+                // the input is in hex format, convert it to bytes
+                var hex = inputBase64OrHex[2..];
+                return UInt256Base64DeltaToUlong(Convert.FromHexString(hex));
+            }
+            return UInt256Base64DeltaToUlong(Convert.FromBase64String(inputBase64OrHex));
         }
 
         // Converts a base64-encoded 32-byte big-endian UInt256 delta value into a ulong by

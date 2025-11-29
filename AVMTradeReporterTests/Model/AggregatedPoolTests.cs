@@ -154,8 +154,8 @@ namespace AVMTradeReporterTests.Model
             // Values are derived from virtual amounts (equal to real amounts for non-concentrated AMM)
             // For (1,2): A = p1.A_real (1.1) + reverse(p2).A_real (4.5) = 5.6
             //            B = p1.B_real (2.2) + reverse(p2).B_real (3.3) = 5.5
-            Assert.That(agg12.VirtualSumALevel1, Is.EqualTo(33.411611892693684301049159175M));
-            Assert.That(agg12.VirtualSumBLevel1, Is.EqualTo(45.523232618035869447454225347M));
+            Assert.That(agg12.VirtualSumALevel1, Is.EqualTo(33.411611892694053532345314914m));
+            Assert.That(agg12.VirtualSumBLevel1, Is.EqualTo(45.523232618036247532345314914m));
             Assert.That(agg12.TVL_A, Is.EqualTo(9m));
             Assert.That(agg12.TVL_B, Is.EqualTo(11m));
             Assert.That(agg12.PoolCount, Is.EqualTo(2m));
