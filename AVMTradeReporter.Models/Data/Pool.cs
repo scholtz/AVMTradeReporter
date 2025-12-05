@@ -332,7 +332,6 @@ namespace AVMTradeReporter.Models.Data
 
         private BigInteger GetY(BigInteger otherTotal, BigInteger amp, BigInteger D)
         {
-            var nCoins = 2;
             var aPrecision = 1000;
             var nn = 4;
             var Ann = amp * nn;
@@ -366,7 +365,7 @@ namespace AVMTradeReporter.Models.Data
             if (n > 0)
             {
                 int bitLength = (int)Math.Ceiling(BigInteger.Log(n, 2));
-                BigInteger root = BigInteger.One << (bitLength / 2);
+                BigInteger root = BigInteger.One << (bitLength / 2 + 1);
 
                 while (true)
                 {
