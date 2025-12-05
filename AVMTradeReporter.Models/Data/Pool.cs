@@ -115,7 +115,7 @@ namespace AVMTradeReporter.Models.Data
 
                                 if (priceReal > 0)
                                 {
-                                    return virtualLiquidity / (decimal)Math.Sqrt((double)priceReal);
+                                    return virtualLiquidity / (decimal)Math.Sqrt((double)priceReal) * Convert.ToDecimal(Amplifier.Value) / 1000;
                                 }
                             }
                             catch
@@ -212,7 +212,7 @@ namespace AVMTradeReporter.Models.Data
 
                                 if (priceReal > 0)
                                 {
-                                    return virtualLiquidity * (decimal)Math.Sqrt((double)priceReal);
+                                    return virtualLiquidity * (decimal)Math.Sqrt((double)priceReal) * Convert.ToDecimal(Amplifier.Value) / 1000;
                                 }
                             }
                             catch
