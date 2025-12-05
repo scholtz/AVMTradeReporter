@@ -5,6 +5,7 @@ using AVMTradeReporter.Model;
 using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Models.Data.Enums;
+using AVMTradeReporter.Services;
 using System.Diagnostics;
 using System.Text;
 using System.Threading;
@@ -15,6 +16,11 @@ namespace AVMTradeReporter.Processors.Liqudity
     {
         public string AppArg { get; set; } = "0440fa8f";
 
+        private readonly ILogger<TransactionProcessor> _logger;
+        public BiatecLiquidityAddProcessor(ILogger<TransactionProcessor> logger)
+        {
+            _logger = logger;
+        }
         public Liquidity? GetLiquidityUpdate(
             SignedTransaction current,
             SignedTransaction? previous1,

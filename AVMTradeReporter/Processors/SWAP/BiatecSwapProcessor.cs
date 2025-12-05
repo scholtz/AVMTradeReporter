@@ -5,12 +5,19 @@ using AVMTradeReporter.Model;
 using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Models.Data.Enums;
+using AVMTradeReporter.Services;
 using System.Threading;
 
 namespace AVMTradeReporter.Processors.SWAP
 {
     public class BiatecSwapProcessor : ISwapProcessor
     {
+
+        private readonly ILogger<TransactionProcessor> _logger;
+        public BiatecSwapProcessor(ILogger<TransactionProcessor> logger)
+        {
+            _logger = logger;
+        }
         public string AppArg { get; set; } = "2013349e";
 
         public Trade? GetTrade(
@@ -126,6 +133,10 @@ namespace AVMTradeReporter.Processors.SWAP
                     {
                         var asciiBytes = Model.Utils.DeltaValueStringToBytes(stringVal);
                         A = Utils.UInt256Base64DeltaToUlong(asciiBytes);
+                        if (appCallTx?.ApplicationId == 3136517663ul)
+                        {
+                            _logger.LogInformation($"BiatecSwapProcessor 3136517663 - processing A value for Biatec Liquidity Pool {stringVal}->{A}");
+                        }
                     }
                 }
                 var BItem = current.Detail?.GlobalDelta?.FirstOrDefault(kv => kv.Key.ToString() == "bb");
@@ -135,6 +146,10 @@ namespace AVMTradeReporter.Processors.SWAP
                     {
                         var asciiBytes = Model.Utils.DeltaValueStringToBytes(stringVal);
                         B = Utils.UInt256Base64DeltaToUlong(asciiBytes);
+                        if (appCallTx?.ApplicationId == 3136517663ul)
+                        {
+                            _logger.LogInformation($"BiatecSwapProcessor 3136517663 - processing B value for Biatec Liquidity Pool {stringVal}->{B}");
+                        }
                     }
                 }
                 var LItem = current.Detail?.GlobalDelta?.FirstOrDefault(kv => kv.Key.ToString() == "L");

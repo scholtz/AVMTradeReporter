@@ -5,6 +5,7 @@ using AVMTradeReporter.Model;
 using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Models.Data.Enums;
+using AVMTradeReporter.Services;
 using System.Threading;
 
 namespace AVMTradeReporter.Processors.SWAP
@@ -12,6 +13,12 @@ namespace AVMTradeReporter.Processors.SWAP
     public class TinySwapProcessor : ISwapProcessor
     {
         public string AppArg { get; set; } = "73776170";
+
+        private readonly ILogger<TransactionProcessor> _logger;
+        public TinySwapProcessor(ILogger<TransactionProcessor> logger)
+        {
+            _logger = logger;
+        }
 
         public Trade? GetTrade(
             SignedTransaction current,
