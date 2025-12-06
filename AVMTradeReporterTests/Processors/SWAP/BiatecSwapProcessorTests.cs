@@ -47,11 +47,18 @@ namespace AVMTradeReporterTests.Processors.LiquidityAdd
         [Test]
         public async Task BiatecSwapProcessorTestAsa2Asa56210430()
         {
-        //    var client = new Algorand.Gossip.GossipHttpClient(new Algorand.Gossip.GossipHttpConfiguration()
-        //    {
-        //        GenesisId = "mainnet-v1.0",
-        //        Hosts = new string[] { "http://algorand-algod-public.de-4.biatec.io:4160" }
-        //    });
+            //    var client = new Algorand.Gossip.GossipHttpClient(new Algorand.Gossip.GossipHttpConfiguration()
+            //    {
+            //        GenesisId = "mainnet-v1.0",
+            //        Hosts = new string[] { "http://algorand-algod-public.de-4.biatec.io:4160" }
+            //    });
+
+            //var client = new Algorand.Gossip.GossipHttpClient(new Algorand.Gossip.GossipHttpConfiguration()
+            //{
+            //    GenesisId = "mainnet-v1.0",
+            //    Hosts = new string[] { "http://r-t5.algorand-mainnet.network:4160" }
+            //});
+
             var client = new Algorand.Gossip.GossipHttpClient(Algorand.Gossip.GossipHttpConfiguration.MainNetArchival);
             var block = await client.FetchBlockAsync(56210430);
 

@@ -328,7 +328,7 @@ namespace AVMTradeReporter.Services
                 CertifiedBlock? block = null;
                 try
                 {
-                    block = await _algod.GetBlockAsync(blockId, Format.Json, false);
+                    block = await _algod.GetBlockAsync(blockId, Format.Msgpack, false);
                 }
                 catch
                 {
@@ -337,14 +337,14 @@ namespace AVMTradeReporter.Services
                         _logger.LogWarning("Algod failed, trying Algod2");
                         try
                         {
-                            block = await _algod2.GetBlockAsync(blockId, Format.Json, false);
+                            block = await _algod2.GetBlockAsync(blockId, Format.Msgpack, false);
                         }
                         catch
                         {
                             if (_algod3 != null)
                             {
                                 _logger.LogWarning("Algod2 failed, trying Algod3");
-                                block = await _algod3.GetBlockAsync(blockId, Format.Json, false);
+                                block = await _algod3.GetBlockAsync(blockId, Format.Msgpack, false);
                             }
                         }
                     }
