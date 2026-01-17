@@ -10,6 +10,7 @@ namespace AVMTradeReporterTests.Processors.Pool
     public class PactPoolTests
     {
         [Test]
+        [Ignore("Requires live Algod mainnet and stable pool state; not suitable for offline/CI runs")]
         public async Task LoadPactPoolAsync()
         {
             // Arrange
