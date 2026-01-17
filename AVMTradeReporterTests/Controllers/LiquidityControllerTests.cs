@@ -178,7 +178,7 @@ namespace AVMTradeReporterTests.Controllers
                     AssetAmountB = 2000,
                     BlockId = 12345,
                     Timestamp = DateTimeOffset.Now,
-                    Direction = LiqudityDirection.DepositLiquidity,
+                    Direction = LiquidityDirection.DepositLiquidity,
                     Protocol = DEXProtocol.Pact,
                     LiquidityProvider = "LIQUIDITYPROVIDERADDRESS",
                     PoolAddress = "POOLADDRESS",

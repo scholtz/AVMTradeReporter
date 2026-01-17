@@ -118,7 +118,7 @@ namespace AVMTradeReporter.Processors.Liqudity
                 }
                 return new Liquidity
                 {
-                    Direction = LiqudityDirection.WithdrawLiquidity,
+                    Direction = LiquidityDirection.WithdrawLiquidity,
                     AssetIdA = assetAId,
                     AssetIdB = assetBId,
                     AssetIdLP = assetLPId,

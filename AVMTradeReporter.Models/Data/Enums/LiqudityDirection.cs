@@ -2,8 +2,9 @@
 
 namespace AVMTradeReporter.Models.Data.Enums
 {
+
     [JsonConverter(typeof(JsonStringEnumConverter))]
-    public enum LiqudityDirection
+    public enum LiquidityDirection
     {
         DepositLiquidity,
         WithdrawLiquidity

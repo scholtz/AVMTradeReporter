@@ -7,7 +7,7 @@ namespace AVMTradeReporter.Models.Data
     public class Liquidity
     {
         [JsonConverter(typeof(JsonStringEnumConverter))]
-        public LiqudityDirection Direction { get; set; }
+        public LiquidityDirection Direction { get; set; }
         public ulong AssetIdA { get; set; }
         public ulong AssetIdB { get; set; }
         public ulong AssetIdLP { get; set; }

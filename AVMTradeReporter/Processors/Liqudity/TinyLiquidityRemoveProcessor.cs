@@ -110,7 +110,7 @@ namespace AVMTradeReporter.Processors.Liqudity
                 if (poolAddress == null) return null;
                 return new Liquidity
                 {
-                    Direction = LiqudityDirection.WithdrawLiquidity,
+                    Direction = LiquidityDirection.WithdrawLiquidity,
                     AssetIdA = assetAId,
                     AssetIdB = assetBId,
                     AssetIdLP = assetLPId,
