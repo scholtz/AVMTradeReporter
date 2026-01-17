@@ -1,5 +1,6 @@
 ﻿using AVMTradeReporter.Models.Data.Enums;
 using System.Text.Json.Serialization;
+using System.Numerics;
 
 namespace AVMTradeReporter.Models.Data
 {
@@ -17,6 +18,7 @@ namespace AVMTradeReporter.Models.Data
         public ulong? B { get; set; }
         public ulong? StableA { get; set; }
         public ulong? StableB { get; set; }
+        public ulong? Amplifier { get; set; }
         // protocol fees in A asset
         public ulong? AF { get; set; }
         // protocol fees in B asset
@@ -90,6 +92,37 @@ namespace AVMTradeReporter.Models.Data
                     }
                     else if (AMMType == Enums.AMMType.StableSwap)
                     {
+                        if (StableA.HasValue && StableB.HasValue && Amplifier.HasValue)
+                        {
+                            try
+                            {
+                                var amp = new BigInteger(Amplifier.Value);
+                                var realA = new BigInteger(StableA.Value);
+                                var realB = new BigInteger(StableB.Value);
+
+                                var D = GetD(realA, realB, amp);
+
+                                var delta = realA / 10000;
+                                if (delta == 0) delta = 1;
+
+                                var newB = GetY(realA + delta, amp, D);
+                                var price = (decimal)(realB - newB) / (decimal)delta;
+
+                                var dDecimal = (decimal)D / (decimal)Math.Pow(10, (double)(AssetADecimals ?? 0));
+                                var virtualLiquidity = dDecimal / 2;
+
+                                var priceReal = price * (decimal)Math.Pow(10, (double)(AssetADecimals ?? 0) - (double)(AssetBDecimals ?? 0));
+
+                                if (priceReal > 0)
+                                {
+                                    return virtualLiquidity / (decimal)Math.Sqrt((double)priceReal) * Convert.ToDecimal(Amplifier.Value) / 1000;
+                                }
+                            }
+                            catch
+                            {
+                                // fallback
+                            }
+                        }
                         // for stable swap, we can return the minimum of the two amounts as the virtual amount.. so that the pool is balanced for price 1:1
                         return Math.Min(RealAmountA, RealAmountB);
                     }
@@ -113,6 +146,10 @@ namespace AVMTradeReporter.Models.Data
                 if (this.Protocol == DEXProtocol.Biatec)
                 {
                     return Convert.ToDecimal(A) / 1000000000;
+                }
+                if (this.AMMType == Enums.AMMType.StableSwap)
+                {
+                    return (Convert.ToDecimal(StableA ?? 0) / Convert.ToDecimal(Math.Pow(10, Convert.ToDouble(AssetADecimals ?? 0))));
                 }
                 return Convert.ToDecimal(A) / Convert.ToDecimal(Math.Pow(10, Convert.ToDouble(AssetADecimals ?? 0))) + Convert.ToDecimal(AF) / Convert.ToDecimal(Math.Pow(10, Convert.ToDouble(AssetADecimals ?? 0)));
             }
@@ -152,6 +189,37 @@ namespace AVMTradeReporter.Models.Data
                     }
                     else if (AMMType == Enums.AMMType.StableSwap)
                     {
+                        if (StableA.HasValue && StableB.HasValue && Amplifier.HasValue)
+                        {
+                            try
+                            {
+                                var amp = new BigInteger(Amplifier.Value);
+                                var realA = new BigInteger(StableA.Value);
+                                var realB = new BigInteger(StableB.Value);
+
+                                var D = GetD(realA, realB, amp);
+
+                                var delta = realA / 10000;
+                                if (delta == 0) delta = 1;
+
+                                var newB = GetY(realA + delta, amp, D);
+                                var price = (decimal)(realB - newB) / (decimal)delta;
+
+                                var dDecimal = (decimal)D / (decimal)Math.Pow(10, (double)(AssetADecimals ?? 0));
+                                var virtualLiquidity = dDecimal / 2;
+
+                                var priceReal = price * (decimal)Math.Pow(10, (double)(AssetADecimals ?? 0) - (double)(AssetBDecimals ?? 0));
+
+                                if (priceReal > 0)
+                                {
+                                    return virtualLiquidity * (decimal)Math.Sqrt((double)priceReal) * Convert.ToDecimal(Amplifier.Value) / 1000;
+                                }
+                            }
+                            catch
+                            {
+                                // fallback
+                            }
+                        }
                         // for stable swap, we can return the minimum of the two amounts as the virtual amount.. so that the pool is balanced for price 1:1
                         return Math.Min(RealAmountA, RealAmountB);
                     }
@@ -177,6 +245,10 @@ namespace AVMTradeReporter.Models.Data
                 {
                     return Convert.ToDecimal(B) / 1000000000;
                 }
+                if (this.AMMType == Enums.AMMType.StableSwap)
+                {
+                    return (Convert.ToDecimal(StableB ?? 0) / Convert.ToDecimal(Math.Pow(10, Convert.ToDouble(AssetBDecimals ?? 0))));
+                }
                 return Convert.ToDecimal(B) / Convert.ToDecimal(Math.Pow(10, Convert.ToDouble(AssetBDecimals ?? 0))) + Convert.ToDecimal(BF) / Convert.ToDecimal(Math.Pow(10, Convert.ToDouble(AssetBDecimals ?? 0)));
             }
         }
@@ -193,6 +265,9 @@ namespace AVMTradeReporter.Models.Data
                 AssetIdLP = AssetIdLP,
                 A = B,
                 B = A,
+                StableA = StableB,
+                StableB = StableA,
+                Amplifier = Amplifier,
                 AF = BF,
                 BF = AF,
                 L = L,
@@ -208,6 +283,98 @@ namespace AVMTradeReporter.Models.Data
                 TotalTVLAssetAInUSD = TotalTVLAssetBInUSD, // swapped
                 TotalTVLAssetBInUSD = TotalTVLAssetAInUSD
             };
+        }
+
+        private BigInteger GetD(BigInteger totalPrimary, BigInteger totalSecondary, BigInteger amp)
+        {
+            var nCoins = 2;
+            var aPrecision = 1000;
+            var nn = 4; // nCoins ^ nCoins
+
+            var S = totalPrimary + totalSecondary;
+            if (S == 0) return 0;
+
+            var D = S;
+            var Ann = amp * nn;
+
+            var i = 0;
+            var nPlusOne = nCoins + 1;
+
+            for (i = 0; i < 64; i++)
+            {
+                var D_P = D;
+                // D_P = D^3 / (4 * x * y)
+                D_P = (D * D * D) / (totalPrimary * totalSecondary * nn);
+
+                var DPrev = D;
+
+                // numerator = D * ( (Ann * S / aPrecision) + D_P * nCoins )
+                // divisor = ( (Ann - aPrecision) * D / aPrecision ) + (nPlusOne * D_P)
+                
+                var numerator = D * ((Ann * S / aPrecision) + D_P * nCoins);
+                var divisor = ((Ann - aPrecision) * D / aPrecision) + (nPlusOne * D_P);
+
+                if (divisor == 0) return D;
+
+                D = numerator / divisor;
+
+                if (D > DPrev)
+                {
+                    if (D - DPrev <= 1) break;
+                }
+                else
+                {
+                    if (DPrev - D <= 1) break;
+                }
+            }
+            return D;
+        }
+
+        private BigInteger GetY(BigInteger otherTotal, BigInteger amp, BigInteger D)
+        {
+            var aPrecision = 1000;
+            var nn = 4;
+            var Ann = amp * nn;
+
+            var S = otherTotal;
+            var P = otherTotal;
+
+            var b = S + (D * aPrecision) / Ann;
+            var c = (D * D * D * aPrecision) / (4 * P * Ann);
+
+            BigInteger diff = (D > b) ? (D - b) : (b - D);
+            BigInteger delta = (diff * diff) + (4 * c);
+            BigInteger sqrtDelta = Sqrt(delta);
+
+            BigInteger result;
+            if (D >= b)
+            {
+                result = (sqrtDelta + (D - b)) / 2;
+            }
+            else
+            {
+                result = (sqrtDelta - (b - D)) / 2;
+            }
+
+            return result;
+        }
+
+        private BigInteger Sqrt(BigInteger n)
+        {
+            if (n == 0) return 0;
+            if (n > 0)
+            {
+                int bitLength = (int)Math.Ceiling(BigInteger.Log(n, 2));
+                BigInteger root = BigInteger.One << (bitLength / 2 + 1);
+
+                while (true)
+                {
+                    BigInteger nextRoot = (root + n / root) >> 1;
+                    if (nextRoot >= root) return root;
+                    root = nextRoot;
+                }
+            }
+            throw new ArithmeticException("NaN");
         }
     }
 }

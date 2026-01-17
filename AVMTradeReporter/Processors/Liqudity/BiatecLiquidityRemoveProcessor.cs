@@ -5,6 +5,7 @@ using AVMTradeReporter.Model;
 using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Models.Data.Enums;
+using AVMTradeReporter.Services;
 using System.Diagnostics;
 using System.Threading;
 
@@ -14,6 +15,11 @@ namespace AVMTradeReporter.Processors.Liqudity
     {
         public string AppArg { get; set; } = "549a90a4";
 
+        private readonly ILogger<TransactionProcessor> _logger;
+        public BiatecLiquidityRemoveProcessor(ILogger<TransactionProcessor> logger)
+        {
+            _logger = logger;
+        }
         public Liquidity? GetLiquidityUpdate(
             SignedTransaction current,
             SignedTransaction? previous1,
@@ -85,11 +91,8 @@ namespace AVMTradeReporter.Processors.Liqudity
                 {
                     if (AItem.Value.Value.Bytes is string stringVal)
                     {
-                        //var asciiBytes = Algorand.Utils.Encoder.DeltaValueStringToBytes(stringVal);
-                        //var longVal = Algorand.Utils.Encoder.UInt256ToUlong(asciiBytes);
                         var asciiBytes = Model.Utils.DeltaValueStringToBytes(stringVal);
-                        var longVal = Model.Utils.UInt256ToUlong(asciiBytes);
-                        A = longVal;
+                        A = Utils.UInt256Base64DeltaToUlong(asciiBytes);
                     }
                 }
                 var BItem = current.Detail?.GlobalDelta?.FirstOrDefault(kv => kv.Key.ToString() == "bb");
@@ -97,11 +100,8 @@ namespace AVMTradeReporter.Processors.Liqudity
                 {
                     if (BItem.Value.Value.Bytes is string stringVal)
                     {
-                        //var asciiBytes = Algorand.Utils.Encoder.DeltaValueStringToBytes(stringVal);
-                        //var longVal = Algorand.Utils.Encoder.UInt256ToUlong(asciiBytes);
                         var asciiBytes = Model.Utils.DeltaValueStringToBytes(stringVal);
-                        var longVal = Model.Utils.UInt256ToUlong(asciiBytes);
-                        B = longVal;
+                        B = Utils.UInt256Base64DeltaToUlong(asciiBytes);
                     }
                 }
                 var LItem = current.Detail?.GlobalDelta?.FirstOrDefault(kv => kv.Key.ToString() == "L");
@@ -109,11 +109,8 @@ namespace AVMTradeReporter.Processors.Liqudity
                 {
                     if (LItem.Value.Value.Bytes is string stringVal)
                     {
-                        //var asciiBytes = Algorand.Utils.Encoder.DeltaValueStringToBytes(stringVal);
-                        //var longVal = Algorand.Utils.Encoder.UInt256ToUlong(asciiBytes);
                         var asciiBytes = Model.Utils.DeltaValueStringToBytes(stringVal);
-                        var longVal = Model.Utils.UInt256ToUlong(asciiBytes);
-                        L = longVal;
+                        L = Utils.UInt256Base64DeltaToUlong(asciiBytes);
                     }
                 }
                 return new Liquidity

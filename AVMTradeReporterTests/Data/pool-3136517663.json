@@ -16,7 +16,7 @@
   "VerificationClass": 0,
   "Protocol": 2,
   "Timestamp": "2025-08-18T11:15:42.0563679+00:00",
-  "AMMType": 1,
+  "AMMType": "ConcentratedLiquidityAMM",
   "ApprovalProgramHash": "af89b67168c410fb94b2dae735dd2483071d7ef0114de56e53aa2f15f681637a",
   "LPFee": 0.0,
   "ProtocolFeePortion": 0.0,

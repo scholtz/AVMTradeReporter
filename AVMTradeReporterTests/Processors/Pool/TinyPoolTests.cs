@@ -30,7 +30,7 @@ namespace AVMTradeReporterTests.Processors.Pool
             // Act
             var pool = await processor.LoadPoolAsync(address, appId);
             // Assert
-            Assert.IsNotNull(pool);
+            Assert.That(pool, Is.Not.Null);
             Assert.That(pool.PoolAddress, Is.EqualTo(address));
             Assert.That(pool.PoolAppId, Is.EqualTo(appId));
             Assert.That(pool.AssetIdA, Is.EqualTo(3032713424));
@@ -69,7 +69,7 @@ namespace AVMTradeReporterTests.Processors.Pool
             // Act
             var pool = await processor.LoadPoolAsync(address, appId);
             // Assert
-            Assert.IsNotNull(pool);
+            Assert.That(pool, Is.Not.Null);
             Assert.That(pool.Protocol, Is.EqualTo(DEXProtocol.Tiny));
             Assert.That(pool.PoolAddress, Is.EqualTo(address));
             Assert.That(pool.PoolAppId, Is.EqualTo(appId));
@@ -106,7 +106,7 @@ namespace AVMTradeReporterTests.Processors.Pool
             // Act
             var pool = await processor.LoadPoolAsync(address, appId);
             // Assert
-            Assert.IsNotNull(pool);
+            Assert.That(pool, Is.Not.Null);
             Assert.That(pool.Protocol, Is.EqualTo(DEXProtocol.Tiny));
             Assert.That(pool.PoolAddress, Is.EqualTo(address));
             Assert.That(pool.PoolAppId, Is.EqualTo(appId));

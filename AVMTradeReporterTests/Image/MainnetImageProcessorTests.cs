@@ -19,8 +19,8 @@ namespace AVMTradeReporterTests.Image
             // Act
             var imageData = await processor.LoadImageAsync(assetId, cancellationTokenSource.Token);
             // Assert
-            Assert.IsNotNull(imageData, "Image data should not be null");
-            Assert.IsTrue(imageData.Length > 100, "Image data should not be empty");
+            Assert.That(imageData, Is.Not.Null, "Image data should not be null");
+            Assert.That(imageData.Length > 100, Is.True, "Image data should not be empty");
         }
         [Test]
         public async Task LoadImageForAsset1241945177Async()
@@ -34,8 +34,8 @@ namespace AVMTradeReporterTests.Image
             // Act
             var imageData = await processor.LoadImageAsync(assetId, cancellationTokenSource.Token);
             // Assert
-            Assert.IsNotNull(imageData, "Image data should not be null");
-            Assert.IsTrue(imageData.Length > 100, "Image data should not be empty");
+            Assert.That(imageData, Is.Not.Null, "Image data should not be null");
+            Assert.That(imageData.Length > 100, Is.True, "Image data should not be empty");
         }
         [Test]
         public async Task LoadImageForAsset3054226103Async()
@@ -49,8 +49,8 @@ namespace AVMTradeReporterTests.Image
             // Act
             var imageData = await processor.LoadImageAsync(assetId, cancellationTokenSource.Token);
             // Assert
-            Assert.IsNotNull(imageData, "Image data should not be null");
-            Assert.IsTrue(imageData.Length > 100, "Image data should not be empty");
+            Assert.That(imageData, Is.Not.Null, "Image data should not be null");
+            Assert.That(imageData.Length > 100, Is.True, "Image data should not be empty");
         }
         [Test]
         public async Task LoadImageForAsset123Async()
@@ -64,9 +64,9 @@ namespace AVMTradeReporterTests.Image
             // Act
             var imageData = await processor.LoadImageAsync(assetId, cancellationTokenSource.Token);
             // Assert
-            Assert.IsNotNull(imageData, "Image data should not be null");
-            Assert.IsTrue(imageData.Length > 0, "Image data should not be empty");
-            Assert.IsTrue(imageData.Length < 1000, "Image data should not be empty");
+            Assert.That(imageData, Is.Not.Null, "Image data should not be null");
+            Assert.That(imageData.Length > 0, Is.True, "Image data should not be empty");
+            Assert.That(imageData.Length < 1000, Is.True, "Image data should not be empty");
         }
     }
 }

@@ -4,6 +4,7 @@ using AVMTradeReporter.Models.Data.Enums;
 using AVMTradeReporter.Repository;
 using System.Text;
 using static Org.BouncyCastle.Math.EC.ECCurve;
+using AVMTradeReporter.Model;
 
 namespace AVMTradeReporter.Processors.Pool
 {
@@ -98,12 +99,9 @@ namespace AVMTradeReporter.Processors.Pool
             var assetADecimals = (await _assetRepository.GetAssetAsync(assetAId, cancelationTokenSource.Token))?.Params?.Decimals;
             var assetBDecimals = (await _assetRepository.GetAssetAsync(assetBId, cancelationTokenSource.Token))?.Params?.Decimals;
 
-            var aBytes = Convert.FromBase64String(A.Value.Bytes);
-            var a = BitConverter.ToUInt64(aBytes.Skip(24).Take(8).Reverse().ToArray(), 0);
-            var bBytes = Convert.FromBase64String(B.Value.Bytes);
-            var b = BitConverter.ToUInt64(bBytes.Skip(24).Take(8).Reverse().ToArray(), 0);
-            var lBytes = Convert.FromBase64String(L.Value.Bytes);
-            var l = BitConverter.ToUInt64(lBytes.Skip(24).Take(8).Reverse().ToArray(), 0);
+            var a = Utils.UInt256Base64DeltaToUlong(A.Value.Bytes);
+            var b = Utils.UInt256Base64DeltaToUlong(B.Value.Bytes);
+            var l = Utils.UInt256Base64DeltaToUlong(L.Value.Bytes);
 
 
             if (pool == null)

@@ -201,7 +201,7 @@ namespace AVMTradeReporter.Repository
                             var poolJson = await _redisDatabase.StringGetAsync(redisKey);
                             if (poolJson.HasValue)
                             {
-                                var pool = JsonSerializer.Deserialize<Pool>(poolJson!);
+                                var pool = JsonSerializer.Deserialize<Pool>((string)poolJson!);
                                 if (pool != null)
                                 {
                                     var poolId = GeneratePoolId(pool.PoolAddress);
@@ -230,7 +230,7 @@ namespace AVMTradeReporter.Repository
                         var poolJson = await _redisDatabase.StringGetAsync(key);
                         if (poolJson.HasValue)
                         {
-                            var pool = JsonSerializer.Deserialize<Pool>(poolJson!);
+                            var pool = JsonSerializer.Deserialize<Pool>((string)poolJson!);
                             if (pool != null)
                             {
                                 var poolId = GeneratePoolId(pool.PoolAddress);
@@ -451,7 +451,7 @@ namespace AVMTradeReporter.Repository
                         }
                         catch (Exception ex)
                         {
-                            _logger.LogError(ex, "Failed to store pool in Elasticsearch: {pool.PoolAddress}");
+                            _logger.LogError(ex, "Failed to store pool in Elasticsearch: {PoolAddress}", pool.PoolAddress);
                         }
                     }, token);
                 }

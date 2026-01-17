@@ -70,6 +70,7 @@ namespace AVMTradeReporter.Processors.Pool
             var b = B.Value.Uint;
             ulong? stableA = null;
             ulong? stableB = null;
+            ulong? amplifier = null;
             if (contractName == "[SI] PACT AMM")
             {
                 type = AMMType.StableSwap;
@@ -77,6 +78,16 @@ namespace AVMTradeReporter.Processors.Pool
                 stableB = b;
                 a = 0;
                 b = 0;
+
+                var INITIAL_A = app.Params.GlobalState.FirstOrDefault(p => p.Key == Convert.ToBase64String(Encoding.ASCII.GetBytes("INITIAL_A")));
+                var FUTURE_A = app.Params.GlobalState.FirstOrDefault(p => p.Key == Convert.ToBase64String(Encoding.ASCII.GetBytes("FUTURE_A")));
+                var INITIAL_A_TIME = app.Params.GlobalState.FirstOrDefault(p => p.Key == Convert.ToBase64String(Encoding.ASCII.GetBytes("INITIAL_A_TIME")));
+                var FUTURE_A_TIME = app.Params.GlobalState.FirstOrDefault(p => p.Key == Convert.ToBase64String(Encoding.ASCII.GetBytes("FUTURE_A_TIME")));
+
+                if (INITIAL_A != null && FUTURE_A != null && INITIAL_A_TIME != null && FUTURE_A_TIME != null)
+                {
+                    amplifier = CalculateAmplifier(INITIAL_A.Value.Uint, FUTURE_A.Value.Uint, INITIAL_A_TIME.Value.Uint, FUTURE_A_TIME.Value.Uint);
+                }
             }
             _logger.LogInformation($"Processing {contractName}");
 
@@ -92,6 +103,7 @@ namespace AVMTradeReporter.Processors.Pool
                     B = b,
                     StableA = stableA,
                     StableB = stableB,
+                    Amplifier = amplifier,
                     L = L.Value.Uint,
                     AssetIdLP = LTID.Value.Uint,
                     AMMType = type,
@@ -138,6 +150,11 @@ namespace AVMTradeReporter.Processors.Pool
                     pool.StableB = stableB;
                     updated = true;
                 }
+                if (pool.Amplifier != amplifier)
+                {
+                    pool.Amplifier = amplifier;
+                    updated = true;
+                }
                 if (pool.L != L.Value.Uint)
                 {
                     pool.L = L.Value.Uint;
@@ -178,7 +195,7 @@ namespace AVMTradeReporter.Processors.Pool
                     pool.AssetBDecimals = assetBDecimals;
                     updated = true;
                 }
-                if (pool.AMMType != AMMType.OldAMM)
+                if (pool.AMMType != type)
                 {
                     pool.AMMType = type;
                     updated = true;
@@ -195,6 +212,25 @@ namespace AVMTradeReporter.Processors.Pool
                 await _poolRepository.StorePoolAsync(pool, true, cancelationTokenSource.Token);
             }
             return pool;
+        }
+
+        private ulong CalculateAmplifier(ulong initialA, ulong futureA, ulong initialATime, ulong futureATime)
+        {
+            var now = (ulong)DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            if (now < futureATime)
+            {
+                var futureInitialTimeDiff = futureATime - initialATime;
+                var currentInitialTimeDiff = now - initialATime;
+                if (futureA > initialA)
+                {
+                    return initialA + (futureA - initialA) * currentInitialTimeDiff / futureInitialTimeDiff;
+                }
+                else
+                {
+                    return initialA - (initialA - futureA) * currentInitialTimeDiff / futureInitialTimeDiff;
+                }
+            }
+            return futureA;
         }
     }
 }

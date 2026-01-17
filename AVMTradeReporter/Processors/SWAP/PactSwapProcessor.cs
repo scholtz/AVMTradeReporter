@@ -5,6 +5,7 @@ using AVMTradeReporter.Model;
 using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Models.Data.Enums;
+using AVMTradeReporter.Services;
 using System.Threading;
 
 namespace AVMTradeReporter.Processors.SWAP
@@ -13,6 +14,11 @@ namespace AVMTradeReporter.Processors.SWAP
     {
         public string AppArg { get; set; } = "53574150";
 
+        private readonly ILogger<TransactionProcessor> _logger;
+        public PactSwapProcessor(ILogger<TransactionProcessor> logger)
+        {
+            _logger = logger;
+        }
         public Trade? GetTrade(
             SignedTransaction current,
             SignedTransaction? previous,

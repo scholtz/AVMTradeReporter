@@ -81,7 +81,7 @@ class Program
                                 var val = await db.StringGetAsync(redisKey);
                                 if (!val.IsNullOrEmpty)
                                 {
-                                    var pool = JsonSerializer.Deserialize<Pool>(val!);
+                                    var pool = JsonSerializer.Deserialize<Pool>((string)val!);
                                     if (pool != null)
                                     {
                                         preloadPools.Add(pool);
@@ -117,7 +117,7 @@ class Program
                                 var val = await db.StringGetAsync(key);
                                 if (!val.IsNullOrEmpty)
                                 {
-                                    var pool = JsonSerializer.Deserialize<Pool>(val!);
+                                    var pool = JsonSerializer.Deserialize<Pool>((string)val!);
                                     if (pool != null)
                                     {
                                         preloadPools.Add(pool);
@@ -143,7 +143,7 @@ class Program
                         try
                         {
                             var json = await File.ReadAllTextAsync(seedPoolsFile);
-                            var seedPools = JsonSerializer.Deserialize<Pool[]>(json) ?? Array.Empty<Pool>();
+                            var seedPools = JsonSerializer.Deserialize<Pool[]>((string)json) ?? Array.Empty<Pool>();
                             foreach (var p in seedPools)
                             {
                                 var redisKey = poolKeyPrefix + p.PoolAddress;
@@ -178,7 +178,7 @@ class Program
                                 var val = await db.StringGetAsync(redisKey);
                                 if (!val.IsNullOrEmpty)
                                 {
-                                    var aggregatedPool = JsonSerializer.Deserialize<AggregatedPool>(val!);
+                                    var aggregatedPool = JsonSerializer.Deserialize<AggregatedPool>((string)val!);
                                     if (aggregatedPool != null)
                                     {
                                         preloadAggregatedPools.Add(aggregatedPool);
@@ -204,7 +204,7 @@ class Program
                                 var val = await db.StringGetAsync(key);
                                 if (!val.IsNullOrEmpty)
                                 {
-                                    var aggregatedPool = JsonSerializer.Deserialize<AggregatedPool>(val!);
+                                    var aggregatedPool = JsonSerializer.Deserialize<AggregatedPool>((string)val!);
                                     if (aggregatedPool != null)
                                     {
                                         preloadAggregatedPools.Add(aggregatedPool);
@@ -228,7 +228,7 @@ class Program
                         try
                         {
                             var json = await File.ReadAllTextAsync(seedAggregatedFile);
-                            var seedAggs = JsonSerializer.Deserialize<AggregatedPool[]>(json) ?? Array.Empty<AggregatedPool>();
+                            var seedAggs = JsonSerializer.Deserialize<AggregatedPool[]>((string)json) ?? Array.Empty<AggregatedPool>();
                             foreach (var ap in seedAggs)
                             {
                                 var redisKey = aggregatedPoolKeyPrefix + ap.AssetIdA + "-" + ap.AssetIdB;
@@ -287,7 +287,7 @@ class Program
             {
                 try
                 {
-                    var pool = JsonSerializer.Deserialize<Pool>(message!);
+                    var pool = JsonSerializer.Deserialize<Pool>((string)message!);
                     if (pool != null)
                     {
                         Console.ForegroundColor = ConsoleColor.Green;
@@ -324,7 +324,7 @@ class Program
             {
                 try
                 {
-                    var aggregatedPool = JsonSerializer.Deserialize<AggregatedPool>(message!);
+                    var aggregatedPool = JsonSerializer.Deserialize<AggregatedPool>((string)message!);
                     if (aggregatedPool != null)
                     {
                         Console.ForegroundColor = ConsoleColor.Cyan;

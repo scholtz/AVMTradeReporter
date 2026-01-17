@@ -6,6 +6,7 @@ using AVMTradeReporter.Models.Data.Enums;
 using AVMTradeReporter.Processors;
 using AVMTradeReporter.Processors.Liqudity;
 using AVMTradeReporter.Processors.SWAP;
+using System;
 using System.Text;
 using System.Threading;
 
@@ -21,30 +22,30 @@ namespace AVMTradeReporter.Services
         {
             _logger = logger;
             // Initialize swap processors
-            var pactSwap = new PactSwapProcessor();
+            var pactSwap = new PactSwapProcessor(_logger);
             swapProcessors.Add(pactSwap.AppArg.ToLower(), pactSwap);
-            var biatecSwap = new BiatecSwapProcessor();
+            var biatecSwap = new BiatecSwapProcessor(_logger);
             swapProcessors.Add(biatecSwap.AppArg.ToLower(), biatecSwap);
-            var tinySwap = new TinySwapProcessor();
+            var tinySwap = new TinySwapProcessor(_logger);
             swapProcessors.Add(tinySwap.AppArg.ToLower(), tinySwap);
 
             // Initialize liquidity processors
-            var pactLAdd = new PactLiquidityAddProcessor();
+            var pactLAdd = new PactLiquidityAddProcessor(_logger);
             liquidityProcessors.Add(pactLAdd.AppArg.ToLower(), pactLAdd);
 
-            var tinyLAdd = new TinyLiquidityAddProcessor();
+            var tinyLAdd = new TinyLiquidityAddProcessor(_logger);
             liquidityProcessors.Add(tinyLAdd.AppArg.ToLower(), tinyLAdd);
 
-            var biatecLAdd = new BiatecLiquidityAddProcessor();
+            var biatecLAdd = new BiatecLiquidityAddProcessor(_logger);
             liquidityProcessors.Add(biatecLAdd.AppArg.ToLower(), biatecLAdd);
 
-            var pactLRem = new PactLiquidityRemoveProcessor();
+            var pactLRem = new PactLiquidityRemoveProcessor(_logger);
             liquidityProcessors.Add(pactLRem.AppArg.ToLower(), pactLRem);
 
-            var tinyLRem = new TinyLiquidityRemoveProcessor();
+            var tinyLRem = new TinyLiquidityRemoveProcessor(_logger);
             liquidityProcessors.Add(tinyLRem.AppArg.ToLower(), tinyLRem);
 
-            var biatecLRem = new BiatecLiquidityRemoveProcessor();
+            var biatecLRem = new BiatecLiquidityRemoveProcessor(_logger);
             liquidityProcessors.Add(biatecLRem.AppArg.ToLower(), biatecLRem);
         }
 

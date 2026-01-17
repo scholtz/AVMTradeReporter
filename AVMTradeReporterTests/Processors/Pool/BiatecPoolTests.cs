@@ -30,14 +30,15 @@ namespace AVMTradeReporterTests.Processors.Pool
             // Act
             var pool = await processor.LoadPoolAsync(address, appId);
             // Assert
-            Assert.IsNotNull(pool);
+            Assert.That(pool, Is.Not.Null);
             Assert.That(pool.PoolAddress, Is.EqualTo(address));
             Assert.That(pool.PoolAppId, Is.EqualTo(appId));
             Assert.That(pool.AssetIdA, Is.EqualTo(0));
             Assert.That(pool.AssetIdB, Is.EqualTo(1241945177));
-
-            Assert.That(pool.VirtualAmountB / pool.VirtualAmountA, Is.GreaterThanOrEqualTo(pool.PMin));
-            Assert.That(pool.VirtualAmountB / pool.VirtualAmountA, Is.LessThanOrEqualTo(pool.PMax));
+            Assert.That(pool.PMin, Is.Not.Null, "PMin should not be null");
+            Assert.That(pool.PMax, Is.Not.Null, "PMax should not be null");
+            Assert.That(pool.VirtualAmountB / pool.VirtualAmountA, Is.GreaterThanOrEqualTo(pool.PMin!.Value));
+            Assert.That(pool.VirtualAmountB / pool.VirtualAmountA, Is.LessThanOrEqualTo(pool.PMax!.Value));
 
             pool.A = 100;
             pool.B = 200;
@@ -46,8 +47,10 @@ namespace AVMTradeReporterTests.Processors.Pool
 
             var pool2 = await processor.LoadPoolAsync(address, appId);
 
-            Assert.That(pool2.VirtualAmountB / pool2.VirtualAmountA, Is.GreaterThanOrEqualTo(pool2.PMin));
-            Assert.That(pool2.VirtualAmountB / pool2.VirtualAmountA, Is.LessThanOrEqualTo(pool2.PMax));
+            Assert.That(pool2.PMin, Is.Not.Null, "PMin should not be null");
+            Assert.That(pool2.PMax, Is.Not.Null, "PMax should not be null");
+            Assert.That(pool2.VirtualAmountB / pool2.VirtualAmountA, Is.GreaterThanOrEqualTo(pool2.PMin!.Value));
+            Assert.That(pool2.VirtualAmountB / pool2.VirtualAmountA, Is.LessThanOrEqualTo(pool2.PMax!.Value));
             Assert.That(pool.LPFee, Is.EqualTo(0.0001m));
             Assert.That(pool.ProtocolFeePortion, Is.EqualTo(0.2m));
 
@@ -68,14 +71,16 @@ namespace AVMTradeReporterTests.Processors.Pool
             // Act
             var pool = await processor.LoadPoolAsync(address, appId);
             // Assert
-            Assert.IsNotNull(pool);
+            Assert.That(pool, Is.Not.Null);
             Assert.That(pool.PoolAddress, Is.EqualTo(address));
             Assert.That(pool.PoolAppId, Is.EqualTo(appId));
             Assert.That(pool.AssetIdA, Is.EqualTo(0));
             Assert.That(pool.AssetIdB, Is.EqualTo(1241945177));
 
-            Assert.That(pool.VirtualAmountB / pool.VirtualAmountA, Is.GreaterThanOrEqualTo(pool.PMin));
-            Assert.That(pool.VirtualAmountB / pool.VirtualAmountA, Is.LessThanOrEqualTo(pool.PMax));
+            Assert.That(pool.PMin, Is.Not.Null, "PMin should not be null");
+            Assert.That(pool.PMax, Is.Not.Null, "PMax should not be null");
+            Assert.That(pool.VirtualAmountB / pool.VirtualAmountA, Is.GreaterThanOrEqualTo(pool.PMin!.Value));
+            Assert.That(pool.VirtualAmountB / pool.VirtualAmountA, Is.LessThanOrEqualTo(pool.PMax!.Value));
         }
 
         [Test]
@@ -94,7 +99,7 @@ namespace AVMTradeReporterTests.Processors.Pool
             // Act
             var pool = await processor.LoadPoolAsync(address, appId);
             // Assert
-            Assert.IsNotNull(pool);
+            Assert.That(pool, Is.Not.Null);
             Assert.That(pool.PoolAddress, Is.EqualTo(address));
             Assert.That(pool.PoolAppId, Is.EqualTo(appId));
             Assert.That(pool.AssetIdA, Is.EqualTo(452399768));
@@ -106,8 +111,8 @@ namespace AVMTradeReporterTests.Processors.Pool
             Assert.That(pool.PMax, Is.GreaterThan(0));
             Assert.That(pool.LPFee, Is.EqualTo(0.0001m));
             Assert.That(pool.ProtocolFeePortion, Is.EqualTo(0.2m));
-            Assert.That(pool.VirtualAmountB / pool.VirtualAmountA, Is.GreaterThanOrEqualTo(pool.PMin));
-            Assert.That(pool.VirtualAmountB / pool.VirtualAmountA, Is.LessThanOrEqualTo(pool.PMax));
+            Assert.That(pool.VirtualAmountB / pool.VirtualAmountA, Is.GreaterThanOrEqualTo(pool.PMin!.Value));
+            Assert.That(pool.VirtualAmountB / pool.VirtualAmountA, Is.LessThanOrEqualTo(pool.PMax!.Value));
         }
         [Test]
         public async Task LoadBiatecPoolAsync3098469455()
@@ -125,7 +130,7 @@ namespace AVMTradeReporterTests.Processors.Pool
             // Act
             var pool = await processor.LoadPoolAsync(address, appId);
             // Assert
-            Assert.IsNotNull(pool);
+            Assert.That(pool, Is.Not.Null);
             Assert.That(pool.PoolAddress, Is.EqualTo(address));
             Assert.That(pool.PoolAppId, Is.EqualTo(appId));
             Assert.That(pool.AssetIdA, Is.EqualTo(1241945177));
@@ -137,8 +142,8 @@ namespace AVMTradeReporterTests.Processors.Pool
             Assert.That(pool.PMax, Is.GreaterThan(0));
             Assert.That(pool.LPFee, Is.EqualTo(0.001m));
             Assert.That(pool.ProtocolFeePortion, Is.EqualTo(0.2m));
-            Assert.That(pool.VirtualAmountB / pool.VirtualAmountA, Is.GreaterThanOrEqualTo(pool.PMin));
-            Assert.That(pool.VirtualAmountB / pool.VirtualAmountA, Is.LessThanOrEqualTo(pool.PMax));
+            Assert.That(pool.VirtualAmountB / pool.VirtualAmountA, Is.GreaterThanOrEqualTo(pool.PMin!.Value));
+            Assert.That(pool.VirtualAmountB / pool.VirtualAmountA, Is.LessThanOrEqualTo(pool.PMax!.Value));
         }
     }
 }
