@@ -154,8 +154,8 @@ namespace AVMTradeReporterTests.Model
             // Values are derived from virtual amounts (equal to real amounts for non-concentrated AMM)
             // For (1,2): A = p1.A_real (1.1) + reverse(p2).A_real (4.5) = 5.6
             //            B = p1.B_real (2.2) + reverse(p2).B_real (3.3) = 5.5
-            Assert.That(agg12.VirtualSumALevel1, Is.EqualTo(33.411611892693684301049159175M));
-            Assert.That(agg12.VirtualSumBLevel1, Is.EqualTo(45.523232618035869447454225347M));
+            Assert.That(agg12.VirtualSumALevel1, Is.EqualTo(33.411611892693684301049159175M).Within(0.000000000001m));
+            Assert.That(agg12.VirtualSumBLevel1, Is.EqualTo(45.523232618035869447454225347M).Within(0.000000000001m));
             Assert.That(agg12.TVL_A, Is.EqualTo(9m));
             Assert.That(agg12.TVL_B, Is.EqualTo(11m));
             Assert.That(agg12.PoolCount, Is.EqualTo(2m));
@@ -212,6 +212,7 @@ namespace AVMTradeReporterTests.Model
                 B = 8_000_000,  // 2.0
                 BF = 0,   // +0.2 -> 2.2
                 Protocol = DEXProtocol.Pact,
+                LPFee = 0.0005m,
                 Timestamp = older
             };
             var p4 = new AVMTradeReporter.Models.Data.Pool
@@ -226,6 +227,7 @@ namespace AVMTradeReporterTests.Model
                 B = 10_000_000,  // 2.0
                 BF = 0,   // +0.2 -> 2.2
                 Protocol = DEXProtocol.Pact,
+                LPFee = 0.0005m,
                 Timestamp = older
             };
 
@@ -246,7 +248,8 @@ namespace AVMTradeReporterTests.Model
             Assert.That(agg12.PoolCount, Is.EqualTo(2m));
             Assert.That(agg12.LastUpdated, Is.EqualTo(now)); // max timestamp
             Assert.That(agg12.Id, Is.EqualTo("1-2"));
-            Assert.That(agg12.Level2Pools.ToArray(), Is.EqualTo(new string[] { p3.PoolAddress, p4.PoolAddress }));
+            Assert.That(agg12.Level2Pools.Any(s => s.StartsWith(p3.PoolAddress + "|", StringComparison.Ordinal)), Is.True);
+            Assert.That(agg12.Level2Pools.Any(s => s.StartsWith(p4.PoolAddress + "|", StringComparison.Ordinal)), Is.True);
             Assert.That(agg12.Level1Pools.ToArray(), Is.EqualTo(new string[] { p1.PoolAddress, p2.PoolAddress }));
 
             Assert.That(agg12.VirtualSumALevel2, Is.EqualTo(7));
@@ -277,7 +280,7 @@ namespace AVMTradeReporterTests.Model
             Assert.That(aggregatedPool.AssetIdA, Is.EqualTo(0));
             Assert.That(aggregatedPool.AssetIdB, Is.EqualTo(452399768));
             var price = aggregatedPool.VirtualSumBLevel1 / aggregatedPool.VirtualSumALevel1;
-            Assert.That(price, Is.EqualTo(6.8129419971702496226889404405m));
+            Assert.That(price, Is.EqualTo(6.8129419971702496226889404405m).Within(0.000000000001m));
 
         }
 

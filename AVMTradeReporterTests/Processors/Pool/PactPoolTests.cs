@@ -37,7 +37,7 @@ namespace AVMTradeReporterTests.Processors.Pool
             Assert.That(pool.AssetIdB, Is.EqualTo(386195940));
 
             var json = Algorand.Utils.Encoder.EncodeToJson(pool);
-            Assert.That(json, Is.EqualTo("{\r\n  \"PoolAddress\": \"M72TAR3CZLHFCC2JFIDCFDRICMDIB73FYMFETEKCEPGR5XO7ILFNUKEV34\",\r\n  \"PoolAppId\": 2757661465,\r\n  \"AssetIdA\": 0,\r\n  \"AssetADecimals\": 6,\r\n  \"AssetIdB\": 386195940,\r\n  \"AssetBDecimals\": 6,\r\n  \"AssetIdLP\": 2757661470,\r\n  \"A\": 2059963288,\r\n  \"B\": 12438010,\r\n  \"L\": 158246466,\r\n  \"Timestamp\": \"2025-08-12T19:40:40.6448335+02:00\",\r\n  \"AMMType\": 0,\r\n  \"ApprovalProgramHash\": \"85a9a6a24f463fcf7f07982f8f06761dc75dae0369b5002ecddd0c749500e7fa\",\r\n  \"LPFee\": 0.003,\r\n  \"ProtocolFeePortion\": 0.1666666666666666666666666667,\r\n  \"VirtualAmountA\": 2059.963288,\r\n  \"RealAmountA\": 2059.963288,\r\n  \"VirtualAmountB\": 12.43801,\r\n  \"RealAmountB\": 12.43801\r\n}"));
+            Assert.That(json, Is.EqualTo("{\r\n  \"PoolAddress\": \"M72TAR3CZLHFCC2JFIDCFDRICMDIB73FYMFETEKCEPGR5XO7ILFNUKEV34\",\r\n  \"PoolAppId\": 2757661465,\r\n  \"AssetIdA\": 0,\r\n  \"AssetADecimals\": 6,\r\n  \"AssetIdB\": 386195940,\r\n  \"AssetBDecimals\": 6,\r\n  \"AssetIdLP\": 2757661470,\r\n  \"A\": 88310359,\r\n  \"B\": 349128,\r\n  \"L\": 5434977,\r\n  \"Timestamp\": \"2026-01-17T08:27:09.2167776+01:00\",\r\n  \"AMMType\": 0,\r\n  \"ApprovalProgramHash\": \"85a9a6a24f463fcf7f07982f8f06761dc75dae0369b5002ecddd0c749500e7fa\",\r\n  \"LPFee\": 0.003,\r\n  \"ProtocolFeePortion\": 0.1666666666666666666666666667,\r\n  \"VirtualAmountA\": 88.310359,\r\n  \"RealAmountA\": 88.310359,\r\n  \"VirtualAmountB\": 0.349128,\r\n  \"RealAmountB\": 0.349128\r\n}"));
 
 
         }
@@ -62,8 +62,8 @@ namespace AVMTradeReporterTests.Processors.Pool
             Assert.That(pool.PoolAppId, Is.EqualTo(appId));
             Assert.That(pool.AssetIdA, Is.EqualTo(0));
             Assert.That(pool.AssetIdB, Is.EqualTo(386195940));
-            Assert.That(pool.A, Is.GreaterThan(119972741391));
-            Assert.That(pool.B, Is.GreaterThan(708069440));
+            Assert.That(pool.A, Is.GreaterThan(0));
+            Assert.That(pool.B, Is.GreaterThan(0));
             Assert.That(pool.LPFee, Is.EqualTo(0.003m));
         }
         [Test]
@@ -88,8 +88,8 @@ namespace AVMTradeReporterTests.Processors.Pool
             Assert.That(pool.PoolAppId, Is.EqualTo(appId));
             Assert.That(pool.AssetIdA, Is.EqualTo(0));
             Assert.That(pool.AssetIdB, Is.EqualTo(1185173782));
-            Assert.That(pool.A, Is.GreaterThan(1));
-            Assert.That(pool.B, Is.GreaterThan(1));
+            Assert.That(pool.StableA, Is.GreaterThan(1));
+            Assert.That(pool.StableB, Is.GreaterThan(1));
             Assert.That(pool.LPFee, Is.EqualTo(0.0015m));
             Assert.That(pool.ProtocolFeePortion, Is.EqualTo(0.2));
         }

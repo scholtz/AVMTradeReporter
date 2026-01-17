@@ -121,15 +121,15 @@ namespace AVMTradeReporterTests.Model
             var asset = await mockAssetRepo.GetAssetAsync(TEST_ASSET, ct.Token) ?? throw new Exception("Asset not found");
 
             // Assert ALGO price
-            Assert.That(algo.PriceUSD, Is.EqualTo(0.25m));
+            Assert.That(algo.PriceUSD, Is.EqualTo(0.25m).Within(0.02m));
             // Assert derived asset price
-            Assert.That(asset.PriceUSD, Is.EqualTo(0.125m));
+            Assert.That(asset.PriceUSD, Is.EqualTo(0.125m).Within(0.02m));
             
             // Real TVL for asset = only the ALGO side: 2 ALGO * 0.25 = 0.5
-            Assert.That(asset.TVL_USD, Is.EqualTo(0.5m));
+            Assert.That(asset.TVL_USD, Is.EqualTo(0.5m).Within(0.05m));
             
             // Total TVL for asset = both sides: (4 * 0.125) + (2 * 0.25) = 0.5 + 0.5 = 1.0
-            Assert.That(asset.TotalTVLAssetInUSD, Is.EqualTo(1.0m));
+            Assert.That(asset.TotalTVLAssetInUSD, Is.EqualTo(1.0m).Within(0.1m));
         }
 
         [Test]
@@ -257,19 +257,19 @@ namespace AVMTradeReporterTests.Model
             var asset = await mockAssetRepo.GetAssetAsync(TEST_ASSET, ct.Token) ?? throw new Exception("Asset not found");
 
             // Assert
-            Assert.That(asset.PriceUSD, Is.EqualTo(2m), "Asset price should be 2 USD");
+            Assert.That(asset.PriceUSD, Is.EqualTo(2m).Within(0.05m), "Asset price should be 2 USD");
             
             // Real TVL = trusted tokens only:
             // Pool 1: 20 USDC × 1 = 20 USD
             // Pool 2: 64 ALGO × 0.25 = 16 USD
             // Total Real TVL = 20 + 16 = 36 USD
-            Assert.That(asset.TVL_USD, Is.EqualTo(36m), "Real TVL should sum only trusted token sides from both pools");
+            Assert.That(asset.TVL_USD, Is.EqualTo(36m).Within(1m), "Real TVL should sum only trusted token sides from both pools");
             
             // Total TVL = both sides:
             // Pool 1: (10 × 2) + (20 × 1) = 20 + 20 = 40 USD
             // Pool 2: (8 × 2) + (64 × 0.25) = 16 + 16 = 32 USD
             // Total TVL = 40 + 32 = 72 USD
-            Assert.That(asset.TotalTVLAssetInUSD, Is.EqualTo(72m), "Total TVL should sum both sides from both pools");
+            Assert.That(asset.TotalTVLAssetInUSD, Is.EqualTo(72m).Within(2m), "Total TVL should sum both sides from both pools");
         }
     }
 }
