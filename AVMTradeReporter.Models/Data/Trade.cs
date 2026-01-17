@@ -115,7 +115,9 @@ namespace AVMTradeReporter.Models.Data
         public decimal? ValueUSD { get; set; }
 
         /// <summary>
-        /// Trade price expressed as USD per one unit of the out asset.
+        /// Trade price expressed as USD per one unit of the canonical base asset.
+        /// Canonical base asset is defined as <c>min(AssetIdIn, AssetIdOut)</c>.
+        /// This keeps the reported USD price stable regardless of swap direction.
         /// </summary>
         public decimal? PriceUSD { get; set; }
 

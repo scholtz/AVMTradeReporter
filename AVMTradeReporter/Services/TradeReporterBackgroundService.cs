@@ -274,7 +274,22 @@ namespace AVMTradeReporter.Services
             var outUsd = UsdValuation.TryComputeUsdValue(trade.AssetAmountOut, assetOut);
 
             trade.ValueUSD = CombineSides(inUsd, outUsd);
-            trade.PriceUSD = UsdValuation.TryComputeUsdTradePrice(trade.ValueUSD, trade.AssetAmountOut, assetOut);
+
+            // PriceUSD is stored as USD per 1 unit of the canonical base asset (min(asset ids))
+            // so the reported price is stable regardless of swap direction.
+            trade.PriceUSD = null;
+            var baseAssetId = Math.Min(trade.AssetIdIn, trade.AssetIdOut);
+            if (trade.ValueUSD.HasValue)
+            {
+                if (baseAssetId == trade.AssetIdIn)
+                {
+                    trade.PriceUSD = UsdValuation.TryComputeUsdTradePrice(trade.ValueUSD, trade.AssetAmountIn, assetIn);
+                }
+                else
+                {
+                    trade.PriceUSD = UsdValuation.TryComputeUsdTradePrice(trade.ValueUSD, trade.AssetAmountOut, assetOut);
+                }
+            }
 
             // Fees are always calculated from the input side:
             // gross fee (USD) = (input amount in USD) * LPFee.
