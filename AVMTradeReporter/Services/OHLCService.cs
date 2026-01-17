@@ -133,7 +133,21 @@ namespace AVMTradeReporter.Services
         {
             if (_elastic == null) return new HistoryResponseDto { S = "no_data" };
             if (assetA == assetB) return new HistoryResponseDto { S = "no_data" };
-            if (!_resolutionMap.TryGetValue(resolution ?? string.Empty, out var interval)) return new HistoryResponseDto { S = "error", Error = "Unsupported resolution" };
+
+            var wantsUsd = false;
+            var rawResolution = (resolution ?? string.Empty).Trim();
+            if (rawResolution.EndsWith("-usd", StringComparison.OrdinalIgnoreCase))
+            {
+                wantsUsd = true;
+                rawResolution = rawResolution[..^4];
+            }
+            else if (rawResolution.EndsWith("-asset", StringComparison.OrdinalIgnoreCase))
+            {
+                wantsUsd = false;
+                rawResolution = rawResolution[..^6];
+            }
+
+            if (!_resolutionMap.TryGetValue(rawResolution, out var interval)) return new HistoryResponseDto { S = "error", Error = "Unsupported resolution" };
 
             var fromDt = DateTimeOffset.FromUnixTimeSeconds(from).UtcDateTime;
             var toDt = DateTimeOffset.FromUnixTimeSeconds(to).UtcDateTime;
@@ -158,6 +172,19 @@ namespace AVMTradeReporter.Services
                         new TermQuery { Field = Infer.Field<OHLC>(f => f.AssetIdA), Value = a },
                         new TermQuery { Field = Infer.Field<OHLC>(f => f.AssetIdB), Value = b },
                         new TermQuery { Field = Infer.Field<OHLC>(f => f.Interval), Value = interval },
+                        // If documents were created before `InUSDValuation` existed, they will not have the field.
+                        // Such documents are treated as asset-valuation candles.
+                        wantsUsd
+                            ? new TermQuery { Field = Infer.Field<OHLC>(f => f.InUSDValuation), Value = true }
+                            : new BoolQuery
+                            {
+                                Should = new List<Query>
+                                {
+                                    new TermQuery { Field = Infer.Field<OHLC>(f => f.InUSDValuation), Value = false },
+                                    new BoolQuery { MustNot = new List<Query> { new ExistsQuery { Field = Infer.Field<OHLC>(f => f.InUSDValuation) } } }
+                                },
+                                MinimumShouldMatch = 1
+                            },
                         new DateRangeQuery { Field = Infer.Field<OHLC>(f => f.StartTime), Gte = fromDt, Lte = toDt }
                     }
                 }

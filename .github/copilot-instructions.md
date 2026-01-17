@@ -124,4 +124,12 @@ This is an ASP.NET Core (.NET 8) Web API + SignalR service that:
 - Includes comprehensive Swagger API documentation
 - Uses AlgorandAuthentication for API security
 
+### USD valuation (charting)
+
+- **Trades and liquidity updates must carry USD valuation** (`Trade.ValueUSD`, `Trade.PriceUSD`, `Trade.FeesUSD`, `Liquidity.ValueUSD`) computed using cached asset prices (`BiatecAsset.PriceUSD`).
+- **OHLC is stored as two series**:
+  - Asset valuation (`InUSDValuation == false` or missing field for legacy docs)
+  - USD valuation (`InUSDValuation == true`)
+- When querying OHLC, the API can select USD vs asset series; when a document loaded from Elasticsearch does not contain `InUSDValuation`, it is treated as **asset valuation**.
+
 The application can run in development mode without external services but will log connection errors. For full functionality, configure Elasticsearch, Redis, and Algorand node endpoints in appsettings.Development.json.

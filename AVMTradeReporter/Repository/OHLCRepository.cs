@@ -50,6 +50,7 @@ namespace AVMTradeReporter.Repository
                             {"assetIdA", new LongNumberProperty()},
                             {"assetIdB", new LongNumberProperty()},
                             {"interval", new KeywordProperty()},
+                            {"inUSDValuation", new BooleanProperty()},
                             {"startTime", new DateProperty()},
                             {"open", new DoubleNumberProperty()},
                             {"high", new DoubleNumberProperty()},
@@ -102,7 +103,7 @@ namespace AVMTradeReporter.Repository
             return new DateTimeOffset(ts.UtcDateTime.Date);
         }
 
-        internal record BucketSpec(string Interval, DateTimeOffset BucketStart, string DocId, decimal Price, decimal VolumeBase, decimal VolumeQuote, ulong AssetIdA, ulong AssetIdB);
+        internal record BucketSpec(string Interval, DateTimeOffset BucketStart, string DocId, bool InUsdValuation, decimal Price, decimal VolumeBase, decimal VolumeQuote, ulong AssetIdA, ulong AssetIdB);
 
         internal static IEnumerable<BucketSpec> GetIntervalBuckets(Trade trade)
         {
@@ -124,13 +125,31 @@ namespace AVMTradeReporter.Repository
             }
             else yield break;
             if (volBase <= 0) yield break;
+
+            // Asset valuation: quote-per-base using raw on-chain volumes.
             var price = volQuote / volBase;
+
+            // USD valuation: if trade has USD value, compute USD-per-base-unit.
+            decimal? usdPrice = null;
+            if (trade.ValueUSD.HasValue && volBase > 0)
+            {
+                usdPrice = trade.ValueUSD.Value / volBase;
+            }
+
             var ts = trade.Timestamp.Value.ToUniversalTime();
             foreach (var (code, span) in Intervals)
             {
                 var bucketStart = GetBucketStart(ts, span);
-                var docId = $"{aId}-{bId}-{code}-{bucketStart:yyyyMMddHHmmss}";
-                yield return new BucketSpec(code, bucketStart, docId, price, volBase, volQuote, aId, bId);
+                var docIdAsset = $"{aId}-{bId}-{code}-asset-{bucketStart:yyyyMMddHHmmss}";
+                yield return new BucketSpec(code, bucketStart, docIdAsset, false, price, volBase, volQuote, aId, bId);
+
+                if (usdPrice.HasValue)
+                {
+                    // For USD-valued series, keep volumeBase in base asset units, but express quote volume in USD.
+                    var docIdUsd = $"{aId}-{bId}-{code}-usd-{bucketStart:yyyyMMddHHmmss}";
+                    var volumeUsd = trade.ValueUSD.Value;
+                    yield return new BucketSpec(code, bucketStart, docIdUsd, true, usdPrice.Value, volBase, volumeUsd, aId, bId);
+                }
             }
         }
 
@@ -158,6 +177,7 @@ namespace AVMTradeReporter.Repository
                     AssetIdA = b.AssetIdA,
                     AssetIdB = b.AssetIdB,
                     Interval = b.Interval,
+                    InUSDValuation = b.InUsdValuation,
                     StartTime = b.BucketStart,
                     Open = b.Price,
                     High = b.Price,

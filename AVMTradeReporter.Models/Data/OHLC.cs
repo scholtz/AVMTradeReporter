@@ -11,15 +11,32 @@ namespace AVMTradeReporter.Models.Data
     public class OHLC
     {
         /// <summary>
-        /// Document id: AssetIdA-AssetIdB-Interval-YYYYMMddHHmmss (bucket start utc)
+        /// Document id: AssetIdA-AssetIdB-Interval-(asset|usd)-YYYYMMddHHmmss (bucket start utc).
         /// </summary>
-        public string Id => $"{AssetIdA}-{AssetIdB}-{Interval}-{StartTime:yyyyMMddHHmmss}";
+        public string Id => $"{AssetIdA}-{AssetIdB}-{Interval}-{(InUSDValuation ? "usd" : "asset")}-{StartTime:yyyyMMddHHmmss}";
+
+        /// <summary>
+        /// Asset id of the base asset (always the lower asset id).
+        /// </summary>
         public ulong AssetIdA { get; set; }
+
+        /// <summary>
+        /// Asset id of the quote asset (always the higher asset id).
+        /// </summary>
         public ulong AssetIdB { get; set; }
+
         /// <summary>
         /// Interval code (1m,5m,15m,1h,4h,1d,1w,1M)
         /// </summary>
         public string Interval { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Indicates whether this candle is stored in USD valuation.
+        /// If <c>false</c>, the candle is stored in asset valuation (price in quote per base).
+        /// When loading documents that do not have this field, they are treated as asset valuation.
+        /// </summary>
+        public bool InUSDValuation { get; set; }
+
         /// <summary>
         /// Start time (inclusive) of the bucket (UTC)
         /// </summary>
@@ -28,8 +45,20 @@ namespace AVMTradeReporter.Models.Data
         /// Open price of the bucket (AssetB per AssetA)
         /// </summary>
         public decimal? Open { get; set; }
+
+        /// <summary>
+        /// High price of the bucket.
+        /// </summary>
         public decimal? High { get; set; }
+
+        /// <summary>
+        /// Low price of the bucket.
+        /// </summary>
         public decimal? Low { get; set; }
+
+        /// <summary>
+        /// Close price of the bucket.
+        /// </summary>
         public decimal? Close { get; set; }
         /// <summary>
         /// Total traded amount for base asset (AssetIdA)
