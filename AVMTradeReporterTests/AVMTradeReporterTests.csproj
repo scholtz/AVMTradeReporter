@@ -27,10 +27,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="Services\" />
-  </ItemGroup>
-
-  <ItemGroup>
     <None Update="Data\pool-3136517663.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

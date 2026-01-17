@@ -6,6 +6,7 @@ using AVMIndexReporter.Repository;
 using AVMTradeReporter.Model;
 using AVMTradeReporter.Model.Configuration;
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Model.Valuation;
 using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Repository;
 using Microsoft.Extensions.Options;
@@ -27,6 +28,7 @@ namespace AVMTradeReporter.Services
         private readonly TradeRepository _tradeRepository;
         private readonly LiquidityRepository _liquidityRepository;
         private readonly PoolRepository _poolRepository;
+        private readonly IAssetRepository _assetRepository;
         private readonly TransactionProcessor _transactionProcessor;
         private readonly BlockRepository _blockRepository;
 
@@ -46,6 +48,7 @@ namespace AVMTradeReporter.Services
             TradeRepository tradeRepository,
             LiquidityRepository liquidityRepository,
             PoolRepository poolRepository,
+            IAssetRepository assetRepository,
             TransactionProcessor transactionProcessor,
             BlockRepository blockRepository
             )
@@ -56,6 +59,7 @@ namespace AVMTradeReporter.Services
             _tradeRepository = tradeRepository;
             _liquidityRepository = liquidityRepository;
             _poolRepository = poolRepository;
+            _assetRepository = assetRepository;
             _transactionProcessor = transactionProcessor;
             _blockRepository = blockRepository;
 
@@ -245,16 +249,62 @@ namespace AVMTradeReporter.Services
 
         ConcurrentDictionary<string, Trade> _trades = new ConcurrentDictionary<string, Trade>();
         ConcurrentDictionary<string, Liquidity> _liquidityUpdates = new ConcurrentDictionary<string, Liquidity>();
-        private Task RegisterTrade(Trade trade, CancellationToken cancellationToken)
+
+        private async Task RegisterTrade(Trade trade, CancellationToken cancellationToken)
         {
+
+            await PopulateTradeUsdAsync(trade, cancellationToken);
             _trades[trade.TxId] = trade;
-            return Task.CompletedTask;
         }
 
-        public Task RegisterLiquidity(Liquidity liquidityUpdate, CancellationToken cancellationToken)
+        public async Task RegisterLiquidity(Liquidity liquidityUpdate, CancellationToken cancellationToken)
         {
+            await PopulateLiquidityUsdAsync(liquidityUpdate, cancellationToken);
             _liquidityUpdates[liquidityUpdate.TxId] = liquidityUpdate;
-            return Task.CompletedTask;
+        }
+
+        private async Task PopulateTradeUsdAsync(Trade trade, CancellationToken cancellationToken)
+        {
+            if (trade == null) return;
+
+            var assetIn = await _assetRepository.GetAssetAsync(trade.AssetIdIn, cancellationToken);
+            var assetOut = await _assetRepository.GetAssetAsync(trade.AssetIdOut, cancellationToken);
+
+            var inUsd = UsdValuation.TryComputeUsdValue(trade.AssetAmountIn, assetIn);
+            var outUsd = UsdValuation.TryComputeUsdValue(trade.AssetAmountOut, assetOut);
+
+            trade.ValueUSD = CombineSides(inUsd, outUsd);
+            trade.PriceUSD = UsdValuation.TryComputeUsdTradePrice(trade.ValueUSD, trade.AssetAmountOut, assetOut);
+
+            // Fees are denominated in pool assets A and B, not necessarily in/out.
+            // Approximate by valuing AF in assetIn and BF in assetOut when pool mapping is unavailable.
+            var feeAUsd = UsdValuation.TryComputeUsdFee(trade.AF, assetIn);
+            var feeBUsd = UsdValuation.TryComputeUsdFee(trade.BF, assetOut);
+            trade.FeesUSD = SumNullable(feeAUsd, feeBUsd);
+        }
+
+        private async Task PopulateLiquidityUsdAsync(Liquidity liquidity, CancellationToken cancellationToken)
+        {
+            if (liquidity == null) return;
+
+            var assetA = await _assetRepository.GetAssetAsync(liquidity.AssetIdA, cancellationToken);
+            var assetB = await _assetRepository.GetAssetAsync(liquidity.AssetIdB, cancellationToken);
+
+            var aUsd = UsdValuation.TryComputeUsdValue(liquidity.AssetAmountA, assetA);
+            var bUsd = UsdValuation.TryComputeUsdValue(liquidity.AssetAmountB, assetB);
+            liquidity.ValueUSD = CombineSides(aUsd, bUsd);
+        }
+
+        private static decimal? CombineSides(decimal? aUsd, decimal? bUsd)
+        {
+            if (aUsd.HasValue && bUsd.HasValue) return (aUsd.Value + bUsd.Value) / 2m;
+            return aUsd ?? bUsd;
+        }
+
+        private static decimal? SumNullable(decimal? a, decimal? b)
+        {
+            if (a == null && b == null) return null;
+            return (a ?? 0m) + (b ?? 0m);
         }
 
         private bool IsMemoryPressureHigh()
