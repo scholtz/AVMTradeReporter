@@ -51,6 +51,12 @@ namespace AVMTradeReporter.Model.Configuration
         /// Block processing configuration
         /// </summary>
         public BlockProcessingConfiguration BlockProcessing { get; set; } = new BlockProcessingConfiguration();
+
+        /// <summary>
+        /// Stability index per asset id.
+        /// Higher value means more stable / preferred base asset for USD price reporting.
+        /// </summary>
+        public Dictionary<ulong, int> AssetStabilityIndex { get; set; } = new();
     }
 
     public class RedisConfiguration

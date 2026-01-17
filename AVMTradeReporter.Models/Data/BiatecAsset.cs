@@ -6,6 +6,9 @@ namespace AVMTradeReporter.Model.Data
     {
         public AssetType Type { get; set; } = AssetType.ASA;
         public decimal PriceUSD { get; set; }
+
+        public int StabilityIndex { get; set; } = 0;
+
         /// <summary>
         /// Real TVL in USD: Sum of trusted token values from pools where this asset is paired with a trusted reference token.
         /// Calculated as: Σ(trusted_token_amount × trusted_token_price) for each pool with this asset.

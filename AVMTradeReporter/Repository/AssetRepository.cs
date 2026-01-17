@@ -9,6 +9,8 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using AVMTradeReporter.Hubs;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Options;
+using AVMTradeReporter.Model.Configuration;
 
 namespace AVMTradeReporter.Repository
 {
@@ -22,17 +24,37 @@ namespace AVMTradeReporter.Repository
         private static bool _initialized = false;
         private static readonly SemaphoreSlim _initLock = new(1, 1);
         private const string RedisKeyPrefix = "asset:";
+        private readonly AppConfiguration? _appConfig;
 
         public AssetRepository(
             IDefaultApi algod,
             ILogger<AssetRepository> logger,
             IDatabase? redisDatabase = null,
-            IHubContext<BiatecScanHub>? hubContext = null)
+            IHubContext<BiatecScanHub>? hubContext = null,
+            IOptions<AppConfiguration>? appConfig = null)
         {
             _algod = algod;
             _logger = logger;
             _redisDatabase = redisDatabase;
             _hubContext = hubContext;
+            _appConfig = appConfig?.Value;
+        }
+
+        private void EnsureStabilityIndexInitialized(BiatecAsset asset)
+        {
+            if (asset == null) return;
+
+            // If already set, keep it (allows overriding in Redis).
+            if (asset.StabilityIndex != 0) return;
+
+            if (_appConfig?.AssetStabilityIndex != null && _appConfig.AssetStabilityIndex.TryGetValue(asset.Index, out var idx))
+            {
+                asset.StabilityIndex = idx;
+            }
+            else
+            {
+                asset.StabilityIndex = 0;
+            }
         }
 
         public async Task EnsureInitializedAsync(CancellationToken cancellationToken)
@@ -65,6 +87,7 @@ namespace AVMTradeReporter.Repository
                                             {
                                                 asset.Timestamp = DateTimeOffset.UtcNow;
                                             }
+                                            EnsureStabilityIndexInitialized(asset);
                                             _assetCache[asset.Index] = asset;
                                             loaded++;
                                         }
@@ -136,12 +159,14 @@ namespace AVMTradeReporter.Repository
                         },
                         Timestamp = DateTimeOffset.UtcNow
                     };
+                    EnsureStabilityIndexInitialized(algo);
                     _assetCache[0] = algo;
                     return algo;
                 }
 
                 if (_assetCache.TryGetValue(assetId, out var cached))
                 {
+                    EnsureStabilityIndexInitialized(cached);
                     return cached;
                 }
 
@@ -150,8 +175,10 @@ namespace AVMTradeReporter.Repository
                 if (asset != null)
                 {
                     var assetToStore = Newtonsoft.Json.JsonConvert.DeserializeObject<BiatecAsset>(Newtonsoft.Json.JsonConvert.SerializeObject(asset) ?? throw new Exception($"Unable to serialize asset {asset.Index}")) ?? throw new Exception($"Unable to deserialize asset to biatec asset {asset.Index}");
+                    EnsureStabilityIndexInitialized(assetToStore);
                     await SetAssetAsync(assetToStore, cancellationToken); // fire and forget
                 }
+                EnsureStabilityIndexInitialized(_assetCache[assetId]);
                 return _assetCache[assetId];
             }
             catch (Exception ex)
@@ -164,6 +191,8 @@ namespace AVMTradeReporter.Repository
         public async Task SetAssetAsync(BiatecAsset asset, CancellationToken cancellationToken = default)
         {
             if (asset == null) return;
+
+            EnsureStabilityIndexInitialized(asset);
 
             if (asset.Timestamp == null)
             {

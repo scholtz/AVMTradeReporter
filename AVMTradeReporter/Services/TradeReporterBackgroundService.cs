@@ -275,19 +275,36 @@ namespace AVMTradeReporter.Services
 
             trade.ValueUSD = CombineSides(inUsd, outUsd);
 
-            // PriceUSD is stored as USD per 1 unit of the canonical base asset (min(asset ids))
-            // so the reported price is stable regardless of swap direction.
             trade.PriceUSD = null;
-            var baseAssetId = Math.Min(trade.AssetIdIn, trade.AssetIdOut);
+            trade.PriceUSDAssetId = null;
+
+            // Select base asset for USD price reporting:
+            // - higher StabilityIndex wins
+            // - when equal, lower asset id wins
+            var inIdx = assetIn?.StabilityIndex ?? 0;
+            var outIdx = assetOut?.StabilityIndex ?? 0;
+
+            var baseAssetId = trade.AssetIdIn;
+            if (outIdx > inIdx)
+            {
+                baseAssetId = trade.AssetIdOut;
+            }
+            else if (outIdx == inIdx)
+            {
+                baseAssetId = Math.Min(trade.AssetIdIn, trade.AssetIdOut);
+            }
+
             if (trade.ValueUSD.HasValue)
             {
                 if (baseAssetId == trade.AssetIdIn)
                 {
                     trade.PriceUSD = UsdValuation.TryComputeUsdTradePrice(trade.ValueUSD, trade.AssetAmountIn, assetIn);
+                    trade.PriceUSDAssetId = trade.AssetIdIn;
                 }
                 else
                 {
                     trade.PriceUSD = UsdValuation.TryComputeUsdTradePrice(trade.ValueUSD, trade.AssetAmountOut, assetOut);
+                    trade.PriceUSDAssetId = trade.AssetIdOut;
                 }
             }
 

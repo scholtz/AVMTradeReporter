@@ -31,7 +31,8 @@ namespace AVMTradeReporterTests
                     Clawback = null
                 },
                 PriceUSD = 0,
-                TVL_USD = 0
+                TVL_USD = 0,
+                StabilityIndex = 0
             };
             _assets[assetId] = asset;
             return Task.FromResult<BiatecAsset?>(asset);

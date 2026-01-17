@@ -116,10 +116,14 @@ namespace AVMTradeReporter.Models.Data
 
         /// <summary>
         /// Trade price expressed as USD per one unit of the canonical base asset.
-        /// Canonical base asset is defined as <c>min(AssetIdIn, AssetIdOut)</c>.
-        /// This keeps the reported USD price stable regardless of swap direction.
+        /// Canonical base asset is selected by stability index (higher wins); when equal, lower asset id wins.
         /// </summary>
         public decimal? PriceUSD { get; set; }
+
+        /// <summary>
+        /// Asset id for which <see cref="PriceUSD"/> is expressed (USD per 1 unit of this asset).
+        /// </summary>
+        public ulong? PriceUSDAssetId { get; set; }
 
         /// <summary>
         /// Gross fee collected for this trade valued in USD.
