@@ -115,15 +115,14 @@ namespace AVMTradeReporter.Models.Data
         public decimal? ValueUSD { get; set; }
 
         /// <summary>
-        /// Trade price expressed as USD per one unit of the canonical base asset.
-        /// Canonical base asset is selected by stability index (higher wins); when equal, lower asset id wins.
+        /// Trade price expressed as USD per one unit of the input asset.
         /// </summary>
-        public decimal? PriceUSD { get; set; }
+        public decimal? PriceAssetInUSD { get; set; }
 
         /// <summary>
-        /// Asset id for which <see cref="PriceUSD"/> is expressed (USD per 1 unit of this asset).
+        /// Trade price expressed as USD per one unit of the output asset.
         /// </summary>
-        public ulong? PriceUSDAssetId { get; set; }
+        public decimal? PriceAssetOutUSD { get; set; }
 
         /// <summary>
         /// Gross fee collected for this trade valued in USD.

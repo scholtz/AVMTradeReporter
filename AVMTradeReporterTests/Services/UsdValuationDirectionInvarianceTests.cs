@@ -11,7 +11,7 @@ namespace AVMTradeReporterTests.Services;
 public class UsdValuationDirectionInvarianceTests
 {
     [Test]
-    public async Task RegisterTrade_WhenDirectionReversed_UsdValueAndPriceRemainStable()
+    public async Task RegisterTrade_WhenDirectionReversed_UsdValueAndPerSidePricesRemainConsistent()
     {
         var assetRepo = new MockAssetRepository();
         var poolRepo = new MockPoolRepository();
@@ -67,8 +67,13 @@ public class UsdValuationDirectionInvarianceTests
         await ((ITradeService)service).RegisterTrade(tB, CancellationToken.None);
 
         Assert.That(tA.ValueUSD, Is.EqualTo(tB.ValueUSD));
-        Assert.That(tA.PriceUSD, Is.EqualTo(2m).Within(0.0000000001m));
-        Assert.That(tB.PriceUSD, Is.EqualTo(2m).Within(0.0000000001m));
+
+        // Each trade should report correct per-side prices for its in/out assets.
+        Assert.That(tA.PriceAssetInUSD, Is.EqualTo(2m).Within(0.0000000001m));
+        Assert.That(tA.PriceAssetOutUSD, Is.EqualTo(1m).Within(0.0000000001m));
+
+        Assert.That(tB.PriceAssetInUSD, Is.EqualTo(1m).Within(0.0000000001m));
+        Assert.That(tB.PriceAssetOutUSD, Is.EqualTo(2m).Within(0.0000000001m));
     }
 
     [Test]
