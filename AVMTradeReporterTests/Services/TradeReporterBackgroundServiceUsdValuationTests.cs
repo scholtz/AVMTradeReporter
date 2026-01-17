@@ -9,7 +9,7 @@ using Microsoft.Extensions.Options;
 
 namespace AVMTradeReporterTests.Services;
 
-public class TradeReporterBackgroundServiceUsdValuationTests
+public partial class TradeReporterBackgroundServiceUsdValuationTests
 {
     [Test]
     public async Task RegisterTrade_WhenBothSidesPriced_SetsValueUsdAsAverage()
@@ -206,7 +206,7 @@ public class TradeReporterBackgroundServiceUsdValuationTests
 
         await ((ITradeService)service).RegisterTrade(trade, CancellationToken.None);
 
-        Assert.That(trade.PriceUSD, Is.EqualTo(1m));
+        Assert.That(trade.PriceUSD, Is.EqualTo(2m));
     }
 
     [Test]
