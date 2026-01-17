@@ -3,6 +3,8 @@ using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Models.Data;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Core.Bulk;
+using Elastic.Clients.Elasticsearch.IndexManagement;
+using Elastic.Clients.Elasticsearch.Mapping;
 using Elastic.Clients.Elasticsearch.Security;
 using Microsoft.AspNetCore.SignalR;
 
@@ -26,6 +28,53 @@ namespace AVMTradeReporter.Repository
             _logger = logger;
             _hubContext = hubContext;
             _poolRepository = poolRepository;
+
+            CreateLiquidityIndexTemplateAsync().Wait();
+        }
+
+        private async Task CreateLiquidityIndexTemplateAsync()
+        {
+            var templateRequest = new Elastic.Clients.Elasticsearch.IndexManagement.PutIndexTemplateRequest
+            {
+                Name = "liquidity_template",
+                IndexPatterns = new[] { "liquidity" },
+                Template = new Elastic.Clients.Elasticsearch.IndexManagement.IndexTemplateMapping
+                {
+                    Mappings = new Elastic.Clients.Elasticsearch.Mapping.TypeMapping
+                    {
+                        Properties = new Elastic.Clients.Elasticsearch.Mapping.Properties
+                        {
+                            { "direction", new Elastic.Clients.Elasticsearch.Mapping.KeywordProperty() },
+                            { "assetIdA", new Elastic.Clients.Elasticsearch.Mapping.LongNumberProperty() },
+                            { "assetIdB", new Elastic.Clients.Elasticsearch.Mapping.LongNumberProperty() },
+                            { "assetIdLP", new Elastic.Clients.Elasticsearch.Mapping.LongNumberProperty() },
+                            { "assetAmountA", new Elastic.Clients.Elasticsearch.Mapping.LongNumberProperty() },
+                            { "assetAmountB", new Elastic.Clients.Elasticsearch.Mapping.LongNumberProperty() },
+                            { "assetAmountLP", new Elastic.Clients.Elasticsearch.Mapping.LongNumberProperty() },
+                            { "valueUSD", new Elastic.Clients.Elasticsearch.Mapping.DoubleNumberProperty() },
+                            { "txId", new Elastic.Clients.Elasticsearch.Mapping.KeywordProperty() },
+                            { "blockId", new Elastic.Clients.Elasticsearch.Mapping.LongNumberProperty() },
+                            { "txGroup", new Elastic.Clients.Elasticsearch.Mapping.KeywordProperty() },
+                            { "timestamp", new Elastic.Clients.Elasticsearch.Mapping.DateProperty() },
+                            { "protocol", new Elastic.Clients.Elasticsearch.Mapping.KeywordProperty() },
+                            { "liquidityProvider", new Elastic.Clients.Elasticsearch.Mapping.KeywordProperty() },
+                            { "poolAddress", new Elastic.Clients.Elasticsearch.Mapping.KeywordProperty() },
+                            { "poolAppId", new Elastic.Clients.Elasticsearch.Mapping.LongNumberProperty() },
+                            { "topTxId", new Elastic.Clients.Elasticsearch.Mapping.KeywordProperty() },
+                            { "txState", new Elastic.Clients.Elasticsearch.Mapping.KeywordProperty() }
+                        }
+                    }
+                }
+            };
+
+            if (_elasticClient == null)
+            {
+                _logger.LogError("Elasticsearch client is not initialized");
+                return;
+            }
+
+            var response = await _elasticClient.Indices.PutIndexTemplateAsync(templateRequest);
+            Console.WriteLine($"Template created: {response.IsValidResponse}");
         }
 
         public async Task<bool> StoreLiquidityUpdatesAsync(Liquidity[] items, CancellationToken cancellationToken)
