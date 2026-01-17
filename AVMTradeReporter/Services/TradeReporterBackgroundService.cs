@@ -27,7 +27,7 @@ namespace AVMTradeReporter.Services
         private readonly IndexerRepository _indexerRepository;
         private readonly TradeRepository _tradeRepository;
         private readonly LiquidityRepository _liquidityRepository;
-        private readonly PoolRepository _poolRepository;
+        private readonly IPoolRepository _poolRepository;
         private readonly IAssetRepository _assetRepository;
         private readonly TransactionProcessor _transactionProcessor;
         private readonly BlockRepository _blockRepository;
@@ -47,7 +47,7 @@ namespace AVMTradeReporter.Services
             IndexerRepository indexerRepository,
             TradeRepository tradeRepository,
             LiquidityRepository liquidityRepository,
-            PoolRepository poolRepository,
+            IPoolRepository poolRepository,
             IAssetRepository assetRepository,
             TransactionProcessor transactionProcessor,
             BlockRepository blockRepository
@@ -276,11 +276,32 @@ namespace AVMTradeReporter.Services
             trade.ValueUSD = CombineSides(inUsd, outUsd);
             trade.PriceUSD = UsdValuation.TryComputeUsdTradePrice(trade.ValueUSD, trade.AssetAmountOut, assetOut);
 
-            // Fees are denominated in pool assets A and B, not necessarily in/out.
-            // Approximate by valuing AF in assetIn and BF in assetOut when pool mapping is unavailable.
-            var feeAUsd = UsdValuation.TryComputeUsdFee(trade.AF, assetIn);
-            var feeBUsd = UsdValuation.TryComputeUsdFee(trade.BF, assetOut);
-            trade.FeesUSD = SumNullable(feeAUsd, feeBUsd);
+            // Fees are always calculated from the input side:
+            // gross fee (USD) = (input amount in USD) * LPFee.
+            // split: protocol fee = gross fee * ProtocolFeePortion, provider fee = gross fee - protocol fee.
+            trade.FeesUSD = null;
+            trade.FeesUSDProtocol = null;
+            trade.FeesUSDProvider = null;
+
+            var pool = await _poolRepository.GetPoolAsync(trade.PoolAddress, cancellationToken);
+            var poolLpFee = pool?.LPFee;
+            if (poolLpFee.HasValue && poolLpFee.Value > 0)
+            {
+                var inputUsd = UsdValuation.TryComputeUsdValue(trade.AssetAmountIn, assetIn);
+                if (inputUsd.HasValue)
+                {
+                    var grossFeeUsd = inputUsd.Value * poolLpFee.Value;
+                    trade.FeesUSD = grossFeeUsd;
+
+                    var portion = pool?.ProtocolFeePortion ?? 0m;
+                    if (portion < 0) portion = 0m;
+                    if (portion > 1) portion = 1m;
+
+                    var protocolFeeUsd = grossFeeUsd * portion;
+                    trade.FeesUSDProtocol = protocolFeeUsd;
+                    trade.FeesUSDProvider = grossFeeUsd - protocolFeeUsd;
+                }
+            }
         }
 
         private async Task PopulateLiquidityUsdAsync(Liquidity liquidity, CancellationToken cancellationToken)

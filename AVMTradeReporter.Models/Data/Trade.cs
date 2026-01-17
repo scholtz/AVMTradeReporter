@@ -120,9 +120,23 @@ namespace AVMTradeReporter.Models.Data
         public decimal? PriceUSD { get; set; }
 
         /// <summary>
-        /// Collected protocol fees (if any) valued in USD.
-        /// Computed as (<see cref="AF"/> valued using asset A price) + (<see cref="BF"/> valued using asset B price).
+        /// Gross fee collected for this trade valued in USD.
+        /// Calculated from the input side only as:
+        /// <c>(AssetAmountIn converted to decimal) × (input asset USD price) × (pool LPFee)</c>.
+        /// This is the total fee paid by the trader (LP providers + protocol).
         /// </summary>
         public decimal? FeesUSD { get; set; }
+
+        /// <summary>
+        /// Portion of <see cref="FeesUSD"/> collected by LP providers (USD).
+        /// Calculated as <c>FeesUSD - FeesUSDProtocol</c>.
+        /// </summary>
+        public decimal? FeesUSDProvider { get; set; }
+
+        /// <summary>
+        /// Portion of <see cref="FeesUSD"/> collected by the protocol owner (USD).
+        /// Calculated as <c>FeesUSD × pool.ProtocolFeePortion</c>.
+        /// </summary>
+        public decimal? FeesUSDProtocol { get; set; }
     }
 }
