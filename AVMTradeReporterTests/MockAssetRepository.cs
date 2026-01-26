@@ -54,7 +54,18 @@ namespace AVMTradeReporterTests
             if (!string.IsNullOrWhiteSpace(search))
             {
                 var s = search.ToLowerInvariant();
-                query = query.Where(a => (a.Params?.Name?.ToLowerInvariant().Contains(s) ?? false) || (a.Params?.UnitName?.ToLowerInvariant().Contains(s) ?? false));
+                if (s == "utility")
+                {
+                    query = query.Where(a => a.StabilityIndex == 0);
+                }
+                if (s == "stable")
+                {
+                    query = query.Where(a => a.StabilityIndex > 0);
+                }
+                else
+                {
+                    query = query.Where(a => (a.Params?.Name?.ToLowerInvariant().Contains(s) ?? false) || (a.Params?.UnitName?.ToLowerInvariant().Contains(s) ?? false));
+                }
             }
             return Task.FromResult(query.Skip(offset).Take(size));
         }

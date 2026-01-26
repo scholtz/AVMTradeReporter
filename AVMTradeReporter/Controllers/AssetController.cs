@@ -24,7 +24,7 @@ namespace AVMTradeReporter.Controllers
         /// List assets from the in-memory cache (prefilled from Redis) or filter by IDs / search term.
         /// </summary>
         /// <param name="ids">Comma separated list of asset IDs to include. Missing IDs will be fetched on-demand.</param>
-        /// <param name="search">Case-insensitive substring filter applied to asset name or unit name.</param>
+        /// <param name="search">Case-insensitive substring filter applied to asset name or unit name. Special case: utility returns utility tokens. Special case: stable returns the assets with stabilityIndex > 0.</param>
         /// <param name="size">Maximum number of results to return (default 100, max 500).</param>
         /// <returns>List of matching assets with basic metadata.</returns>
         [HttpGet]

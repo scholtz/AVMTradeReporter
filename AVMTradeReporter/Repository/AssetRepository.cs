@@ -261,16 +261,28 @@ namespace AVMTradeReporter.Repository
                 query = _assetCache.Where(kvp => ids.Contains(kvp.Key)).Select(kvp => kvp.Value);
             }
 
+
             if (!string.IsNullOrWhiteSpace(search))
             {
                 var s = search.Trim().ToLowerInvariant();
-                if (ulong.TryParse(s, out var asset))
+                if (s == "utility")
                 {
-                    query = query.Where(a => a.Index == asset || (a.Params?.Name?.ToLowerInvariant().Contains(s) ?? false) || (a.Params?.UnitName?.ToLowerInvariant().Contains(s) ?? false));
+                    query = query.Where(a => a.StabilityIndex == 0);
+                }
+                if (s == "stable")
+                {
+                    query = query.Where(a => a.StabilityIndex > 0);
                 }
                 else
                 {
-                    query = query.Where(a => (a.Params?.Name?.ToLowerInvariant().Contains(s) ?? false) || (a.Params?.UnitName?.ToLowerInvariant().Contains(s) ?? false));
+                    if (ulong.TryParse(s, out var asset))
+                    {
+                        query = query.Where(a => a.Index == asset || (a.Params?.Name?.ToLowerInvariant().Contains(s) ?? false) || (a.Params?.UnitName?.ToLowerInvariant().Contains(s) ?? false));
+                    }
+                    else
+                    {
+                        query = query.Where(a => (a.Params?.Name?.ToLowerInvariant().Contains(s) ?? false) || (a.Params?.UnitName?.ToLowerInvariant().Contains(s) ?? false));
+                    }
                 }
             }
 
