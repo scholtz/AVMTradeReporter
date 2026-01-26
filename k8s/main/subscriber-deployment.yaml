@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: subscriber
-          image: scholtz2/avm-trade-reporter-subscriber:1.2026.01.17-main
+          image: scholtz2/avm-trade-reporter-subscriber:1.2026.01.26-main
           envFrom:
             - secretRef:
                 name: avm-trade-reporter-subscriber-secret
