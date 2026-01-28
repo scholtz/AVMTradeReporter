@@ -269,6 +269,7 @@ namespace AVMTradeReporter.Repository
                 {
                     query = query.Where(a => a.StabilityIndex == 0);
                 }
+                else
                 if (s == "stable")
                 {
                     query = query.Where(a => a.StabilityIndex > 0);
