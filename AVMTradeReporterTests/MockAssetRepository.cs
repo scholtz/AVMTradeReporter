@@ -57,7 +57,7 @@ namespace AVMTradeReporterTests
                 if (s == "utility")
                 {
                     query = query.Where(a => a.StabilityIndex == 0);
-                }
+                } else
                 if (s == "stable")
                 {
                     query = query.Where(a => a.StabilityIndex > 0);
