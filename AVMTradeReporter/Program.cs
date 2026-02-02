@@ -106,6 +106,12 @@ namespace AVMTradeReporter
                 builder.Services.AddHostedService<PoolRefreshBackgroundService>();
             }
 
+            // Register Volume Update Background Service only if enabled
+            if (appConfig?.VolumeUpdate?.Enabled != false) // default enabled
+            {
+                builder.Services.AddHostedService<VolumeUpdateBackgroundService>();
+            }
+
             builder.Services.AddSingleton<ElasticsearchClient>(sp =>
             {
                 var appConfig = sp.GetRequiredService<IOptions<AppConfiguration>>().Value;

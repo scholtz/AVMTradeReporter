@@ -48,6 +48,11 @@ namespace AVMTradeReporter.Model.Configuration
         public PoolRefreshConfiguration PoolRefresh { get; set; } = new PoolRefreshConfiguration();
 
         /// <summary>
+        /// Volume update background service configuration
+        /// </summary>
+        public VolumeUpdateConfiguration VolumeUpdate { get; set; } = new VolumeUpdateConfiguration();
+
+        /// <summary>
         /// Block processing configuration
         /// </summary>
         public BlockProcessingConfiguration BlockProcessing { get; set; } = new BlockProcessingConfiguration();
@@ -91,6 +96,19 @@ namespace AVMTradeReporter.Model.Configuration
         /// Initial delay before starting the first refresh (in minutes). Default is 1 minute.
         /// </summary>
         public int InitialDelayMinutes { get; set; } = 1;
+    }
+
+    public class VolumeUpdateConfiguration
+    {
+        /// <summary>
+        /// Enables or disables the volume update background service
+        /// </summary>
+        public bool Enabled { get; set; } = true;
+
+        /// <summary>
+        /// How often to update volumes (in seconds). Default is 60 seconds.
+        /// </summary>
+        public int IntervalSeconds { get; set; } = 60;
     }
 
     public class BlockProcessingConfiguration

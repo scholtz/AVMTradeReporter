@@ -7,6 +7,7 @@ using Elastic.Clients.Elasticsearch.IndexManagement;
 using Elastic.Clients.Elasticsearch.Mapping;
 using Elastic.Clients.Elasticsearch.Security;
 using Microsoft.AspNetCore.SignalR;
+using System.Collections.Concurrent;
 
 namespace AVMTradeReporter.Repository
 {
@@ -17,6 +18,9 @@ namespace AVMTradeReporter.Repository
         private readonly IHubContext<BiatecScanHub> _hubContext;
         private readonly PoolRepository _poolRepository;
         private readonly OHLCRepository _ohlcRepository; // new dependency
+
+        // Track pools that had trades for volume updates
+        private static readonly ConcurrentBag<string> _poolsWithRecentTrades = new();
 
         public TradeRepository(
             ElasticsearchClient elasticClient,
@@ -96,6 +100,13 @@ namespace AVMTradeReporter.Repository
                     {
                         BiatecScanHub.RecentTrades.TryDequeue(out _);
                     }
+                }
+
+                // Track pools with trades for volume updates
+                var uniquePoolAddresses = trades.Select(t => t.PoolAddress).Distinct();
+                foreach (var poolAddress in uniquePoolAddresses)
+                {
+                    _poolsWithRecentTrades.Add(poolAddress);
                 }
 
                 _logger.LogInformation("Bulk indexing {tradeCount} trades", trades.Length);
@@ -225,6 +236,14 @@ namespace AVMTradeReporter.Repository
             }
         }
 
+        public static IEnumerable<string> GetPoolsWithRecentTrades()
+        {
+            return _poolsWithRecentTrades.Distinct();
+        }
 
+        public static void ClearPoolsWithRecentTrades()
+        {
+            _poolsWithRecentTrades.Clear();
+        }
     }
 }
