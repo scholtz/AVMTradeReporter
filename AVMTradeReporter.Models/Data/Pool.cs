@@ -56,6 +56,21 @@ namespace AVMTradeReporter.Models.Data
         /// </summary>
         public decimal? TotalTVLAssetBInUSD { get; set; }
 
+        /// <summary>
+        /// 1 hour trading volume in USD.
+        /// </summary>
+        public decimal? Volume1H { get; set; }
+
+        /// <summary>
+        /// 24 hours trading volume in USD.
+        /// </summary>
+        public decimal? Volume24H { get; set; }
+
+        /// <summary>
+        /// 7 days trading volume in USD.
+        /// </summary>
+        public decimal? Volume7D { get; set; }
+
         public decimal VirtualAmountA
         {
             get
@@ -281,7 +296,10 @@ namespace AVMTradeReporter.Models.Data
                 LPFee = LPFee,
                 ProtocolFeePortion = ProtocolFeePortion,
                 TotalTVLAssetAInUSD = TotalTVLAssetBInUSD, // swapped
-                TotalTVLAssetBInUSD = TotalTVLAssetAInUSD
+                TotalTVLAssetBInUSD = TotalTVLAssetAInUSD,
+                Volume1H = Volume1H,
+                Volume24H = Volume24H,
+                Volume7D = Volume7D
             };
         }
 

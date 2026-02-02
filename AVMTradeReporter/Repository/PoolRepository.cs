@@ -4,6 +4,7 @@ using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Models.Data.Enums;
 using AVMTradeReporter.Processors.Pool;
+using AVMTradeReporter.Services;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Core.Bulk;
 using Elastic.Clients.Elasticsearch.IndexManagement;
@@ -93,6 +94,9 @@ namespace AVMTradeReporter.Repository
 
                 _isInitialized = true;
                 _logger.LogInformation("PoolRepository initialization completed. Total pools in memory: {count}", _poolsCache.Count);
+
+                // Update pool volumes
+                await UpdatePoolVolumesAsync(cancellationToken);
 
                 // Initialize aggregated pools from currently loaded pools
                 try
@@ -914,6 +918,39 @@ namespace AVMTradeReporter.Repository
                 DEXProtocol.Biatec => _serviceProvider.GetService<BiatecPoolProcessor>(),
                 _ => null
             };
+        }
+
+        private async Task UpdatePoolVolumesAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                var tradeQueryService = _serviceProvider.GetService<ITradeQueryService>();
+                if (tradeQueryService == null)
+                {
+                    _logger.LogWarning("TradeQueryService not available for volume updates");
+                    return;
+                }
+
+                var poolAddresses = _poolsCache.Keys.ToList();
+                var volumes = await tradeQueryService.GetPoolVolumesAsync(poolAddresses, cancellationToken);
+
+                foreach (var kv in volumes)
+                {
+                    if (_poolsCache.TryGetValue(kv.Key, out var pool))
+                    {
+                        pool.Volume1H = kv.Value.Volume1H;
+                        pool.Volume24H = kv.Value.Volume24H;
+                        pool.Volume7D = kv.Value.Volume7D;
+                        _poolsCache[kv.Key] = pool; // update cache
+                    }
+                }
+
+                _logger.LogInformation("Updated volumes for {count} pools", volumes.Count);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to update pool volumes");
+            }
         }
     }
 }

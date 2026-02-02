@@ -12,5 +12,7 @@ namespace AVMTradeReporter.Services
             int offset = 0,
             int size = 100,
             CancellationToken cancellationToken = default);
+
+        Task<Dictionary<string, (decimal Volume1H, decimal Volume24H, decimal Volume7D)>> GetPoolVolumesAsync(IEnumerable<string> poolAddresses, CancellationToken cancellationToken = default);
     }
 }

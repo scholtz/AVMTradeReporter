@@ -165,22 +165,12 @@ namespace AVMTradeReporterTests.Controllers
             LastCalledOffset = offset;
             LastCalledSize = size;
 
-            // Return a sample trade for testing
-            var trades = new List<Trade>
-            {
-                new Trade
-                {
-                    TxId = "sample-tx-id",
-                    AssetIdIn = 123,
-                    AssetIdOut = 456,
-                    AssetAmountIn = 1000,
-                    AssetAmountOut = 2000,
-                    BlockId = 12345,
-                    Timestamp = DateTimeOffset.Now
-                }
-            };
+            return Task.FromResult<IEnumerable<Trade>>(new List<Trade>());
+        }
 
-            return Task.FromResult<IEnumerable<Trade>>(trades);
+        public Task<Dictionary<string, (decimal Volume1H, decimal Volume24H, decimal Volume7D)>> GetPoolVolumesAsync(IEnumerable<string> poolAddresses, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(new Dictionary<string, (decimal, decimal, decimal)>());
         }
     }
 

@@ -1,6 +1,7 @@
 using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Models.Data;
 using Elastic.Clients.Elasticsearch;
+using static Elastic.Clients.Elasticsearch.Field;
 
 namespace AVMTradeReporter.Services
 {
@@ -56,6 +57,88 @@ namespace AVMTradeReporter.Services
             }
 
             return trades;
+        }
+
+        public async Task<Dictionary<string, (decimal Volume1H, decimal Volume24H, decimal Volume7D)>> GetPoolVolumesAsync(IEnumerable<string> poolAddresses, CancellationToken cancellationToken = default)
+        {
+            var volumes = new Dictionary<string, (decimal Volume1H, decimal Volume24H, decimal Volume7D)>();
+
+            if (_elastic == null)
+            {
+                _logger.LogWarning("Elasticsearch client not available for volume calculation");
+                return volumes;
+            }
+
+            var poolAddressSet = new HashSet<string>(poolAddresses);
+
+            var now = DateTimeOffset.UtcNow;
+
+            // Periods
+            var periods = new[]
+            {
+                (Hours: 1, Key: "1H"),
+                (Hours: 24, Key: "24H"),
+                (Hours: 168, Key: "7D") // 7*24
+            };
+
+            foreach (var period in periods)
+            {
+                var startTime = now.AddHours(-period.Hours);
+
+                try
+                {
+                    // Fetch trades in the period
+                    var searchResponse = await _elastic.SearchAsync<Trade>(s => s
+                        .Indices("trades")
+                        .Size(10000) // Assume not too many trades per period
+                        .Query(q => q
+                            .Bool(b => b
+                                .Must(
+                                    m => m.Range(r => r.DateRange(dr => dr.Field(f => f.Timestamp).Gte(startTime.ToString("o")))),
+                                    m => m.Terms(t => t.Field(f => f.PoolAddress).Terms(poolAddressSet.Select(p => FieldValue.String(p)).ToArray()))
+                                )
+                            )
+                        ),
+                        cancellationToken);
+
+                    if (searchResponse.IsValidResponse)
+                    {
+                        var tradesInPeriod = searchResponse.Documents.Where(t => t.ValueUSD.HasValue);
+                        var grouped = tradesInPeriod.GroupBy(t => t.PoolAddress)
+                            .ToDictionary(g => g.Key, g => g.Sum(t => t.ValueUSD!.Value));
+
+                        foreach (var kv in grouped)
+                        {
+                            var poolAddress = kv.Key;
+                            var volume = kv.Value;
+
+                            if (!volumes.ContainsKey(poolAddress))
+                            {
+                                volumes[poolAddress] = (Volume1H: 0m, Volume24H: 0m, Volume7D: 0m);
+                            }
+
+                            var current = volumes[poolAddress];
+                            volumes[poolAddress] = period.Key switch
+                            {
+                                "1H" => (volume, current.Volume24H, current.Volume7D),
+                                "24H" => (current.Volume1H, volume, current.Volume7D),
+                                "7D" => (current.Volume1H, current.Volume24H, volume),
+                                _ => current
+                            };
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogError("Elasticsearch query failed for {period}: {Error}", period.Key, searchResponse.DebugInformation);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to calculate volumes for {period}", period.Key);
+                }
+            }
+
+            return volumes;
         }
 
         private static Elastic.Clients.Elasticsearch.QueryDsl.Query BuildQuery(

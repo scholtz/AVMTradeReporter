@@ -389,5 +389,46 @@ namespace AVMTradeReporterTests.Model
 
         }
 
+        [Test]
+        public void FromPools_AggregatesVolumes()
+        {
+            // Arrange
+            var p1 = new AVMTradeReporter.Models.Data.Pool
+            {
+                AssetIdA = 1,
+                AssetIdB = 2,
+                A = 1000000,
+                B = 2000000,
+                Volume1H = 100,
+                Volume24H = 1000,
+                Volume7D = 10000
+            };
+
+            var p2 = new AVMTradeReporter.Models.Data.Pool
+            {
+                AssetIdA = 2,
+                AssetIdB = 1,
+                A = 2000000,
+                B = 1000000,
+                Volume1H = 200,
+                Volume24H = 2000,
+                Volume7D = 20000
+            };
+
+            // Act
+            var result = AggregatedPool.FromPools(new[] { p1, p2 }).ToArray();
+
+            // Assert
+            var agg12 = result.Single(r => r.AssetIdA == 1 && r.AssetIdB == 2);
+            var agg21 = result.Single(r => r.AssetIdA == 2 && r.AssetIdB == 1);
+
+            Assert.That(agg12.Volume1H, Is.EqualTo(300));
+            Assert.That(agg12.Volume24H, Is.EqualTo(3000));
+            Assert.That(agg12.Volume7D, Is.EqualTo(30000));
+
+            Assert.That(agg21.Volume1H, Is.EqualTo(300));
+            Assert.That(agg21.Volume24H, Is.EqualTo(3000));
+            Assert.That(agg21.Volume7D, Is.EqualTo(30000));
+        }
     }
 }

@@ -100,6 +100,21 @@ namespace AVMTradeReporter.Models.Data
         /// </summary>
         public decimal? TotalTVLAssetBInUSD { get; set; }
         /// <summary>
+        /// 1 hour trading volume in USD.
+        /// </summary>
+        public decimal? Volume1H { get; set; }
+
+        /// <summary>
+        /// 24 hours trading volume in USD.
+        /// </summary>
+        public decimal? Volume24H { get; set; }
+
+        /// <summary>
+        /// 7 days trading volume in USD.
+        /// </summary>
+        public decimal? Volume7D { get; set; }
+
+        /// <summary>
         /// Aggregates pools by (AssetIdA, AssetIdB) and computes the sum of A and B.
         /// Pools missing asset ids or amounts are ignored or treated as zero respectively.
         /// </summary>
@@ -128,6 +143,9 @@ namespace AVMTradeReporter.Models.Data
                     VirtualSumBLevel1 = g.Sum(p => p.VirtualAmountB),
                     TotalTVLAssetAInUSD = g.Sum(p => p.TotalTVLAssetAInUSD ?? 0),
                     TotalTVLAssetBInUSD = g.Sum(p => p.TotalTVLAssetBInUSD ?? 0),
+                    Volume1H = g.Sum(p => p.Volume1H ?? 0),
+                    Volume24H = g.Sum(p => p.Volume24H ?? 0),
+                    Volume7D = g.Sum(p => p.Volume7D ?? 0),
                     TVL_A = g.Sum(p => p.RealAmountA),
                     TVL_B = g.Sum(p => p.RealAmountB),
                     PoolCount = g.Count(),
@@ -248,6 +266,9 @@ namespace AVMTradeReporter.Models.Data
                 Level2Pools = Level2Pools,
                 TotalTVLAssetAInUSD = TotalTVLAssetBInUSD,
                 TotalTVLAssetBInUSD = TotalTVLAssetAInUSD,
+                Volume1H = Volume1H,
+                Volume24H = Volume24H,
+                Volume7D = Volume7D,
             };
         }
     }
