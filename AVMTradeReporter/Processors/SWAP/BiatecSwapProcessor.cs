@@ -173,7 +173,7 @@ namespace AVMTradeReporter.Processors.SWAP
                     Timestamp = block == null ? DateTimeOffset.UtcNow : DateTimeOffset.FromUnixTimeSeconds(Convert.ToInt64(block?.Timestamp ?? 0)),
                     Protocol = DEXProtocol.Biatec,
                     PoolAddress = poolAddress.EncodeAsString(),
-                    PoolAppId = appCallTx.ApplicationId ?? 0,
+                    PoolAppId = appCallTx?.ApplicationId ?? 0,
                     TopTxId = topTxId,
                     Trader = trader.EncodeAsString(),
                     TradeState = tradeState,

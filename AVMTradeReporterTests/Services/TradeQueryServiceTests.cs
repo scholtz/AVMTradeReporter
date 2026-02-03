@@ -85,6 +85,17 @@ namespace AVMTradeReporterTests.Services
             Assert.That(result, Is.Not.Null);
             Assert.That(result.Count(), Is.EqualTo(0));
         }
+
+        [Test]
+        public async Task GetPoolVolumesAsync_WithoutElasticsearch_ReturnsEmptyDictionary()
+        {
+            // Act
+            var result = await _tradeQueryService.GetPoolVolumesAsync(new List<string> { "pool1" });
+
+            // Assert
+            Assert.That(result, Is.Not.Null);
+            Assert.That(result.Count, Is.EqualTo(0));
+        }
     }
 
     // Mock classes for testing

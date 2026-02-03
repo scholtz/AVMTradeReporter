@@ -90,7 +90,7 @@ namespace AVMTradeReporter.Services
                     // Fetch trades in the period
                     var searchResponse = await _elastic.SearchAsync<Trade>(s => s
                         .Indices("trades")
-                        .Size(10000) // Assume not too many trades per period
+                        .Size(100000) // Increased size to handle more trades per period
                         .Query(q => q
                             .Bool(b => b
                                 .Must(
@@ -121,7 +121,7 @@ namespace AVMTradeReporter.Services
                             volumes[poolAddress] = period.Key switch
                             {
                                 "1H" => (volume, current.Volume24H, current.Volume7D),
-                                "24H" => (current.Volume1H, volume, current.Volume7D),
+                                "24H" => (current.Volume1H, volume, current.Volume24H),
                                 "7D" => (current.Volume1H, current.Volume24H, volume),
                                 _ => current
                             };
@@ -176,3 +176,7 @@ namespace AVMTradeReporter.Services
         }
     }
 }
+
+
+
+

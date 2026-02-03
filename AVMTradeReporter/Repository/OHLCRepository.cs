@@ -147,7 +147,7 @@ namespace AVMTradeReporter.Repository
                 {
                     // For USD-valued series, keep volumeBase in base asset units, but express quote volume in USD.
                     var docIdUsd = $"{aId}-{bId}-{code}-usd-{bucketStart:yyyyMMddHHmmss}";
-                    var volumeUsd = trade.ValueUSD.Value;
+                    var volumeUsd = usdPrice.Value * volBase;
                     yield return new BucketSpec(code, bucketStart, docIdUsd, true, usdPrice.Value, volBase, volumeUsd, aId, bId);
                 }
             }

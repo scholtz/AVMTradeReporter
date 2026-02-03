@@ -66,7 +66,7 @@ namespace AVMTradeReporter.Services
             try
             {
                 var idx = TradeReporterBackgroundService.Indexer;
-                if (isNumber && idx?.Round >= number)
+                if (isNumber && idx != null && idx.Round >= number)
                 {
                     res.Blocks.Add(number);
                 }
@@ -80,7 +80,8 @@ namespace AVMTradeReporter.Services
             try
             {
                 var address = new Address(q);
-                if (address.EncodeAsString().Equals(q))
+                var encoded = address.EncodeAsString();
+                if (encoded != null && encoded.Equals(q))
                 {
                     res.Addresses.Add(q);
                 }
