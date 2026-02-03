@@ -13,6 +13,8 @@
     <PackageReference Include="AlgorandAuthentication" Version="2.1.1" />
     <PackageReference Include="Elastic.Clients.Elasticsearch" Version="9.2.2" />
     <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.22.1" />
+    <PackageReference Include="NLog" Version="6.1.0" />
+    <PackageReference Include="NLog.Web.AspNetCore" Version="6.1.1" />
     <PackageReference Include="StackExchange.Redis" Version="2.10.1" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="10.1.0" />
     <PackageReference Include="Swashbuckle.AspNetCore.Filters" Version="10.0.1" />

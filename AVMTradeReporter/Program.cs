@@ -12,6 +12,7 @@ using Elastic.Clients.Elasticsearch.Security;
 using Elastic.Transport;
 using Microsoft.Extensions.Options;
 using Microsoft.OpenApi;
+using NLog.Web;
 using StackExchange.Redis;
 using System.Text.Json.Serialization; // added for ReferenceHandler (kept in case future customization)
 
@@ -22,6 +23,8 @@ namespace AVMTradeReporter
         public static void Main(string[] args)
         {
             var builder = WebApplication.CreateBuilder(args);
+
+            builder.UseNLog();
 
             // Add services to the container.
             builder.Services.AddControllers();
