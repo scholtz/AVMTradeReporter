@@ -94,7 +94,7 @@ namespace AVMTradeReporter.Services
                         .Query(q => q
                             .Bool(b => b
                                 .Must(
-                                    m => m.Range(r => r.DateRange(dr => dr.Field(f => f.Timestamp).Gte(startTime.ToString("o")))),
+                                    m => m.Range(r => r.Date(dr => dr.Field(f => f.Timestamp).Gte(startTime.ToString("o")))),
                                     m => m.Terms(t => t.Field(f => f.PoolAddress).Terms(poolAddressSet.Select(p => FieldValue.String(p)).ToArray()))
                                 )
                             )
