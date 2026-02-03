@@ -85,7 +85,7 @@ namespace AVMTradeReporter.Repository
         {
             if (!trades.Any())
             {
-                _logger.LogDebug("No trades to store");
+                //_logger.LogDebug("No trades to store");
                 return false;
             }
 

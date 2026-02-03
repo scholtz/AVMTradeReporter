@@ -272,7 +272,7 @@ namespace AVMTradeReporter.Repository
                     {
                         var aggregatedPoolJson = JsonSerializer.Serialize(agg);
                         await _redisSubscriber.PublishAsync(RedisChannel.Literal(_appConfig.Redis.AggregatedPoolUpdateChannel), aggregatedPoolJson);
-                        _logger.LogDebug("Published aggregated pool update to Redis PubSub channel: {channel}", _appConfig.Redis.AggregatedPoolUpdateChannel);
+                        //_logger.LogDebug("Published aggregated pool update to Redis PubSub channel: {channel}", _appConfig.Redis.AggregatedPoolUpdateChannel);
                     }
                     catch (Exception ex)
                     {

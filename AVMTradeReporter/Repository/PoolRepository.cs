@@ -570,6 +570,10 @@ namespace AVMTradeReporter.Repository
                     }
                 }
 
+                existingPool.Volume1H += trade.ValueUSD ?? 0;
+                existingPool.Volume24H += trade.ValueUSD ?? 0;
+                existingPool.Volume7D += trade.ValueUSD ?? 0;
+
                 await StorePoolAsync(existingPool, true, cancellationToken);
 
                 _logger.LogDebug("Updated pool from trade: {poolAddress}_{poolAppId}_{protocol}",
@@ -920,38 +924,6 @@ namespace AVMTradeReporter.Repository
             };
         }
 
-        private async Task UpdatePoolVolumesAsync(CancellationToken cancellationToken)
-        {
-            try
-            {
-                var tradeQueryService = _serviceProvider.GetService<ITradeQueryService>();
-                if (tradeQueryService == null)
-                {
-                    _logger.LogWarning("TradeQueryService not available for volume updates");
-                    return;
-                }
-
-                var poolAddresses = _poolsCache.Keys.ToList();
-                var volumes = await tradeQueryService.GetPoolVolumesAsync(poolAddresses, cancellationToken);
-
-                foreach (var kv in volumes)
-                {
-                    if (_poolsCache.TryGetValue(kv.Key, out var pool))
-                    {
-                        pool.Volume1H = kv.Value.Volume1H;
-                        pool.Volume24H = kv.Value.Volume24H;
-                        pool.Volume7D = kv.Value.Volume7D;
-                        _poolsCache[kv.Key] = pool; // update cache
-                    }
-                }
-
-                _logger.LogInformation("Updated volumes for {count} pools", volumes.Count);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to update pool volumes");
-            }
-        }
         internal async Task UpdatePoolVolumesAsync(IEnumerable<string> poolAddresses, CancellationToken cancellationToken)
         {
             try
@@ -962,8 +934,9 @@ namespace AVMTradeReporter.Repository
                     _logger.LogWarning("TradeQueryService not available for volume updates");
                     return;
                 }
-
+                _logger.LogDebug("Updating volumes for {count} pools", poolAddresses.Count());
                 var volumes = await tradeQueryService.GetPoolVolumesAsync(poolAddresses, cancellationToken);
+                _logger.LogDebug("UpdatePoolVolumesAsync {volumes}", volumes);
 
                 foreach (var kv in volumes)
                 {
