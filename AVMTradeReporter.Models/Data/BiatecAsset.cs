@@ -23,5 +23,20 @@ namespace AVMTradeReporter.Model.Data
         /// This represents the total pool value including both the asset itself and the trusted tokens it's paired with.
         /// </summary>
         public decimal? TotalTVLAssetInUSD { get; set; }
+
+        /// <summary>
+        /// 1 hour trading volume in USD, summed from all aggregated pools involving this asset.
+        /// </summary>
+        public decimal Volume1H { get; set; }
+
+        /// <summary>
+        /// 24 hours trading volume in USD, summed from all aggregated pools involving this asset.
+        /// </summary>
+        public decimal Volume24H { get; set; }
+
+        /// <summary>
+        /// 7 days trading volume in USD, summed from all aggregated pools involving this asset.
+        /// </summary>
+        public decimal Volume7D { get; set; }
     }
 }

@@ -462,6 +462,34 @@ namespace AVMTradeReporter.Repository
                         changed = true;
                     }
 
+                    // Calculate volumes from all aggregated pools involving this asset
+                    decimal volume1H = _cache.Values
+                        .Where(p => p.AssetIdA == assetId || p.AssetIdB == assetId)
+                        .Sum(p => p.Volume1H ?? 0);
+                    decimal volume24H = _cache.Values
+                        .Where(p => p.AssetIdA == assetId || p.AssetIdB == assetId)
+                        .Sum(p => p.Volume24H ?? 0);
+                    decimal volume7D = _cache.Values
+                        .Where(p => p.AssetIdA == assetId || p.AssetIdB == assetId)
+                        .Sum(p => p.Volume7D ?? 0);
+
+                    // Set volumes
+                    if (volume1H != asset.Volume1H)
+                    {
+                        asset.Volume1H = volume1H;
+                        changed = true;
+                    }
+                    if (volume24H != asset.Volume24H)
+                    {
+                        asset.Volume24H = volume24H;
+                        changed = true;
+                    }
+                    if (volume7D != asset.Volume7D)
+                    {
+                        asset.Volume7D = volume7D;
+                        changed = true;
+                    }
+
                     if (changed)
                     {
                         asset.Timestamp = updatedPool.LastUpdated > asset.Timestamp ? updatedPool.LastUpdated : asset.Timestamp;
