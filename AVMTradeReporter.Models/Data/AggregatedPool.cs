@@ -102,17 +102,17 @@ namespace AVMTradeReporter.Models.Data
         /// <summary>
         /// 1 hour trading volume in USD.
         /// </summary>
-        public decimal Volume1H { get; set; } = 0;
+        public decimal? Volume1H { get; set; } = 0;
 
         /// <summary>
         /// 24 hours trading volume in USD.
         /// </summary>
-        public decimal Volume24H { get; set; } = 0;
+        public decimal? Volume24H { get; set; } = 0;
 
         /// <summary>
         /// 7 days trading volume in USD.
         /// </summary>
-        public decimal Volume7D { get; set; } = 0;
+        public decimal? Volume7D { get; set; } = 0;
 
         /// <summary>
         /// Aggregates pools by (AssetIdA, AssetIdB) and computes the sum of A and B.

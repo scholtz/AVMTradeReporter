@@ -465,13 +465,13 @@ namespace AVMTradeReporter.Repository
                     // Calculate volumes from all aggregated pools involving this asset
                     decimal volume1H = _cache.Values
                         .Where(p => p.AssetIdA == assetId || p.AssetIdB == assetId)
-                        .Sum(p => p.Volume1H);
+                        .Sum(p => p.Volume1H ?? 0);
                     decimal volume24H = _cache.Values
                         .Where(p => p.AssetIdA == assetId || p.AssetIdB == assetId)
-                        .Sum(p => p.Volume24H);
+                        .Sum(p => p.Volume24H ?? 0);
                     decimal volume7D = _cache.Values
                         .Where(p => p.AssetIdA == assetId || p.AssetIdB == assetId)
-                        .Sum(p => p.Volume7D);
+                        .Sum(p => p.Volume7D ?? 0);
 
                     // Set volumes
                     if (volume1H != asset.Volume1H)

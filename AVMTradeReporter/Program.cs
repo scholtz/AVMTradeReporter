@@ -211,14 +211,14 @@ namespace AVMTradeReporter
             {
                 if (context.Request.Path.StartsWithSegments("/biatecScanHub"))
                 {
-                    Console.WriteLine($"SignalR request: {context.Request.Method} {context.Request.Path}");
-                    Console.WriteLine($"Query: {context.Request.QueryString}");
+                    app.Logger.LogDebug($"SignalR request: {context.Request.Method} {context.Request.Path}");
+                    app.Logger.LogDebug($"Query: {context.Request.QueryString}");
 
                     // Check for access_token in query and move to Authorization header
                     if (context.Request.Query.ContainsKey("access_token"))
                     {
                         var accessToken = context.Request.Query["access_token"].ToString();
-                        Console.WriteLine($"Access token in query: {accessToken.Substring(0, Math.Min(30, accessToken.Length))}...");
+                        app.Logger.LogDebug($"Access token in query: {accessToken.Substring(0, Math.Min(30, accessToken.Length))}...");
 
                         // Move to Authorization header for our authentication handler
                         if (!context.Request.Headers.ContainsKey("Authorization"))
@@ -226,15 +226,15 @@ namespace AVMTradeReporter
                             // URL decode the token
                             var decodedToken = System.Web.HttpUtility.UrlDecode(accessToken);
                             context.Request.Headers["Authorization"] = decodedToken;
-                            Console.WriteLine($"Moved and decoded access_token to Authorization header: {decodedToken.Substring(0, Math.Min(30, decodedToken.Length))}...");
+                            app.Logger.LogDebug($"Moved and decoded access_token to Authorization header: {decodedToken.Substring(0, Math.Min(30, decodedToken.Length))}...");
                         }
                     }
 
                     // Debug: Show all headers
-                    Console.WriteLine("Request Headers:");
+                    app.Logger.LogDebug("Request Headers:");
                     foreach (var header in context.Request.Headers)
                     {
-                        Console.WriteLine($"  {header.Key}: {header.Value}");
+                        app.Logger.LogDebug($"  {header.Key}: {header.Value}");
                     }
                 }
 
@@ -242,16 +242,16 @@ namespace AVMTradeReporter
 
                 if (context.Request.Path.StartsWithSegments("/biatecScanHub"))
                 {
-                    Console.WriteLine($"Response status: {context.Response.StatusCode}");
+                    app.Logger.LogDebug($"Response status: {context.Response.StatusCode}");
                     if (context.User?.Identity != null)
                     {
-                        Console.WriteLine($"User authenticated: {context.User.Identity.IsAuthenticated}, Name: '{context.User.Identity.Name}'");
+                        app.Logger.LogDebug($"User authenticated: {context.User.Identity.IsAuthenticated}, Name: '{context.User.Identity.Name}'");
                         if (context.User.Claims != null)
                         {
-                            Console.WriteLine("User Claims:");
+                            app.Logger.LogDebug("User Claims:");
                             foreach (var claim in context.User.Claims)
                             {
-                                Console.WriteLine($"  {claim.Type}: {claim.Value}");
+                                app.Logger.LogDebug($"  {claim.Type}: {claim.Value}");
                             }
                         }
                     }
