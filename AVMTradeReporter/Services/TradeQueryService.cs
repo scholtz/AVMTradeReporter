@@ -103,6 +103,7 @@ namespace AVMTradeReporter.Services
 
                     if (searchResponse.IsValidResponse)
                     {
+                        _logger.LogDebug("Fetched {Count} trades for period {Period}", searchResponse.Documents.Count, period.Key);
                         var tradesInPeriod = searchResponse.Documents.Where(t => t.ValueUSD.HasValue);
                         var grouped = tradesInPeriod.GroupBy(t => t.PoolAddress)
                             .ToDictionary(g => g.Key, g => g.Sum(t => t.ValueUSD!.Value));
