@@ -183,16 +183,3 @@ namespace AVMTradeReporter.Services
         }
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
