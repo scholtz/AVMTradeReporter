@@ -93,7 +93,7 @@ namespace AVMTradeReporter.Services
                     // Fetch trades in the period
                     var searchResponse = await _elastic.SearchAsync<Trade>(s => s
                         .Indices("trades")
-                        .Size(100000) // Increased size to handle more trades per period
+                        .Size(200000) // Increased size to handle more trades per period
                         .Query(q => q
                             .Bool(b => b
                                 .Must(
