@@ -86,6 +86,8 @@ namespace AVMTradeReporter.Services
             {
                 var startTime = now.AddHours(-period.Hours);
 
+                _logger.LogDebug("now: {now}, startTime for {period}: {startTime}", now, period.Key, startTime);
+
                 try
                 {
                     // Fetch trades in the period
@@ -96,8 +98,8 @@ namespace AVMTradeReporter.Services
                             .Bool(b => b
                                 .Must(
                                     m => m.Range(r => r.Date(dr => dr.Field(f => f.Timestamp).Gte(startTime.ToString("o")))),
-                                    m => m.Terms(t => t.Field(f => f.PoolAddress).Terms(poolAddressSet.Select(p => FieldValue.String(p)).ToArray())),
-                                    m => m.Term(t => t.Field(f => f.TradeState).Value(FieldValue.String("Confirmed")))
+                                    m => m.Terms(t => t.Field("poolAddress.keyword").Terms(poolAddressSet.Select(p => FieldValue.String(p)).ToArray())),
+                                    m => m.Term(t => t.Field("tradeState.keyword").Value(FieldValue.String("Confirmed")))
                                 )
                             )
                         ),
