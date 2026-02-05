@@ -161,6 +161,7 @@ namespace AVMTradeReporter.Repository
                         if (successCount > 0)
                         {
                             var successfulTrades = new List<Trade>();
+                            var newlyCreatedTrades = new List<Trade>();
                             var bulkResponseItems = bulkResponse.Items.ToList();
 
                             for (int i = 0; i < trades.Length && i < bulkResponseItems.Count; i++)
@@ -168,18 +169,33 @@ namespace AVMTradeReporter.Repository
                                 if (bulkResponseItems[i].IsValid)
                                 {
                                     successfulTrades.Add(trades[i]);
+                                    if (bulkResponseItems[i].Result == "created")
+                                    {
+                                        newlyCreatedTrades.Add(trades[i]);
+                                    }
                                 }
                             }
 
-                            // Update pools and OHLC from confirmed trades in background
+                            // Update pools from all confirmed trades in background
                             _ = Task.Run(async () =>
                             {
                                 foreach (var trade in successfulTrades)
                                 {
                                     await _poolRepository.UpdatePoolFromTrade(trade, cancellationToken);
-                                    await _ohlcRepository.UpdateFromTradeAsync(trade, cancellationToken);
                                 }
                             }, cancellationToken);
+
+                            // Update OHLC only for newly created trades to prevent double counting
+                            if (newlyCreatedTrades.Any())
+                            {
+                                _ = Task.Run(async () =>
+                                {
+                                    foreach (var trade in newlyCreatedTrades)
+                                    {
+                                        await _ohlcRepository.UpdateFromTradeAsync(trade, cancellationToken);
+                                    }
+                                }, cancellationToken);
+                            }
                         }
 
                         return true;
