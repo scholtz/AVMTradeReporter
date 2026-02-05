@@ -81,7 +81,7 @@ namespace AVMTradeReporter.Repository
         {
             if (!items.Any())
             {
-                _logger.LogDebug("No items to store");
+                //_logger.LogDebug("No items to store");
                 return false;
             }
 

@@ -27,16 +27,16 @@ namespace AVMTradeReporter.Model.Data
         /// <summary>
         /// 1 hour trading volume in USD, summed from all aggregated pools involving this asset.
         /// </summary>
-        public decimal Volume1H { get; set; }
+        public decimal? Volume1H { get; set; } = 0;
 
         /// <summary>
         /// 24 hours trading volume in USD, summed from all aggregated pools involving this asset.
         /// </summary>
-        public decimal Volume24H { get; set; }
+        public decimal? Volume24H { get; set; } = 0;
 
         /// <summary>
         /// 7 days trading volume in USD, summed from all aggregated pools involving this asset.
         /// </summary>
-        public decimal Volume7D { get; set; }
+        public decimal? Volume7D { get; set; } = 0;
     }
 }

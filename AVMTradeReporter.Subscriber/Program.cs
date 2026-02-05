@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Collections.Concurrent;
 using System.IO; // added for optional seed file
 using System.Linq; // for Take()
+using Microsoft.Extensions.Logging;
 
 namespace AVMTradeReporter.Subscriber;
 
@@ -11,9 +12,12 @@ class Program
 {
     static async Task Main(string[] args)
     {
-        Console.WriteLine("AVM Trade Reporter - Redis PubSub Subscriber");
-        Console.WriteLine("=============================================");
-        Console.WriteLine();
+        using var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
+        ILogger logger = loggerFactory.CreateLogger<Program>();
+
+        logger.LogDebug("AVM Trade Reporter - Redis PubSub Subscriber");
+        logger.LogDebug("=============================================");
+        logger.LogDebug("");
 
         // Configuration - can be overridden via command line arguments or environment variables
         var redisConnectionString = Environment.GetEnvironmentVariable("REDIS_CONNECTION") ?? "localhost:6379";
@@ -27,14 +31,14 @@ class Program
         var seedAggregatedFile = Environment.GetEnvironmentVariable("SEED_AGGREGATED_POOLS_FILE") ?? string.Empty; // optional JSON array of AggregatedPool
         var enableSeeding = (Environment.GetEnvironmentVariable("ENABLE_REDIS_SEEDING") ?? "false").Equals("true", StringComparison.OrdinalIgnoreCase);
 
-        Console.WriteLine($"Connecting to Redis at: {redisConnectionString}");
-        Console.WriteLine($"Redis DB Id: {redisDbId}");
-        Console.WriteLine($"Pool updates channel: {poolChannel}");
-        Console.WriteLine($"Aggregated pool updates channel: {aggregatedPoolChannel}");
-        Console.WriteLine($"Pool key prefix: {poolKeyPrefix}");
-        Console.WriteLine($"Aggregated pool key prefix: {aggregatedPoolKeyPrefix}");
-        Console.WriteLine($"Enable seeding: {enableSeeding}");
-        Console.WriteLine();
+        logger.LogDebug($"Connecting to Redis at: {redisConnectionString}");
+        logger.LogDebug($"Redis DB Id: {redisDbId}");
+        logger.LogDebug($"Pool updates channel: {poolChannel}");
+        logger.LogDebug($"Aggregated pool updates channel: {aggregatedPoolChannel}");
+        logger.LogDebug($"Pool key prefix: {poolKeyPrefix}");
+        logger.LogDebug($"Aggregated pool key prefix: {aggregatedPoolKeyPrefix}");
+        logger.LogDebug($"Enable seeding: {enableSeeding}");
+        logger.LogDebug("");
 
         try
         {
@@ -47,8 +51,8 @@ class Program
             var subscriber = redis.GetSubscriber();
             var db = redis.GetDatabase(redisDbId);
 
-            Console.WriteLine("Connected to Redis successfully!");
-            Console.WriteLine();
+            logger.LogDebug("Connected to Redis successfully!");
+            logger.LogDebug("");
 
             // Preload existing pools from Redis (if keys exist)
             var preloadPools = new List<Pool>();
@@ -61,17 +65,17 @@ class Program
                 {
                     var server = redis.GetServer(endpoints[0]);
                     // Load Pools using index set if available
-                    Console.WriteLine("Preloading pools from Redis...");
+                    logger.LogDebug("Preloading pools from Redis...");
                     int poolCounter = 0;
                     var poolIndexKey = poolKeyPrefix + "index";
                     
-                    Console.WriteLine($"Checking for pool index at key: {poolIndexKey}");
+                    logger.LogDebug($"Checking for pool index at key: {poolIndexKey}");
                     
                     if (await db.KeyExistsAsync(poolIndexKey))
                     {
-                        Console.WriteLine($"Pool index found at {poolIndexKey}");
+                        logger.LogDebug($"Pool index found at {poolIndexKey}");
                         var members = await db.SetMembersAsync(poolIndexKey);
-                        Console.WriteLine($"Pool index contains {members.Length} members");
+                        logger.LogDebug($"Pool index contains {members.Length} members");
                         
                         foreach (var member in members)
                         {
@@ -90,22 +94,18 @@ class Program
                                 }
                                 else
                                 {
-                                    Console.ForegroundColor = ConsoleColor.Yellow;
-                                    Console.WriteLine($"  Pool key {redisKey} in index but has no value");
-                                    Console.ResetColor();
+                                    logger.LogDebug($"  Pool key {redisKey} in index but has no value");
                                 }
                             }
                             catch (Exception ex)
                             {
-                                Console.ForegroundColor = ConsoleColor.DarkRed;
-                                Console.WriteLine($"  Failed to deserialize pool key {member}: {ex.Message}");
-                                Console.ResetColor();
+                                logger.LogDebug($"  Failed to deserialize pool key {member}: {ex.Message}");
                             }
                         }
                     }
                     else
                     {
-                        Console.WriteLine($"No pool index found at {poolIndexKey}, trying key scan...");
+                        logger.LogDebug($"No pool index found at {poolIndexKey}, trying key scan...");
                         int scannedKeys = 0;
                         foreach (var key in server.Keys(pattern: poolKeyPrefix + "*", database: redisDbId))
                         {
@@ -127,19 +127,17 @@ class Program
                             }
                             catch (Exception ex)
                             {
-                                Console.ForegroundColor = ConsoleColor.DarkRed;
-                                Console.WriteLine($"  Failed to deserialize pool key {key}: {ex.Message}");
-                                Console.ResetColor();
+                                logger.LogDebug($"  Failed to deserialize pool key {key}: {ex.Message}");
                             }
                         }
-                        Console.WriteLine($"Scanned {scannedKeys} keys matching pattern {poolKeyPrefix}*");
+                        logger.LogDebug($"Scanned {scannedKeys} keys matching pattern {poolKeyPrefix}*");
                     }
-                    Console.WriteLine($"Loaded {poolCounter} pools from Redis.");
+                    logger.LogDebug($"Loaded {poolCounter} pools from Redis.");
 
                     // Optional seeding if no pools loaded
                     if (poolCounter == 0 && enableSeeding && File.Exists(seedPoolsFile))
                     {
-                        Console.WriteLine($"Seeding pools from file: {seedPoolsFile}");
+                        logger.LogDebug($"Seeding pools from file: {seedPoolsFile}");
                         try
                         {
                             var json = await File.ReadAllTextAsync(seedPoolsFile);
@@ -153,18 +151,16 @@ class Program
                                 preloadPools.Add(p);
                             }
                             poolCounter = preloadPools.Count;
-                            Console.WriteLine($"Seeded {poolCounter} pools.");
+                            logger.LogDebug($"Seeded {poolCounter} pools.");
                         }
                         catch (Exception ex)
                         {
-                            Console.ForegroundColor = ConsoleColor.Red;
-                            Console.WriteLine($"Failed to seed pools: {ex.Message}");
-                            Console.ResetColor();
+                            logger.LogDebug($"Failed to seed pools: {ex.Message}");
                         }
                     }
 
                     // Load Aggregated Pools using index set if available
-                    Console.WriteLine("Preloading aggregated pools from Redis (if any)...");
+                    logger.LogDebug("Preloading aggregated pools from Redis (if any)...");
                     int aggCounter = 0;
                     var aggIndexKey = aggregatedPoolKeyPrefix + "index";
                     if (await db.KeyExistsAsync(aggIndexKey))
@@ -188,9 +184,7 @@ class Program
                             }
                             catch (Exception ex)
                             {
-                                Console.ForegroundColor = ConsoleColor.DarkRed;
-                                Console.WriteLine($"  Failed to deserialize aggregated pool key {member}: {ex.Message}");
-                                Console.ResetColor();
+                                logger.LogDebug($"  Failed to deserialize aggregated pool key {member}: {ex.Message}");
                             }
                         }
                     }
@@ -214,17 +208,15 @@ class Program
                             }
                             catch (Exception ex)
                             {
-                                Console.ForegroundColor = ConsoleColor.DarkRed;
-                                Console.WriteLine($"  Failed to deserialize aggregated pool key {key}: {ex.Message}");
-                                Console.ResetColor();
+                                logger.LogDebug($"  Failed to deserialize aggregated pool key {key}: {ex.Message}");
                             }
                         }
                     }
-                    Console.WriteLine($"Loaded {aggCounter} aggregated pools from Redis.");
+                    logger.LogDebug($"Loaded {aggCounter} aggregated pools from Redis.");
 
                     if (aggCounter == 0 && enableSeeding && !string.IsNullOrEmpty(seedAggregatedFile) && File.Exists(seedAggregatedFile))
                     {
-                        Console.WriteLine($"Seeding aggregated pools from file: {seedAggregatedFile}");
+                        logger.LogDebug($"Seeding aggregated pools from file: {seedAggregatedFile}");
                         try
                         {
                             var json = await File.ReadAllTextAsync(seedAggregatedFile);
@@ -238,48 +230,44 @@ class Program
                                 preloadAggregatedPools.Add(ap);
                             }
                             aggCounter = preloadAggregatedPools.Count;
-                            Console.WriteLine($"Seeded {aggCounter} aggregated pools.");
+                            logger.LogDebug($"Seeded {aggCounter} aggregated pools.");
                         }
                         catch (Exception ex)
                         {
-                            Console.ForegroundColor = ConsoleColor.Red;
-                            Console.WriteLine($"Failed to seed aggregated pools: {ex.Message}");
-                            Console.ResetColor();
+                            logger.LogDebug($"Failed to seed aggregated pools: {ex.Message}");
                         }
                     }
 
-                    Console.WriteLine();
+                    logger.LogDebug("");
 
                     // Optional summary output (limit to first 5 to avoid spam)
                     if (poolCounter > 0)
                     {
-                        Console.WriteLine("Sample preloaded pools (up to 5):");
+                        logger.LogDebug("Sample preloaded pools (up to 5):");
                         foreach (var p in preloadPools.Take(5))
                         {
-                            Console.WriteLine($"  {p.PoolAddress} | {p.AssetIdA}-{p.AssetIdB} | Protocol={p.Protocol} | RealA={p.RealAmountA:F4} RealB={p.RealAmountB:F4}");
+                            logger.LogDebug($"  {p.PoolAddress} | {p.AssetIdA}-{p.AssetIdB} | Protocol={p.Protocol} | RealA={p.RealAmountA:F4} RealB={p.RealAmountB:F4}");
                         }
-                        Console.WriteLine();
+                        logger.LogDebug("");
                     }
                     if (aggCounter > 0)
                     {
-                        Console.WriteLine("Sample preloaded aggregated pools (up to 5):");
+                        logger.LogDebug("Sample preloaded aggregated pools (up to 5):");
                         foreach (var ap in preloadAggregatedPools.Take(5))
                         {
-                            Console.WriteLine($"  {ap.AssetIdA}-{ap.AssetIdB} | Pools={ap.PoolCount} | VSumA(L1)={ap.VirtualSumALevel1:F4} VSumB(L1)={ap.VirtualSumBLevel1:F4}");
+                            logger.LogDebug($"  {ap.AssetIdA}-{ap.AssetIdB} | Pools={ap.PoolCount} | VSumA(L1)={ap.VirtualSumALevel1:F4} VSumB(L1)={ap.VirtualSumBLevel1:F4}");
                         }
-                        Console.WriteLine();
+                        logger.LogDebug("");
                     }
                 }
                 else
                 {
-                    Console.WriteLine("No Redis endpoints found to scan keys.");
+                    logger.LogDebug("No Redis endpoints found to scan keys.");
                 }
             }
             catch (Exception ex)
             {
-                Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine($"Warning: Failed to preload pools from Redis: {ex.Message}");
-                Console.ResetColor();
+                logger.LogDebug($"Warning: Failed to preload pools from Redis: {ex.Message}");
             }
 
             // Subscribe to pool updates
@@ -290,34 +278,30 @@ class Program
                     var pool = JsonSerializer.Deserialize<Pool>((string)message!);
                     if (pool != null)
                     {
-                        Console.ForegroundColor = ConsoleColor.Green;
-                        Console.WriteLine($"[{DateTime.UtcNow:HH:mm:ss.fff}] POOL UPDATE:");
-                        Console.ResetColor();
-                        Console.WriteLine($"  Pool Address: {pool.PoolAddress}");
-                        Console.WriteLine($"  Pool App ID:  {pool.PoolAppId}");
-                        Console.WriteLine($"  Protocol:     {pool.Protocol}");
-                        Console.WriteLine($"  Asset A ID:   {pool.AssetIdA}");
-                        Console.WriteLine($"  Asset B ID:   {pool.AssetIdB}");
-                        Console.WriteLine($"  Real Amount A: {pool.RealAmountA:F6}");
-                        Console.WriteLine($"  Real Amount B: {pool.RealAmountB:F6}");
-                        Console.WriteLine($"  Virtual Amount A: {pool.VirtualAmountA:F6}");
-                        Console.WriteLine($"  Virtual Amount B: {pool.VirtualAmountB:F6}");
+                        logger.LogDebug($"[{DateTime.UtcNow:HH:mm:ss.fff}] POOL UPDATE:");
+                        logger.LogDebug($"  Pool Address: {pool.PoolAddress}");
+                        logger.LogDebug($"  Pool App ID:  {pool.PoolAppId}");
+                        logger.LogDebug($"  Protocol:     {pool.Protocol}");
+                        logger.LogDebug($"  Asset A ID:   {pool.AssetIdA}");
+                        logger.LogDebug($"  Asset B ID:   {pool.AssetIdB}");
+                        logger.LogDebug($"  Real Amount A: {pool.RealAmountA:F6}");
+                        logger.LogDebug($"  Real Amount B: {pool.RealAmountB:F6}");
+                        logger.LogDebug($"  Virtual Amount A: {pool.VirtualAmountA:F6}");
+                        logger.LogDebug($"  Virtual Amount B: {pool.VirtualAmountB:F6}");
                         if (pool.Timestamp.HasValue)
                         {
-                            Console.WriteLine($"  Timestamp:    {pool.Timestamp.Value:yyyy-MM-dd HH:mm:ss UTC}");
+                            logger.LogDebug($"  Timestamp:    {pool.Timestamp.Value:yyyy-MM-dd HH:mm:ss UTC}");
                         }
-                        Console.WriteLine();
+                        logger.LogDebug("");
                     }
                 }
                 catch (Exception ex)
                 {
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine($"Error processing pool update: {ex.Message}");
-                    Console.ResetColor();
+                    logger.LogDebug($"Error processing pool update: {ex.Message}");
                 }
             });
 
-            Console.WriteLine($"Subscribed to pool updates on channel: {poolChannel}");
+            logger.LogDebug($"Subscribed to pool updates on channel: {poolChannel}");
 
             // Subscribe to aggregated pool updates
             await subscriber.SubscribeAsync(RedisChannel.Literal(aggregatedPoolChannel), (channel, message) =>
@@ -327,39 +311,35 @@ class Program
                     var aggregatedPool = JsonSerializer.Deserialize<AggregatedPool>((string)message!);
                     if (aggregatedPool != null)
                     {
-                        Console.ForegroundColor = ConsoleColor.Cyan;
-                        Console.WriteLine($"[{DateTime.UtcNow:HH:mm:ss.fff}] AGGREGATED POOL UPDATE:");
-                        Console.ResetColor();
-                        Console.WriteLine($"  Asset Pair:   {aggregatedPool.AssetIdA} - {aggregatedPool.AssetIdB}");
-                        Console.WriteLine($"  Pool Count:   {aggregatedPool.PoolCount}");
-                        Console.WriteLine($"  Virtual Sum A (Level 1): {aggregatedPool.VirtualSumALevel1:F6}");
-                        Console.WriteLine($"  Virtual Sum B (Level 1): {aggregatedPool.VirtualSumBLevel1:F6}");
-                        Console.WriteLine($"  Virtual Sum A (Level 2): {aggregatedPool.VirtualSumALevel2:F6}");
-                        Console.WriteLine($"  Virtual Sum B (Level 2): {aggregatedPool.VirtualSumBLevel2:F6}");
-                        Console.WriteLine($"  Total Virtual A: {aggregatedPool.VirtualSumA:F6}");
-                        Console.WriteLine($"  Total Virtual B: {aggregatedPool.VirtualSumB:F6}");
-                        Console.WriteLine($"  TVL A:        {aggregatedPool.TVL_A:F6}");
-                        Console.WriteLine($"  TVL B:        {aggregatedPool.TVL_B:F6}");
+                        logger.LogDebug($"[{DateTime.UtcNow:HH:mm:ss.fff}] AGGREGATED POOL UPDATE:");
+                        logger.LogDebug($"  Asset Pair:   {aggregatedPool.AssetIdA} - {aggregatedPool.AssetIdB}");
+                        logger.LogDebug($"  Pool Count:   {aggregatedPool.PoolCount}");
+                        logger.LogDebug($"  Virtual Sum A (Level 1): {aggregatedPool.VirtualSumALevel1:F6}");
+                        logger.LogDebug($"  Virtual Sum B (Level 1): {aggregatedPool.VirtualSumBLevel1:F6}");
+                        logger.LogDebug($"  Virtual Sum A (Level 2): {aggregatedPool.VirtualSumALevel2:F6}");
+                        logger.LogDebug($"  Virtual Sum B (Level 2): {aggregatedPool.VirtualSumBLevel2:F6}");
+                        logger.LogDebug($"  Total Virtual A: {aggregatedPool.VirtualSumA:F6}");
+                        logger.LogDebug($"  Total Virtual B: {aggregatedPool.VirtualSumB:F6}");
+                        logger.LogDebug($"  TVL A:        {aggregatedPool.TVL_A:F6}");
+                        logger.LogDebug($"  TVL B:        {aggregatedPool.TVL_B:F6}");
                         if (aggregatedPool.LastUpdated.HasValue)
                         {
-                            Console.WriteLine($"  Last Updated: {aggregatedPool.LastUpdated.Value:yyyy-MM-dd HH:mm:ss UTC}");
+                            logger.LogDebug($"  Last Updated: {aggregatedPool.LastUpdated.Value:yyyy-MM-dd HH:mm:ss UTC}");
                         }
-                        Console.WriteLine();
+                        logger.LogDebug("");
                     }
                 }
                 catch (Exception ex)
                 {
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine($"Error processing aggregated pool update: {ex.Message}");
-                    Console.ResetColor();
+                    logger.LogDebug($"Error processing aggregated pool update: {ex.Message}");
                 }
             });
 
-            Console.WriteLine($"Subscribed to aggregated pool updates on channel: {aggregatedPoolChannel}");
-            Console.WriteLine();
-            Console.WriteLine("Listening for updates... Press Ctrl+C to exit.");
-            Console.WriteLine();
-
+            logger.LogDebug($"Subscribed to aggregated pool updates on channel: {aggregatedPoolChannel}");
+            logger.LogDebug("");
+            logger.LogDebug("Listening for updates... Press Ctrl+C to exit.");
+            logger.LogDebug("");
+ 
             // Keep the application running
             var cts = new CancellationTokenSource();
             Console.CancelKeyPress += (sender, e) =>
@@ -372,15 +352,13 @@ class Program
         }
         catch (OperationCanceledException)
         {
-            Console.WriteLine();
-            Console.WriteLine("Shutting down gracefully...");
+            logger.LogDebug("");
+            logger.LogDebug("Shutting down gracefully...");
         }
         catch (Exception ex)
         {
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine($"Fatal error: {ex.Message}");
-            Console.WriteLine($"Stack trace: {ex.StackTrace}");
-            Console.ResetColor();
+            logger.LogDebug($"Fatal error: {ex.Message}");
+            logger.LogDebug($"Stack trace: {ex.StackTrace}");
             Environment.Exit(1);
         }
     }

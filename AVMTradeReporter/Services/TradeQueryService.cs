@@ -1,5 +1,6 @@
 using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Models.Data;
+using AVMTradeReporter.Models.Data.Enums;
 using Elastic.Clients.Elasticsearch;
 using static Elastic.Clients.Elasticsearch.Field;
 
@@ -85,17 +86,20 @@ namespace AVMTradeReporter.Services
             {
                 var startTime = now.AddHours(-period.Hours);
 
+                _logger.LogDebug("now: {now}, startTime for {period}: {startTime}", now, period.Key, startTime);
+
                 try
                 {
                     // Fetch trades in the period
                     var searchResponse = await _elastic.SearchAsync<Trade>(s => s
                         .Indices("trades")
-                        .Size(100000) // Increased size to handle more trades per period
+                        .Size(200000) // Increased size to handle more trades per period
                         .Query(q => q
                             .Bool(b => b
                                 .Must(
                                     m => m.Range(r => r.Date(dr => dr.Field(f => f.Timestamp).Gte(startTime.ToString("o")))),
-                                    m => m.Terms(t => t.Field(f => f.PoolAddress).Terms(poolAddressSet.Select(p => FieldValue.String(p)).ToArray()))
+                                    m => m.Terms(t => t.Field("poolAddress.keyword").Terms(poolAddressSet.Select(p => FieldValue.String(p)).ToArray())),
+                                    m => m.Term(t => t.Field("tradeState.keyword").Value(FieldValue.String("Confirmed")))
                                 )
                             )
                         ),
@@ -103,6 +107,11 @@ namespace AVMTradeReporter.Services
 
                     if (searchResponse.IsValidResponse)
                     {
+                        _logger.LogDebug("Fetched {Count} trades for period {Period} for {poolAddressSetCount} pools", searchResponse.Documents.Count, period.Key, poolAddressSet.Count);
+                        if (poolAddressSet.Count < 10)
+                        {
+                            _logger.LogDebug("poolAddressSet: {Trades}", string.Join(", ", poolAddressSet));
+                        }
                         var tradesInPeriod = searchResponse.Documents.Where(t => t.ValueUSD.HasValue);
                         var grouped = tradesInPeriod.GroupBy(t => t.PoolAddress)
                             .ToDictionary(g => g.Key, g => g.Sum(t => t.ValueUSD!.Value));
@@ -176,7 +185,3 @@ namespace AVMTradeReporter.Services
         }
     }
 }
-
-
-
-
