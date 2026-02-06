@@ -13,6 +13,7 @@ using StackExchange.Redis;
 using System.Collections.Concurrent;
 using System.Text.Json;
 using AVMTradeReporter.Services;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace AVMTradeReporter.Repository
 {
@@ -25,7 +26,7 @@ namespace AVMTradeReporter.Repository
         private readonly IDatabase? _redisDatabase;
         private readonly AppConfiguration _appConfig;
         private readonly ISubscriber? _redisSubscriber; // cached Redis subscriber
-        private readonly IOHLCService? _ohlcService;
+        private readonly IServiceProvider _serviceProvider;
 
         private static readonly ConcurrentDictionary<(ulong A, ulong B), AggregatedPool> _cache = new();
 
@@ -34,9 +35,10 @@ namespace AVMTradeReporter.Repository
             ILogger<AggregatedPoolRepository> logger,
             IHubContext<BiatecScanHub> hubContext,
             IOptions<AppConfiguration> appConfig,
+            IServiceProvider serviceProvider,
             IDatabase? redisDatabase = null,
-            IAssetRepository? assetRepository = null,
-            IOHLCService? ohlcService = null)
+            IAssetRepository? assetRepository = null
+)
         {
             _elasticClient = elasticClient;
             _logger = logger;
@@ -45,7 +47,7 @@ namespace AVMTradeReporter.Repository
             _redisDatabase = redisDatabase;
             _appConfig = appConfig.Value;
             _redisSubscriber = _redisDatabase?.Multiplexer.GetSubscriber();
-            _ohlcService = ohlcService;
+            _serviceProvider = serviceProvider;
 
             CreateIndexTemplateAsync().Wait();
         }
@@ -387,11 +389,13 @@ namespace AVMTradeReporter.Repository
                     priceCache[assetId] = asset.PriceUSD;
 
                     // Set historical prices
-                    if (_ohlcService != null)
+                    var ohlcService = _serviceProvider.GetService<IOHLCService>();
+                    
+                    if (ohlcService != null)
                     {
-                        asset.PriceUSD1H = await _ohlcService.GetHistoricalPriceAsync(assetId, TimeSpan.FromHours(1), cancellationToken);
-                        asset.PriceUSD24H = await _ohlcService.GetHistoricalPriceAsync(assetId, TimeSpan.FromHours(24), cancellationToken);
-                        asset.PriceUSD7D = await _ohlcService.GetHistoricalPriceAsync(assetId, TimeSpan.FromDays(7), cancellationToken);
+                        asset.PriceUSD1H = await ohlcService.GetHistoricalPriceAsync(assetId, TimeSpan.FromHours(1), cancellationToken);
+                        asset.PriceUSD24H = await ohlcService.GetHistoricalPriceAsync(assetId, TimeSpan.FromHours(24), cancellationToken);
+                        asset.PriceUSD7D = await ohlcService.GetHistoricalPriceAsync(assetId, TimeSpan.FromDays(7), cancellationToken);
                     }
 
                     // Calculate Real TVL (TVL_USD) and Total TVL (TotalTVLAssetInUSD)
