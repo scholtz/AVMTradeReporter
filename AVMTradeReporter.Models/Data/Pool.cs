@@ -160,7 +160,8 @@ namespace AVMTradeReporter.Models.Data
         {
             get
             {
-
+                if (!A.HasValue) return 0;
+                if (!B.HasValue) return 0;
                 if (A.Value == 0 || B.Value == 0) return 0;
                 return VirtualAmountA;
             }
@@ -269,6 +270,8 @@ namespace AVMTradeReporter.Models.Data
         {
             get
             {
+                if (!A.HasValue) return 0;
+                if (!B.HasValue) return 0;
 
                 if (A.Value == 0 || B.Value == 0) return 0;
                 return VirtualAmountB;
