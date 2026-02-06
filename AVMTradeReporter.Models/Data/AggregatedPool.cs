@@ -34,6 +34,17 @@ namespace AVMTradeReporter.Models.Data
         /// Total aggregated amount of asset B across all pools with this pair.
         /// </summary>
         public decimal VirtualSumBLevel1 { get; set; }
+        /// <summary>
+        /// Total aggregated amount of asset A across all pools with this pair form virtual pool amount.
+        /// Do not count empty pools for price calculation to avoid price manipulation by creating empty pools. Only count pools with virtual amounts for price calculation.
+        /// </summary>
+        public decimal? VirtualSumALevel1ForPrice { get; set; } = 0;
+
+        /// <summary>
+        /// Total aggregated amount of asset B across all pools with this pair.
+        /// Do not count empty pools for price calculation to avoid price manipulation by creating empty pools. Only count pools with virtual amounts for price calculation.
+        /// </summary>
+        public decimal? VirtualSumBLevel1ForPrice { get; set; } = 0;
 
 
         /// <summary>
@@ -140,7 +151,9 @@ namespace AVMTradeReporter.Models.Data
                     AssetIdA = g.Key.A,
                     AssetIdB = g.Key.B,
                     VirtualSumALevel1 = g.Sum(p => p.VirtualAmountA),
+                    VirtualSumALevel2 = g.Sum(p => p.VirtualAmountAForPrice),
                     VirtualSumBLevel1 = g.Sum(p => p.VirtualAmountB),
+                    VirtualSumBLevel2 = g.Sum(p => p.VirtualAmountBForPrice),
                     TotalTVLAssetAInUSD = g.Sum(p => p.TotalTVLAssetAInUSD ?? 0),
                     TotalTVLAssetBInUSD = g.Sum(p => p.TotalTVLAssetBInUSD ?? 0),
                     Volume1H = g.Sum(p => p.Volume1H),
@@ -258,6 +271,8 @@ namespace AVMTradeReporter.Models.Data
                 VirtualSumBLevel1 = VirtualSumALevel1,
                 VirtualSumALevel2 = VirtualSumBLevel2,
                 VirtualSumBLevel2 = VirtualSumALevel2,
+                VirtualSumALevel1ForPrice = VirtualSumBLevel1ForPrice,
+                VirtualSumBLevel1ForPrice = VirtualSumALevel1ForPrice,
                 TVL_A = TVL_B,
                 TVL_B = TVL_A,
                 PoolCount = PoolCount,

@@ -82,6 +82,7 @@ namespace AVMTradeReporter.Models.Data
                         // calculate virtual amount for concentrated liquidity AMM
                         if (PMin.HasValue && PMax.HasValue && A.HasValue && B.HasValue)
                         {
+
                             if (PMin == PMax)
                             {
                                 // special case when PMin == PMax, we can calculate the virtual amount directly
@@ -154,6 +155,16 @@ namespace AVMTradeReporter.Models.Data
                 }
             }
         }
+        // Virtual amount for price calculation, for concentrated liquidity AMM, we need to use virtual amount to calculate the price, because the price is not linear with the real amount, for stable swap, we can use real amount for price calculation, because the price is always 1:1
+        public decimal VirtualAmountAForPrice
+        {
+            get
+            {
+
+                if (A.Value == 0 || B.Value == 0) return 0;
+                return VirtualAmountA;
+            }
+        }
         public decimal RealAmountA
         {
             get
@@ -180,6 +191,8 @@ namespace AVMTradeReporter.Models.Data
                         // calculate virtual amount for concentrated liquidity AMM
                         if (PMin.HasValue && PMax.HasValue && A.HasValue && B.HasValue)
                         {
+                            if (A.Value == 0 || B.Value == 0) return 0;
+
                             if (PMin == PMax)
                             {
                                 // special case when PMin == PMax, we can calculate the virtual amount directly
@@ -250,6 +263,16 @@ namespace AVMTradeReporter.Models.Data
                     Console.Error.WriteLine($"Error calculating VirtualAmountB: {ex.Message}");
                     return 0;
                 }
+            }
+        }
+        // Virtual amount for price calculation, for concentrated liquidity AMM, we need to use virtual amount to calculate the price, because the price is not linear with the real amount, for stable swap, we can use real amount for price calculation, because the price is always 1:1
+        public decimal VirtualAmountBForPrice
+        {
+            get
+            {
+
+                if (A.Value == 0 || B.Value == 0) return 0;
+                return VirtualAmountB;
             }
         }
         public decimal RealAmountB
@@ -328,7 +351,7 @@ namespace AVMTradeReporter.Models.Data
 
                 // numerator = D * ( (Ann * S / aPrecision) + D_P * nCoins )
                 // divisor = ( (Ann - aPrecision) * D / aPrecision ) + (nPlusOne * D_P)
-                
+
                 var numerator = D * ((Ann * S / aPrecision) + D_P * nCoins);
                 var divisor = ((Ann - aPrecision) * D / aPrecision) + (nPlusOne * D_P);
 

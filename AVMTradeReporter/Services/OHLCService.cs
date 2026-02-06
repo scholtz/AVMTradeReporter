@@ -108,7 +108,7 @@ namespace AVMTradeReporter.Services
                 var oriented = pool;
                 if (pool.AssetIdA != a || pool.AssetIdB != b)
                     oriented = (pool.AssetIdA == b && pool.AssetIdB == a) ? pool.Reverse() : pool;
-                decimal price = oriented.VirtualSumALevel1 > 0 ? oriented.VirtualSumBLevel1 / oriented.VirtualSumALevel1 : 0m;
+                decimal price = oriented.VirtualSumALevel1ForPrice > 0 ? oriented.VirtualSumBLevel1ForPrice ?? 0 / (oriented.VirtualSumALevel1ForPrice ?? 0) : 0m;
                 resp.D.Add(new QuoteEntryDto
                 {
                     S = "ok",
