@@ -342,7 +342,7 @@ namespace AVMTradeReporter.Repository
                             var orient = algoUsdc.AssetIdB == 31566704 ? algoUsdc : algoUsdc.Reverse();
                             if (orient.VirtualSumALevel1ForPrice > 0)
                             {
-                                newPrice = orient.VirtualSumBLevel1ForPrice ?? 0 / (orient.VirtualSumALevel1ForPrice ?? 0); // USDC per ALGO
+                                newPrice = (orient.VirtualSumBLevel1ForPrice ?? 0) / (orient.VirtualSumALevel1ForPrice ?? 0); // USDC per ALGO
                             }
                         }
                     }
@@ -355,7 +355,7 @@ namespace AVMTradeReporter.Repository
                             var orient = pairUsdc.AssetIdB == 31566704 ? pairUsdc : pairUsdc.Reverse();
                             if (orient.VirtualSumALevel1ForPrice > 0)
                             {
-                                newPrice = orient.VirtualSumBLevel1ForPrice ?? 0 / (orient.VirtualSumALevel1ForPrice ?? 0); // USDC per asset
+                                newPrice = (orient.VirtualSumBLevel1ForPrice ?? 0) / (orient.VirtualSumALevel1ForPrice ?? 0); // USDC per asset
                             }
                         }
                         else
@@ -368,7 +368,7 @@ namespace AVMTradeReporter.Repository
                                 var orient = pairAlgo.AssetIdA == assetId ? pairAlgo : pairAlgo.Reverse();
                                 if (orient.VirtualSumALevel1ForPrice > 0)
                                 {
-                                    var algoPerAsset = orient.VirtualSumBLevel1ForPrice ?? 0 / (orient.VirtualSumALevel1ForPrice ?? 0); // ALGO per asset
+                                    var algoPerAsset = (orient.VirtualSumBLevel1ForPrice ?? 0) / (orient.VirtualSumALevel1ForPrice ?? 0); // ALGO per asset
                                     newPrice = algoPerAsset * algoAsset.PriceUSD; // USD per asset
                                 }
                             }
