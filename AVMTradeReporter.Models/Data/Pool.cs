@@ -191,7 +191,6 @@ namespace AVMTradeReporter.Models.Data
                         // calculate virtual amount for concentrated liquidity AMM
                         if (PMin.HasValue && PMax.HasValue && A.HasValue && B.HasValue)
                         {
-                            if (A.Value == 0 || B.Value == 0) return 0;
 
                             if (PMin == PMax)
                             {
