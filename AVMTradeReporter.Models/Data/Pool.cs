@@ -189,7 +189,8 @@ namespace AVMTradeReporter.Models.Data
         {
             get
             {
-
+                if (!A.HasValue) return 0;
+                if (!B.HasValue) return 0;
                 if (A.Value == 0 || B.Value == 0) return 0;
                 return VirtualAmountA;
             }
@@ -220,7 +221,6 @@ namespace AVMTradeReporter.Models.Data
                         // calculate virtual amount for concentrated liquidity AMM
                         if (PMin.HasValue && PMax.HasValue && A.HasValue && B.HasValue)
                         {
-                            if (A.Value == 0 || B.Value == 0) return 0;
 
                             if (PMin == PMax)
                             {
@@ -299,6 +299,8 @@ namespace AVMTradeReporter.Models.Data
         {
             get
             {
+                if (!A.HasValue) return 0;
+                if (!B.HasValue) return 0;
 
                 if (A.Value == 0 || B.Value == 0) return 0;
                 return VirtualAmountB;
