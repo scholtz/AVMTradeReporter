@@ -71,6 +71,35 @@ namespace AVMTradeReporter.Models.Data
         /// </summary>
         public decimal? Volume7D { get; set; } = 0;
 
+        /// <summary>
+        /// USD price of asset A 1 hour ago.
+        /// </summary>
+        public decimal? PriceAUSD1H { get; set; }
+
+        /// <summary>
+        /// USD price of asset A 24 hours ago.
+        /// </summary>
+        public decimal? PriceAUSD24H { get; set; }
+
+        /// <summary>
+        /// USD price of asset A 7 days ago.
+        /// </summary>
+        public decimal? PriceAUSD7D { get; set; }
+
+        /// <summary>
+        /// USD price of asset B 1 hour ago.
+        /// </summary>
+        public decimal? PriceBUSD1H { get; set; }
+
+        /// <summary>
+        /// USD price of asset B 24 hours ago.
+        /// </summary>
+        public decimal? PriceBUSD24H { get; set; }
+
+        /// <summary>
+        /// USD price of asset B 7 days ago.
+        /// </summary>
+        public decimal? PriceBUSD7D { get; set; }
         public decimal VirtualAmountA
         {
             get

@@ -13,5 +13,6 @@ namespace AVMTradeReporter.Services
         object GetQuotes(string symbols);
         Task<object> GetHistoryAsync(ulong assetA, ulong assetB, string resolution, long from, long to, CancellationToken ct);
         Task<SymbolInfoDto> GetSymbolInfoAsync(string symbols, CancellationToken ct);
+        Task<decimal?> GetHistoricalPriceAsync(ulong assetId, TimeSpan ago, CancellationToken ct);
     }
 }

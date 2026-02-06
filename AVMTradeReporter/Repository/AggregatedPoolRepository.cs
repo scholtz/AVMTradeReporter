@@ -12,6 +12,7 @@ using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 using System.Collections.Concurrent;
 using System.Text.Json;
+using AVMTradeReporter.Services;
 
 namespace AVMTradeReporter.Repository
 {
@@ -24,6 +25,7 @@ namespace AVMTradeReporter.Repository
         private readonly IDatabase? _redisDatabase;
         private readonly AppConfiguration _appConfig;
         private readonly ISubscriber? _redisSubscriber; // cached Redis subscriber
+        private readonly IOHLCService? _ohlcService;
 
         private static readonly ConcurrentDictionary<(ulong A, ulong B), AggregatedPool> _cache = new();
 
@@ -33,7 +35,8 @@ namespace AVMTradeReporter.Repository
             IHubContext<BiatecScanHub> hubContext,
             IOptions<AppConfiguration> appConfig,
             IDatabase? redisDatabase = null,
-            IAssetRepository? assetRepository = null)
+            IAssetRepository? assetRepository = null,
+            IOHLCService? ohlcService = null)
         {
             _elasticClient = elasticClient;
             _logger = logger;
@@ -42,6 +45,7 @@ namespace AVMTradeReporter.Repository
             _redisDatabase = redisDatabase;
             _appConfig = appConfig.Value;
             _redisSubscriber = _redisDatabase?.Multiplexer.GetSubscriber();
+            _ohlcService = ohlcService;
 
             CreateIndexTemplateAsync().Wait();
         }
@@ -382,6 +386,14 @@ namespace AVMTradeReporter.Repository
                     }
                     priceCache[assetId] = asset.PriceUSD;
 
+                    // Set historical prices
+                    if (_ohlcService != null)
+                    {
+                        asset.PriceUSD1H = await _ohlcService.GetHistoricalPriceAsync(assetId, TimeSpan.FromHours(1), cancellationToken);
+                        asset.PriceUSD24H = await _ohlcService.GetHistoricalPriceAsync(assetId, TimeSpan.FromHours(24), cancellationToken);
+                        asset.PriceUSD7D = await _ohlcService.GetHistoricalPriceAsync(assetId, TimeSpan.FromDays(7), cancellationToken);
+                    }
+
                     // Calculate Real TVL (TVL_USD) and Total TVL (TotalTVLAssetInUSD)
                     // Real TVL: Only trusted tokens from pools paired with trusted references
                     // Total TVL: All assets (both sides) from pools paired with trusted references
@@ -500,6 +512,19 @@ namespace AVMTradeReporter.Repository
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to update asset prices/TVL after aggregated pool update {a}-{b}", updatedPool.AssetIdA, updatedPool.AssetIdB);
+            }
+
+            // Update historical prices on aggregated pools
+            foreach (var agg in _cache.Values)
+            {
+                var assetA = await _assetRepository?.GetAssetAsync(agg.AssetIdA, cancellationToken);
+                var assetB = await _assetRepository?.GetAssetAsync(agg.AssetIdB, cancellationToken);
+                agg.PriceAUSD1H = assetA?.PriceUSD1H;
+                agg.PriceAUSD24H = assetA?.PriceUSD24H;
+                agg.PriceAUSD7D = assetA?.PriceUSD7D;
+                agg.PriceBUSD1H = assetB?.PriceUSD1H;
+                agg.PriceBUSD24H = assetB?.PriceUSD24H;
+                agg.PriceBUSD7D = assetB?.PriceUSD7D;
             }
         }
     }

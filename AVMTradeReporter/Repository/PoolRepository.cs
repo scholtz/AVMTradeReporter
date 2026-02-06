@@ -945,6 +945,20 @@ namespace AVMTradeReporter.Repository
                         pool.Volume1H = kv.Value.Volume1H;
                         pool.Volume24H = kv.Value.Volume24H;
                         pool.Volume7D = kv.Value.Volume7D;
+
+                        // Set historical prices from assets
+                        if (_assetRepository != null)
+                        {
+                            var assetA = await _assetRepository.GetAssetAsync(pool.AssetIdA ?? 0, cancellationToken);
+                            var assetB = await _assetRepository.GetAssetAsync(pool.AssetIdB ?? 0, cancellationToken);
+                            pool.PriceAUSD1H = assetA?.PriceUSD1H;
+                            pool.PriceAUSD24H = assetA?.PriceUSD24H;
+                            pool.PriceAUSD7D = assetA?.PriceUSD7D;
+                            pool.PriceBUSD1H = assetB?.PriceUSD1H;
+                            pool.PriceBUSD24H = assetB?.PriceUSD24H;
+                            pool.PriceBUSD7D = assetB?.PriceUSD7D;
+                        }
+
                         _poolsCache[kv.Key] = pool; // update cache
                     }
                 }

@@ -248,21 +248,20 @@ namespace AVMTradeReporter.Services
                 var decA = assetA.Params?.Decimals ?? 6;
                 var decB = assetB.Params?.Decimals ?? 6;
                 var priceScale = (int)Math.Pow(10, Math.Max(decA, decB));
-                var name = $"{a}-{b}";
-                symList.Add(name);
-                tickers.Add(name);
+
+                symList.Add(raw);
+                tickers.Add(raw);
                 desc.Add($"{assetA.Params?.UnitName ?? a.ToString()} / {assetB.Params?.UnitName ?? b.ToString()}");
                 types.Add("crypto");
-                exchListed.Add("ALG");
-                exchTraded.Add("ALG");
+                exchListed.Add("AVM");
+                exchTraded.Add("AVM");
                 sessions.Add("24x7");
-                timezones.Add("Etc/UTC");
+                timezones.Add("UTC");
                 minmov.Add(1);
                 pricescales.Add(priceScale);
                 hasIntraday.Add(true);
                 supportedRes.Add(_supportedResolutions);
             }
-
             return new SymbolInfoDto
             {
                 Symbols = symList.ToArray(),
@@ -278,6 +277,48 @@ namespace AVMTradeReporter.Services
                 HasIntraday = hasIntraday.ToArray(),
                 SupportedResolutions = supportedRes.ToArray()
             };
+        }
+
+        public async Task<decimal?> GetHistoricalPriceAsync(ulong assetId, TimeSpan ago, CancellationToken ct)
+        {
+            if (_elastic == null) return null;
+
+            var now = DateTimeOffset.UtcNow;
+            var targetTime = now - ago;
+            var fromDt = targetTime.UtcDateTime;
+            var toDt = now.UtcDateTime;
+
+            // Use asset vs ALGO (0) for USD valuation
+            var a = Math.Min(assetId, 0UL);
+            var b = Math.Max(assetId, 0UL);
+
+            var request = new SearchRequest<OHLC>("ohlc")
+            {
+                Size = 1,
+                Sort = new List<SortOptions>
+                {
+                    new SortOptions { Field = new FieldSort { Field = Infer.Field<OHLC>(f => f.StartTime) } }
+                },
+                Query = new BoolQuery
+                {
+                    Filter = new List<Query>
+                    {
+                        new TermQuery { Field = Infer.Field<OHLC>(f => f.AssetIdA), Value = a },
+                        new TermQuery { Field = Infer.Field<OHLC>(f => f.AssetIdB), Value = b },
+                        new TermQuery { Field = Infer.Field<OHLC>(f => f.Interval), Value = "1m" },
+                        new TermQuery { Field = Infer.Field<OHLC>(f => f.InUSDValuation), Value = true },
+                        new DateRangeQuery { Field = Infer.Field<OHLC>(f => f.StartTime), Gte = fromDt, Lte = toDt }
+                    }
+                }
+            };
+
+            var search = await _elastic.SearchAsync<OHLC>(request, ct);
+
+            if (!search.IsValidResponse || search.Hits.Count == 0 || search.Documents.FirstOrDefault()?.Close == null)
+                return null;
+
+            var doc = search.Documents.First();
+            return doc.Close.Value;
         }
     }
 }

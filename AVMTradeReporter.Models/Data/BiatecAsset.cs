@@ -38,5 +38,20 @@ namespace AVMTradeReporter.Model.Data
         /// 7 days trading volume in USD, summed from all aggregated pools involving this asset.
         /// </summary>
         public decimal? Volume7D { get; set; } = 0;
+
+        /// <summary>
+        /// USD price 1 hour ago.
+        /// </summary>
+        public decimal? PriceUSD1H { get; set; }
+
+        /// <summary>
+        /// USD price 24 hours ago.
+        /// </summary>
+        public decimal? PriceUSD24H { get; set; }
+
+        /// <summary>
+        /// USD price 7 days ago.
+        /// </summary>
+        public decimal? PriceUSD7D { get; set; }
     }
 }
