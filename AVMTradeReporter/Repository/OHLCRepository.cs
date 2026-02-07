@@ -131,9 +131,9 @@ namespace AVMTradeReporter.Repository
 
             // USD valuation: if trade has USD value, compute USD-per-base-unit.
             decimal? usdPrice = null;
-            if (trade.ValueUSD.HasValue )
+            if (trade.ValueUSD.HasValue && volBase > 0)
             {
-                usdPrice = trade.ValueUSD.Value ;
+                usdPrice = trade.ValueUSD.Value / volBase;
             }
 
             var ts = trade.Timestamp.Value.ToUniversalTime();
