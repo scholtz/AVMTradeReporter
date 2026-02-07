@@ -307,7 +307,7 @@ namespace AVMTradeReporter.Services
                         new TermQuery { Field = Infer.Field<OHLC>(f => f.AssetIdB), Value = b },
                         new TermQuery { Field = Infer.Field<OHLC>(f => f.Interval), Value = "1m" },
                         new TermQuery { Field = Infer.Field<OHLC>(f => f.InUSDValuation), Value = true },
-                        new DateRangeQuery { Field = Infer.Field<OHLC>(f => f.StartTime), Gte = fromDt, Lte = toDt }
+                        new DateRangeQuery { Field = Infer.Field<OHLC>(f => f.StartTime), Lte = fromDt }
                     }
                 }
             };
