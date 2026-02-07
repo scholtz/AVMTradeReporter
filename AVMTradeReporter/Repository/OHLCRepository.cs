@@ -6,6 +6,7 @@ using Elastic.Clients.Elasticsearch.IndexManagement;
 using Elastic.Clients.Elasticsearch.Core.Bulk;
 using Microsoft.Extensions.Logging;
 using System.Runtime.CompilerServices;
+using Algorand.Algod.Model;
 
 [assembly: InternalsVisibleTo("AVMTradeReporterTests")]
 namespace AVMTradeReporter.Repository
@@ -14,6 +15,7 @@ namespace AVMTradeReporter.Repository
     {
         private readonly ElasticsearchClient _elasticClient;
         private readonly ILogger<OHLCRepository> _logger;
+        private readonly IAssetRepository? _assetRepository;
 
         internal static readonly (string code, TimeSpan span)[] Intervals = new[]
         {
@@ -27,10 +29,11 @@ namespace AVMTradeReporter.Repository
             ("1M", TimeSpan.FromDays(31))
         };
 
-        public OHLCRepository(ElasticsearchClient client, ILogger<OHLCRepository> logger)
+        public OHLCRepository(ElasticsearchClient client, ILogger<OHLCRepository> logger, IAssetRepository? assetRepository = null)
         {
             _elasticClient = client;
             _logger = logger;
+            _assetRepository = assetRepository;
             CreateTemplateAsync().Wait();
         }
 
@@ -105,12 +108,13 @@ namespace AVMTradeReporter.Repository
 
         internal record BucketSpec(string Interval, DateTimeOffset BucketStart, string DocId, bool InUsdValuation, decimal Price, decimal VolumeBase, decimal VolumeQuote, ulong AssetIdA, ulong AssetIdB);
 
-        internal static IEnumerable<BucketSpec> GetIntervalBuckets(Trade trade)
+        internal async Task<IEnumerable<BucketSpec>> GetIntervalBuckets(Trade trade)
         {
-            if (!trade.Timestamp.HasValue) yield break;
+            var result = new List<BucketSpec>();
+            if (!trade.Timestamp.HasValue) return result;
             var aId = Math.Min(trade.AssetIdIn, trade.AssetIdOut);
             var bId = Math.Max(trade.AssetIdIn, trade.AssetIdOut);
-            if (aId == bId) yield break;
+            if (aId == bId) return result;
 
             decimal volBase; decimal volQuote;
             if (trade.AssetIdIn == aId && trade.AssetIdOut == bId)
@@ -123,17 +127,32 @@ namespace AVMTradeReporter.Repository
                 volBase = trade.AssetAmountOut;
                 volQuote = trade.AssetAmountIn;
             }
-            else yield break;
-            if (volBase <= 0) yield break;
+            else return result;
+            if (volBase <= 0) return result;
+
+            int decimalsA = 0;
+            int decimalsB = 0;
+            if (_assetRepository != null)
+            {
+                var assetA = await _assetRepository.GetAssetAsync(aId);
+                var assetB = await _assetRepository.GetAssetAsync(bId);
+                decimalsA = (int)(assetA?.Params?.Decimals ?? 0);
+                decimalsB = (int)(assetB?.Params?.Decimals ?? 0);
+            }
+            decimal powA = (decimal)Math.Pow(10, decimalsA);
+            decimal powB = (decimal)Math.Pow(10, decimalsB);
+            decimal adjustedVolBase = volBase / powA;
+            decimal adjustedVolQuote = volQuote / powB;
+            decimal price = adjustedVolQuote / adjustedVolBase;
 
             // Asset valuation: quote-per-base using raw on-chain volumes.
-            var price = volQuote / volBase;
+            // var price = volQuote / volBase;
 
             // USD valuation: if trade has USD value, compute USD-per-base-unit.
             decimal? usdPrice = null;
-            if (trade.ValueUSD.HasValue && volBase > 0)
+            if (trade.ValueUSD.HasValue && adjustedVolBase > 0)
             {
-                usdPrice = trade.ValueUSD.Value / volBase;
+                usdPrice = trade.ValueUSD.Value / adjustedVolBase;
             }
 
             var ts = trade.Timestamp.Value.ToUniversalTime();
@@ -141,23 +160,24 @@ namespace AVMTradeReporter.Repository
             {
                 var bucketStart = GetBucketStart(ts, span);
                 var docIdAsset = $"{aId}-{bId}-{code}-asset-{bucketStart:yyyyMMddHHmmss}";
-                yield return new BucketSpec(code, bucketStart, docIdAsset, false, price, volBase, volQuote, aId, bId);
+                result.Add(new BucketSpec(code, bucketStart, docIdAsset, false, price, adjustedVolBase, adjustedVolQuote, aId, bId));
 
                 if (usdPrice.HasValue)
                 {
                     // For USD-valued series, keep volumeBase in base asset units, but express quote volume in USD.
                     var docIdUsd = $"{aId}-{bId}-{code}-usd-{bucketStart:yyyyMMddHHmmss}";
-                    var volumeUsd = usdPrice.Value * volBase;
-                    yield return new BucketSpec(code, bucketStart, docIdUsd, true, usdPrice.Value, volBase, volumeUsd, aId, bId);
+                    var volumeUsd = usdPrice.Value * adjustedVolBase;
+                    result.Add(new BucketSpec(code, bucketStart, docIdUsd, true, usdPrice.Value, adjustedVolBase, volumeUsd, aId, bId));
                 }
             }
+            return result;
         }
 
         public async Task UpdateFromTradeAsync(Trade trade, CancellationToken cancellationToken)
         {
             if (_elasticClient == null) return;
             if (trade.TradeState != Models.Data.Enums.TxState.Confirmed) return;
-            var buckets = GetIntervalBuckets(trade).ToList();
+            var buckets = await GetIntervalBuckets(trade);
             if (!buckets.Any()) return;
 
             var bulkRequest = new BulkRequest("ohlc") { Operations = new BulkOperationsCollection() };

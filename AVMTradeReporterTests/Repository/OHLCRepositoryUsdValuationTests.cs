@@ -5,6 +5,8 @@ namespace AVMTradeReporterTests.Repository;
 
 public class OHLCRepositoryUsdValuationTests
 {
+    private OHLCRepository _repo = new(null, null);
+
     [Test]
     public void GetIntervalBuckets_WhenNoUsdValue_GeneratesOnlyAssetSeries()
     {
@@ -19,7 +21,7 @@ public class OHLCRepositoryUsdValuationTests
             TradeState = AVMTradeReporter.Models.Data.Enums.TxState.Confirmed
         };
 
-        var buckets = OHLCRepository.GetIntervalBuckets(trade).ToList();
+        var buckets = _repo.GetIntervalBuckets(trade).Result.ToList();
 
         Assert.That(buckets.Count, Is.EqualTo(OHLCRepository.Intervals.Length));
         Assert.That(buckets.All(b => b.InUsdValuation == false));

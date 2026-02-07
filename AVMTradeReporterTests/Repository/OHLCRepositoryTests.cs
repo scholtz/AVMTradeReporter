@@ -7,8 +7,10 @@ namespace AVMTradeReporterTests.Repository
 {
     public class OHLCRepositoryTests
     {
+        private OHLCRepository _repo = new(null, null);
+
         [Test]
-        public void GetIntervalBuckets_BasicTrade_GeneratesAllBuckets()
+        public async Task GetIntervalBuckets_BasicTrade_GeneratesAllBuckets()
         {
             var trade = new Trade
             {
@@ -21,7 +23,7 @@ namespace AVMTradeReporterTests.Repository
                 TradeState = AVMTradeReporter.Models.Data.Enums.TxState.Confirmed
             };
 
-            var buckets = OHLCRepository.GetIntervalBuckets(trade).ToList();
+            var buckets = await _repo.GetIntervalBuckets(trade);
             Assert.That(buckets.Count, Is.EqualTo(OHLCRepository.Intervals.Length * 2));
 
             var assetSeries = buckets.Where(b => b.InUsdValuation == false).ToList();
@@ -50,7 +52,7 @@ namespace AVMTradeReporterTests.Repository
         }
 
         [Test]
-        public void GetIntervalBuckets_ReversedTrade_Canonicalizes()
+        public async Task GetIntervalBuckets_ReversedTrade_Canonicalizes()
         {
             var trade = new Trade
             {
@@ -62,7 +64,7 @@ namespace AVMTradeReporterTests.Repository
                 Timestamp = DateTimeOffset.Parse("2024-05-06T07:08:09Z"),
                 TradeState = AVMTradeReporter.Models.Data.Enums.TxState.Confirmed
             };
-            var buckets = OHLCRepository.GetIntervalBuckets(trade).ToList();
+            var buckets = await _repo.GetIntervalBuckets(trade);
             Assert.That(buckets, Is.Not.Empty);
 
             var assetSeries = buckets.Where(b => b.InUsdValuation == false).ToList();
@@ -80,7 +82,7 @@ namespace AVMTradeReporterTests.Repository
         }
 
         [Test]
-        public void GetIntervalBuckets_InvalidSameAsset_ReturnsEmpty()
+        public async Task GetIntervalBuckets_InvalidSameAsset_ReturnsEmpty()
         {
             var trade = new Trade
             {
@@ -91,11 +93,12 @@ namespace AVMTradeReporterTests.Repository
                 Timestamp = DateTimeOffset.UtcNow,
                 TradeState = AVMTradeReporter.Models.Data.Enums.TxState.Confirmed
             };
-            Assert.That(OHLCRepository.GetIntervalBuckets(trade), Is.Empty);
+            var buckets = await _repo.GetIntervalBuckets(trade);
+            Assert.That(buckets, Is.Empty);
         }
 
         [Test]
-        public void GetIntervalBuckets_ZeroBaseVolume_ReturnsEmpty()
+        public async Task GetIntervalBuckets_ZeroBaseVolume_ReturnsEmpty()
         {
             var trade = new Trade
             {
@@ -106,7 +109,8 @@ namespace AVMTradeReporterTests.Repository
                 Timestamp = DateTimeOffset.UtcNow,
                 TradeState = AVMTradeReporter.Models.Data.Enums.TxState.Confirmed
             };
-            Assert.That(OHLCRepository.GetIntervalBuckets(trade), Is.Empty);
+            var buckets = await _repo.GetIntervalBuckets(trade);
+            Assert.That(buckets, Is.Empty);
         }
     }
 }
