@@ -69,5 +69,10 @@ namespace AVMTradeReporterTests
             }
             return Task.FromResult(query.Skip(offset).Take(size));
         }
+
+        public Task<IEnumerable<ulong>> GetAllAssetIdsAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<IEnumerable<ulong>>(_assets.Keys);
+        }
     }
 }

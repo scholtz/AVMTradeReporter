@@ -331,7 +331,14 @@ namespace AVMTradeReporter.Repository
                 {
                     var asset = await _assetRepository.GetAssetAsync(assetId, cancellationToken);
                     if (asset == null) continue;
-                    bool changed = false;
+                    var changed = false;
+
+                    // Set USDC price to 1
+                    if (asset.Index == 31566704UL && asset.PriceUSD != 1m)
+                    {
+                        asset.PriceUSD = 1m;
+                        changed = true;
+                    }
 
                     // Calculate PriceUSD
                     decimal newPrice = asset.PriceUSD;
@@ -435,7 +442,27 @@ namespace AVMTradeReporter.Repository
                         priceCache.TryGetValue(assetId, out var priceAssetCurrent);
                         if (priceAssetCurrent <= 0) priceAssetCurrent = asset.PriceUSD;
 
-                        if (priceAssetCurrent <= 0 || otherPrice <= 0) continue; // skip until both prices known
+                        // Set PriceUSD if paired with USDC
+                        if (otherAssetId == 31566704UL && ap.VirtualSumALevel1ForPrice > 0 && ap.VirtualSumBLevel1ForPrice > 0)
+                        {
+                            decimal calculatedPrice;
+                            if (ap.AssetIdA == assetId)
+                            {
+                                calculatedPrice = ap.VirtualSumBLevel1ForPrice.Value / ap.VirtualSumALevel1ForPrice.Value;
+                            }
+                            else
+                            {
+                                calculatedPrice = ap.VirtualSumALevel1ForPrice.Value / ap.VirtualSumBLevel1ForPrice.Value;
+                            }
+                            if (calculatedPrice != asset.PriceUSD)
+                            {
+                                asset.PriceUSD = calculatedPrice;
+                                changed = true;
+                                priceCache[assetId] = calculatedPrice; // update cache
+                            }
+                        }
+
+                        if (priceAssetCurrent <= 0 || otherPrice <= 0) continue; // skip TVL calculation until both prices known
 
                         // Calculate Real TVL: only the trusted token side (otherAssetId is the trusted reference)
                         decimal trustedTokenValue;

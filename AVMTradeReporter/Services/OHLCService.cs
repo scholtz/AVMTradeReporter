@@ -288,9 +288,9 @@ namespace AVMTradeReporter.Services
             var fromDt = targetTime.UtcDateTime;
             var toDt = now.UtcDateTime;
 
-            // Use asset vs ALGO (0) for USD valuation
-            var a = Math.Min(assetId, 0UL);
-            var b = Math.Max(assetId, 0UL);
+            // Use asset vs USDC (31566704) for USD valuation
+            var a = Math.Min(assetId, 31566704UL);
+            var b = Math.Max(assetId, 31566704UL);
 
             var request = new SearchRequest<OHLC>("ohlc")
             {
