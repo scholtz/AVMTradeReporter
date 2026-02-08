@@ -43,7 +43,7 @@ namespace AVMTradeReporter.Repository
             var request = new PutIndexTemplateRequest
             {
                 Name = "ohlc_template",
-                IndexPatterns = new []{"ohlc-*"},
+                IndexPatterns = new[] { "ohlc-*" },
                 Template = new IndexTemplateMapping
                 {
                     Mappings = new TypeMapping
@@ -87,7 +87,7 @@ namespace AVMTradeReporter.Repository
             {
                 if (interval.TotalDays >= 30)
                 {
-                    return new DateTimeOffset(new DateTime(ts.Year, ts.Month, 1, 0,0,0, DateTimeKind.Utc));
+                    return new DateTimeOffset(new DateTime(ts.Year, ts.Month, 1, 0, 0, 0, DateTimeKind.Utc));
                 }
                 int diff = (7 + (int)ts.UtcDateTime.DayOfWeek - (int)DayOfWeek.Monday) % 7;
                 var monday = ts.UtcDateTime.Date.AddDays(-diff);
@@ -144,16 +144,9 @@ namespace AVMTradeReporter.Repository
             decimal adjustedVolBase = volBase / powA;
             decimal adjustedVolQuote = volQuote / powB;
             decimal price = adjustedVolQuote / adjustedVolBase;
-
+            var usdcAssetId = 31566704UL;
             // Asset valuation: quote-per-base using raw on-chain volumes.
             // var price = volQuote / volBase;
-
-            // USD valuation: if trade has USD value, compute USD-per-base-unit.
-            decimal? usdPrice = null;
-            if (trade.ValueUSD.HasValue && adjustedVolBase > 0)
-            {
-                usdPrice = trade.ValueUSD.Value / adjustedVolBase;
-            }
 
             var ts = trade.Timestamp.Value.ToUniversalTime();
             foreach (var (code, span) in Intervals)
@@ -162,12 +155,34 @@ namespace AVMTradeReporter.Repository
                 var docIdAsset = $"{aId}-{bId}-{code}-asset-{bucketStart:yyyyMMddHHmmss}";
                 result.Add(new BucketSpec(code, bucketStart, docIdAsset, false, price, adjustedVolBase, adjustedVolQuote, aId, bId));
 
-                if (usdPrice.HasValue)
+                // USD valuation: if trade has USD value, compute USD-per-base-unit.
+                decimal? usdPriceBase = null;
+                if (trade.ValueUSD.HasValue && adjustedVolBase > 0)
+                {
+                    usdPriceBase = trade.ValueUSD.Value / adjustedVolBase;
+                }
+
+                if (usdPriceBase.HasValue && aId != usdcAssetId)
                 {
                     // For USD-valued series, keep volumeBase in base asset units, but express quote volume in USD.
-                    var docIdUsd = $"{aId}-{bId}-{code}-usd-{bucketStart:yyyyMMddHHmmss}";
-                    var volumeUsd = usdPrice.Value * adjustedVolBase;
-                    result.Add(new BucketSpec(code, bucketStart, docIdUsd, true, usdPrice.Value, adjustedVolBase, volumeUsd, aId, bId));
+                    var docIdUsd = $"{aId}-{usdcAssetId}-{code}-usd-{bucketStart:yyyyMMddHHmmss}";
+                    var volumeUsd = usdPriceBase.Value * adjustedVolBase;
+                    result.Add(new BucketSpec(code, bucketStart, docIdUsd, true, usdPriceBase.Value, adjustedVolBase, volumeUsd, aId, usdcAssetId));
+                }
+
+                // USD valuation: if trade has USD value, compute USD-per-base-unit.
+                decimal? usdPriceQuote = null;
+                if (trade.ValueUSD.HasValue && adjustedVolQuote > 0)
+                {
+                    usdPriceQuote = trade.ValueUSD.Value / adjustedVolQuote;
+                }
+
+                if (usdPriceQuote.HasValue && bId != usdcAssetId)
+                {
+                    // For USD-valued series, keep volumeBase in base asset units, but express quote volume in USD.
+                    var docIdUsd = $"{bId}-{usdcAssetId}-{code}-usd-{bucketStart:yyyyMMddHHmmss}";
+                    var volumeUsd = usdPriceQuote.Value * adjustedVolQuote;
+                    result.Add(new BucketSpec(code, bucketStart, docIdUsd, true, usdPriceQuote.Value, adjustedVolQuote, volumeUsd, bId, usdcAssetId));
                 }
             }
             return result;
