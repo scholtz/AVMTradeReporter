@@ -288,9 +288,7 @@ namespace AVMTradeReporter.Services
             var fromDt = targetTime.UtcDateTime;
             var toDt = now.UtcDateTime;
 
-            // Use asset vs USDC (31566704) for USD valuation
-            var a = Math.Min(assetId, 31566704UL);
-            var b = Math.Max(assetId, 31566704UL);
+            var usdcAssetId = 31566704UL;
 
             var request = new SearchRequest<OHLC>("ohlc")
             {
@@ -303,8 +301,8 @@ namespace AVMTradeReporter.Services
                 {
                     Filter = new List<Query>
                     {
-                        new TermQuery { Field = Infer.Field<OHLC>(f => f.AssetIdA), Value = a },
-                        new TermQuery { Field = Infer.Field<OHLC>(f => f.AssetIdB), Value = b },
+                        new TermQuery { Field = Infer.Field<OHLC>(f => f.AssetIdA), Value = assetId },
+                        new TermQuery { Field = Infer.Field<OHLC>(f => f.AssetIdB), Value = usdcAssetId },
                         new TermQuery { Field = Infer.Field<OHLC>(f => f.Interval), Value = "1m" },
                         new TermQuery { Field = Infer.Field<OHLC>(f => f.InUSDValuation), Value = true },
                         new DateRangeQuery { Field = Infer.Field<OHLC>(f => f.StartTime), Lte = fromDt }
