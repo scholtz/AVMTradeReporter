@@ -295,7 +295,7 @@ namespace AVMTradeReporter.Services
                 Size = 1,
                 Sort = new List<SortOptions>
                 {
-                    new SortOptions { Field = new FieldSort { Field = Infer.Field<OHLC>(f => f.StartTime) } }
+                    new SortOptions { Field = new FieldSort { Field = Infer.Field<OHLC>(f => f.StartTime), Order = SortOrder.Desc } }
                 },
                 Query = new BoolQuery
                 {
@@ -316,7 +316,9 @@ namespace AVMTradeReporter.Services
                 return null;
 
             var doc = search.Documents.First();
-            return doc.Close.Value;
+            if(doc.StartTime > targetTime) return null;
+
+            return doc.Close;
         }
     }
 }
