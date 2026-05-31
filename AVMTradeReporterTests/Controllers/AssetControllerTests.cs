@@ -1,7 +1,7 @@
 using AVMTradeReporter.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace AVMTradeReporterTests.Controllers
 {
@@ -12,7 +12,7 @@ namespace AVMTradeReporterTests.Controllers
         [SetUp]
         public void Setup()
         {
-            _controller = new AssetController(new MockLogger<AssetController>(), new MockAssetRepository());
+            _controller = new AssetController(NullLogger<AssetController>.Instance, new MockAssetRepository());
             _controller.ControllerContext = new ControllerContext
             {
                 HttpContext = new DefaultHttpContext()
