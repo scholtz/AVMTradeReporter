@@ -243,7 +243,7 @@ namespace AVMTradeReporter.Services
         {
             if (!string.IsNullOrWhiteSpace(filter.TxId))
             {
-                return query.Term(t => t.Field(f => f.TxId).Value(filter.TxId));
+                return query.Term(t => t.Field("txId.keyword").Value(FieldValue.String(filter.TxId)));
             }
 
             var must = new List<Action<QueryDescriptor<Trade>>>();
@@ -275,12 +275,12 @@ namespace AVMTradeReporter.Services
 
             if (!string.IsNullOrWhiteSpace(filter.Trader))
             {
-                must.Add(m => m.Term(t => t.Field(f => f.Trader).Value(filter.Trader)));
+                must.Add(m => m.Term(t => t.Field("trader.keyword").Value(FieldValue.String(filter.Trader))));
             }
 
             if (!string.IsNullOrWhiteSpace(filter.PoolAddress))
             {
-                must.Add(m => m.Term(t => t.Field(f => f.PoolAddress).Value(filter.PoolAddress)));
+                must.Add(m => m.Term(t => t.Field("poolAddress.keyword").Value(FieldValue.String(filter.PoolAddress))));
             }
 
             if (filter.PoolAppId.HasValue)
@@ -290,12 +290,12 @@ namespace AVMTradeReporter.Services
 
             if (filter.Protocol.HasValue)
             {
-                must.Add(m => m.Term(t => t.Field(f => f.Protocol).Value(filter.Protocol.Value.ToString())));
+                must.Add(m => m.Term(t => t.Field("protocol.keyword").Value(FieldValue.String(filter.Protocol.Value.ToString()))));
             }
 
             if (filter.TradeState.HasValue)
             {
-                must.Add(m => m.Term(t => t.Field(f => f.TradeState).Value(filter.TradeState.Value.ToString())));
+                must.Add(m => m.Term(t => t.Field("tradeState.keyword").Value(FieldValue.String(filter.TradeState.Value.ToString()))));
             }
 
             AddUlongRangeClause(must, f => f.BlockId, filter.BlockFrom, filter.BlockTo);
