@@ -260,6 +260,10 @@ namespace AVMTradeReporter.Hubs
         {
             if (filter.RecentTrades) return true;
             if (filter.PoolsAddresses.Contains(trade.PoolAddress)) return true;
+            if (filter.Traders.Contains(trade.Trader)) return true;
+            if (filter.Protocols.Contains(trade.Protocol.ToString())) return true;
+            if (filter.TradeStates.Contains(trade.TradeState.ToString())) return true;
+            if (filter.MinTradeValueUSD.HasValue && trade.ValueUSD >= filter.MinTradeValueUSD.Value) return true;
             var aggregatedPoolId = $"{trade.AssetIdIn}-{trade.AssetIdOut}";
             if (filter.AggregatedPoolsIds.Contains(aggregatedPoolId)) return true;
             var aggregatedPoolIdReverted = $"{trade.AssetIdOut}-{trade.AssetIdIn}";

@@ -14,5 +14,9 @@
         public HashSet<string> PoolsAddresses { get; set; } = new();
         public HashSet<string> AggregatedPoolsIds { get; set; } = new();
         public HashSet<string> AssetIds { get; set; } = new();
+        public HashSet<string> Traders { get; set; } = new();
+        public HashSet<string> Protocols { get; set; } = new();
+        public HashSet<string> TradeStates { get; set; } = new();
+        public decimal? MinTradeValueUSD { get; set; }
     }
 }

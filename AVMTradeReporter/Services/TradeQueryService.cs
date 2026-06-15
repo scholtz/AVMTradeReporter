@@ -1,7 +1,9 @@
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Model.DTO;
 using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Models.Data.Enums;
 using Elastic.Clients.Elasticsearch;
+using Elastic.Clients.Elasticsearch.QueryDsl;
 using static Elastic.Clients.Elasticsearch.Field;
 
 namespace AVMTradeReporter.Services
@@ -25,27 +27,44 @@ namespace AVMTradeReporter.Services
             int size = 100,
             CancellationToken cancellationToken = default)
         {
+            var result = await GetTradesAsync(new TradeFilter
+            {
+                AssetIdIn = assetIdIn,
+                AssetIdOut = assetIdOut,
+                TxId = txId,
+                Offset = offset,
+                Size = size
+            }, cancellationToken);
+
+            return result.Items;
+        }
+
+        public async Task<PagedResult<Trade>> GetTradesAsync(TradeFilter filter, CancellationToken cancellationToken = default)
+        {
             var trades = new List<Trade>();
+            var normalizedFilter = NormalizeFilter(filter);
 
             try
             {
                 if (_elastic == null)
                 {
                     _logger.LogWarning("Elasticsearch client not available");
-                    return trades;
+                    return CreatePagedResult(trades, 0, normalizedFilter);
                 }
 
                 var searchResponse = await _elastic.SearchAsync<Trade>(s => s
                     .Indices("trades")
-                    .From(offset)
-                    .Size(size)
-                    .Sort(ss => ss.Field(f => f.Field(t => t.BlockId).Order(SortOrder.Desc)))
-                    .Query(q => BuildQuery(q, assetIdIn, assetIdOut, txId)),
+                    .From(normalizedFilter.Offset)
+                    .Size(normalizedFilter.Size)
+                    .Sort(ss => BuildSort(ss, normalizedFilter))
+                    .Query(q => BuildQuery(q, normalizedFilter)),
                     cancellationToken);
 
                 if (searchResponse.IsValidResponse)
                 {
                     trades.AddRange(searchResponse.Documents);
+                    var total = searchResponse.Total;
+                    return CreatePagedResult(trades, total, normalizedFilter);
                 }
                 else
                 {
@@ -57,7 +76,7 @@ namespace AVMTradeReporter.Services
                 _logger.LogError(ex, "Failed to fetch trades from Elasticsearch");
             }
 
-            return trades;
+            return CreatePagedResult(trades, trades.Count, normalizedFilter);
         }
 
         public async Task<Dictionary<string, (decimal Volume1H, decimal Volume24H, decimal Volume7D)>> GetPoolVolumesAsync(IEnumerable<string> poolAddresses, CancellationToken cancellationToken = default)
@@ -150,38 +169,228 @@ namespace AVMTradeReporter.Services
             return volumes;
         }
 
-        private static Elastic.Clients.Elasticsearch.QueryDsl.Query BuildQuery(
-            Elastic.Clients.Elasticsearch.QueryDsl.QueryDescriptor<Trade> q,
-            ulong? assetIdIn,
-            ulong? assetIdOut,
-            string? txId)
+        private static TradeFilter NormalizeFilter(TradeFilter filter)
         {
-            if (!string.IsNullOrWhiteSpace(txId))
+            return new TradeFilter
             {
-                // If txId is provided, search only by txId
-                return q.Term(t => t.Field(f => f.TxId).Value(txId));
+                AssetIdIn = filter.AssetIdIn,
+                AssetIdOut = filter.AssetIdOut,
+                AssetId = filter.AssetId,
+                AssetIdA = filter.AssetIdA,
+                AssetIdB = filter.AssetIdB,
+                TxId = filter.TxId?.Trim(),
+                Trader = filter.Trader?.Trim(),
+                PoolAddress = filter.PoolAddress?.Trim(),
+                PoolAppId = filter.PoolAppId,
+                Protocol = filter.Protocol,
+                TradeState = filter.TradeState,
+                BlockFrom = filter.BlockFrom,
+                BlockTo = filter.BlockTo,
+                TimestampFrom = filter.TimestampFrom,
+                TimestampTo = filter.TimestampTo,
+                MinValueUSD = filter.MinValueUSD,
+                MaxValueUSD = filter.MaxValueUSD,
+                MinFeesUSD = filter.MinFeesUSD,
+                MaxFeesUSD = filter.MaxFeesUSD,
+                MinAmountIn = filter.MinAmountIn,
+                MaxAmountIn = filter.MaxAmountIn,
+                MinAmountOut = filter.MinAmountOut,
+                MaxAmountOut = filter.MaxAmountOut,
+                SortBy = filter.SortBy?.Trim(),
+                SortDirection = filter.SortDirection?.Trim(),
+                Offset = Math.Max(filter.Offset, 0),
+                Size = Math.Clamp(filter.Size, 1, 500)
+            };
+        }
+
+        private static PagedResult<Trade> CreatePagedResult(IEnumerable<Trade> trades, long total, TradeFilter filter)
+        {
+            return new PagedResult<Trade>
+            {
+                Items = trades,
+                Total = total,
+                Offset = filter.Offset,
+                Size = filter.Size,
+                HasMore = filter.Offset + filter.Size < total
+            };
+        }
+
+        private static SortOrder GetSortOrder(TradeFilter filter)
+        {
+            return string.Equals(filter.SortDirection, "asc", StringComparison.OrdinalIgnoreCase)
+                ? SortOrder.Asc
+                : SortOrder.Desc;
+        }
+
+        private static Elastic.Clients.Elasticsearch.SortOptionsDescriptor<Trade> BuildSort(
+            Elastic.Clients.Elasticsearch.SortOptionsDescriptor<Trade> sort,
+            TradeFilter filter)
+        {
+            var order = GetSortOrder(filter);
+
+            return filter.SortBy?.ToLowerInvariant() switch
+            {
+                "timestamp" => sort.Field(f => f.Field(t => t.Timestamp).Order(order)),
+                "valueusd" => sort.Field(f => f.Field(t => t.ValueUSD).Order(order)),
+                "feesusd" => sort.Field(f => f.Field(t => t.FeesUSD).Order(order)),
+                "assetamountin" => sort.Field(f => f.Field(t => t.AssetAmountIn).Order(order)),
+                "assetamountout" => sort.Field(f => f.Field(t => t.AssetAmountOut).Order(order)),
+                _ => sort.Field(f => f.Field(t => t.BlockId).Order(order))
+            };
+        }
+
+        internal static Query BuildQuery(QueryDescriptor<Trade> query, TradeFilter filter)
+        {
+            if (!string.IsNullOrWhiteSpace(filter.TxId))
+            {
+                return query.Term(t => t.Field(f => f.TxId).Value(filter.TxId));
             }
 
-            if (assetIdIn.HasValue && assetIdOut.HasValue)
+            var must = new List<Action<QueryDescriptor<Trade>>>();
+
+            if (filter.AssetIdIn.HasValue && filter.AssetIdOut.HasValue)
             {
-                // Both assets specified - require both conditions (AND logic)
-                return q.Bool(b => b.Must(
-                    m => m.Term(t => t.Field(f => f.AssetIdIn).Value(assetIdIn.Value)),
-                    m => m.Term(t => t.Field(f => f.AssetIdOut).Value(assetIdOut.Value))
-                ));
+                must.Add(m => m.Term(t => t.Field(f => f.AssetIdIn).Value(filter.AssetIdIn.Value)));
+                must.Add(m => m.Term(t => t.Field(f => f.AssetIdOut).Value(filter.AssetIdOut.Value)));
             }
-            else if (assetIdIn.HasValue || assetIdOut.HasValue)
+            else if (filter.AssetIdIn.HasValue || filter.AssetIdOut.HasValue)
             {
-                // Single asset specified - match either assetIdIn OR assetIdOut
-                var assetId = assetIdIn ?? assetIdOut!.Value;
-                return q.Bool(b => b.Should(
-                    s => s.Term(t => t.Field(f => f.AssetIdIn).Value(assetId)),
-                    s => s.Term(t => t.Field(f => f.AssetIdOut).Value(assetId))
-                ));
+                AddEitherAssetClause(must, filter.AssetIdIn ?? filter.AssetIdOut!.Value);
             }
 
-            // No filters provided, return all trades
-            return q.MatchAll();
+            if (filter.AssetId.HasValue)
+            {
+                AddEitherAssetClause(must, filter.AssetId.Value);
+            }
+
+            if (filter.AssetIdA.HasValue && filter.AssetIdB.HasValue)
+            {
+                AddEitherAssetClause(must, filter.AssetIdA.Value);
+                AddEitherAssetClause(must, filter.AssetIdB.Value);
+            }
+            else if (filter.AssetIdA.HasValue || filter.AssetIdB.HasValue)
+            {
+                AddEitherAssetClause(must, filter.AssetIdA ?? filter.AssetIdB!.Value);
+            }
+
+            if (!string.IsNullOrWhiteSpace(filter.Trader))
+            {
+                must.Add(m => m.Term(t => t.Field(f => f.Trader).Value(filter.Trader)));
+            }
+
+            if (!string.IsNullOrWhiteSpace(filter.PoolAddress))
+            {
+                must.Add(m => m.Term(t => t.Field(f => f.PoolAddress).Value(filter.PoolAddress)));
+            }
+
+            if (filter.PoolAppId.HasValue)
+            {
+                must.Add(m => m.Term(t => t.Field(f => f.PoolAppId).Value(filter.PoolAppId.Value)));
+            }
+
+            if (filter.Protocol.HasValue)
+            {
+                must.Add(m => m.Term(t => t.Field(f => f.Protocol).Value(filter.Protocol.Value.ToString())));
+            }
+
+            if (filter.TradeState.HasValue)
+            {
+                must.Add(m => m.Term(t => t.Field(f => f.TradeState).Value(filter.TradeState.Value.ToString())));
+            }
+
+            AddUlongRangeClause(must, f => f.BlockId, filter.BlockFrom, filter.BlockTo);
+            AddDateRangeClause(must, f => f.Timestamp, filter.TimestampFrom, filter.TimestampTo);
+            AddDecimalRangeClause(must, f => f.ValueUSD, filter.MinValueUSD, filter.MaxValueUSD);
+            AddDecimalRangeClause(must, f => f.FeesUSD, filter.MinFeesUSD, filter.MaxFeesUSD);
+            AddUlongRangeClause(must, f => f.AssetAmountIn, filter.MinAmountIn, filter.MaxAmountIn);
+            AddUlongRangeClause(must, f => f.AssetAmountOut, filter.MinAmountOut, filter.MaxAmountOut);
+
+            return must.Count == 0
+                ? query.MatchAll()
+                : query.Bool(b => b.Must(must.ToArray()));
+        }
+
+        private static void AddEitherAssetClause(List<Action<QueryDescriptor<Trade>>> must, ulong assetId)
+        {
+            must.Add(m => m.Bool(b => b.Should(
+                s => s.Term(t => t.Field(f => f.AssetIdIn).Value(assetId)),
+                s => s.Term(t => t.Field(f => f.AssetIdOut).Value(assetId))
+            )));
+        }
+
+        private static void AddUlongRangeClause(
+            List<Action<QueryDescriptor<Trade>>> must,
+            System.Linq.Expressions.Expression<Func<Trade, object?>> field,
+            ulong? gte,
+            ulong? lte)
+        {
+            if (!gte.HasValue && !lte.HasValue) return;
+
+            must.Add(m => m.Range(r => r.Number(n =>
+            {
+                if (gte.HasValue && lte.HasValue)
+                {
+                    n.Field(field).Gte(gte.Value).Lte(lte.Value);
+                }
+                else if (gte.HasValue)
+                {
+                    n.Field(field).Gte(gte.Value);
+                }
+                else if (lte.HasValue)
+                {
+                    n.Field(field).Lte(lte.Value);
+                }
+            })));
+        }
+
+        private static void AddDecimalRangeClause(
+            List<Action<QueryDescriptor<Trade>>> must,
+            System.Linq.Expressions.Expression<Func<Trade, object?>> field,
+            decimal? gte,
+            decimal? lte)
+        {
+            if (!gte.HasValue && !lte.HasValue) return;
+
+            must.Add(m => m.Range(r => r.Number(n =>
+            {
+                if (gte.HasValue && lte.HasValue)
+                {
+                    n.Field(field).Gte((double)gte.Value).Lte((double)lte.Value);
+                }
+                else if (gte.HasValue)
+                {
+                    n.Field(field).Gte((double)gte.Value);
+                }
+                else if (lte.HasValue)
+                {
+                    n.Field(field).Lte((double)lte.Value);
+                }
+            })));
+        }
+
+        private static void AddDateRangeClause(
+            List<Action<QueryDescriptor<Trade>>> must,
+            System.Linq.Expressions.Expression<Func<Trade, object?>> field,
+            DateTimeOffset? gte,
+            DateTimeOffset? lte)
+        {
+            if (!gte.HasValue && !lte.HasValue) return;
+
+            must.Add(m => m.Range(r => r.Date(d =>
+            {
+                if (gte.HasValue && lte.HasValue)
+                {
+                    d.Field(field).Gte(gte.Value.ToString("o")).Lte(lte.Value.ToString("o"));
+                }
+                else if (gte.HasValue)
+                {
+                    d.Field(field).Gte(gte.Value.ToString("o"));
+                }
+                else if (lte.HasValue)
+                {
+                    d.Field(field).Lte(lte.Value.ToString("o"));
+                }
+            })));
         }
     }
 }

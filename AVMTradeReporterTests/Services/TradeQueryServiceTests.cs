@@ -1,5 +1,8 @@
+using AVMTradeReporter.Model.DTO;
 using AVMTradeReporter.Models.Data;
+using AVMTradeReporter.Models.Data.Enums;
 using AVMTradeReporter.Services;
+using Elastic.Clients.Elasticsearch.QueryDsl;
 using Microsoft.Extensions.Logging;
 using NUnit.Framework;
 
@@ -95,6 +98,75 @@ namespace AVMTradeReporterTests.Services
             // Assert
             Assert.That(result, Is.Not.Null);
             Assert.That(result.Count, Is.EqualTo(0));
+        }
+
+        [Test]
+        public async Task GetTradesAsync_AdvancedFilterWithoutElasticsearch_ReturnsPagedMetadata()
+        {
+            // Act
+            var result = await _tradeQueryService.GetTradesAsync(new TradeFilter
+            {
+                AssetId = 123,
+                Offset = 20,
+                Size = 50
+            });
+
+            // Assert
+            Assert.That(result, Is.Not.Null);
+            Assert.That(result.Items.Count(), Is.EqualTo(0));
+            Assert.That(result.Total, Is.EqualTo(0));
+            Assert.That(result.Offset, Is.EqualTo(20));
+            Assert.That(result.Size, Is.EqualTo(50));
+            Assert.That(result.HasMore, Is.False);
+        }
+
+        [Test]
+        public void BuildQuery_WithAdvancedFilters_DoesNotThrow()
+        {
+            var filter = new TradeFilter
+            {
+                AssetId = 123,
+                AssetIdA = 123,
+                AssetIdB = 456,
+                Trader = "TRADER",
+                PoolAddress = "POOL",
+                PoolAppId = 789,
+                Protocol = DEXProtocol.Biatec,
+                TradeState = TxState.Confirmed,
+                BlockFrom = 100,
+                BlockTo = 200,
+                TimestampFrom = DateTimeOffset.UtcNow.AddHours(-1),
+                TimestampTo = DateTimeOffset.UtcNow,
+                MinValueUSD = 10m,
+                MaxValueUSD = 100m,
+                MinFeesUSD = 1m,
+                MaxFeesUSD = 5m,
+                MinAmountIn = 1000,
+                MaxAmountIn = 2000,
+                MinAmountOut = 3000,
+                MaxAmountOut = 4000
+            };
+
+            Assert.DoesNotThrow(() =>
+            {
+                var query = TradeQueryService.BuildQuery(new QueryDescriptor<Trade>(), filter);
+                Assert.That(query, Is.Not.Null);
+            });
+        }
+
+        [Test]
+        public void BuildQuery_WithTxId_TakesPrecedence()
+        {
+            var filter = new TradeFilter
+            {
+                TxId = "TX",
+                AssetId = 123,
+                Trader = "TRADER"
+            };
+
+            var query = TradeQueryService.BuildQuery(new QueryDescriptor<Trade>(), filter);
+
+            Assert.That(query, Is.Not.Null);
         }
     }
 

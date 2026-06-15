@@ -1,5 +1,7 @@
 using AVMTradeReporter.Controllers;
+using AVMTradeReporter.Model.DTO;
 using AVMTradeReporter.Models.Data;
+using AVMTradeReporter.Models.Data.Enums;
 using AVMTradeReporter.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -35,8 +37,8 @@ namespace AVMTradeReporterTests.Controllers
             var result = await _controller.GetTrades();
 
             // Assert
-            Assert.That(result.Result, Is.TypeOf<OkObjectResult>());
-            var okResult = result.Result as OkObjectResult;
+            Assert.That(result, Is.TypeOf<OkObjectResult>());
+            var okResult = result as OkObjectResult;
             Assert.That(okResult?.Value, Is.TypeOf<List<Trade>>());
         }
 
@@ -140,6 +142,41 @@ namespace AVMTradeReporterTests.Controllers
             Assert.That(_mockTradeQueryService.LastCalledAssetIdIn, Is.EqualTo(assetIdIn));
             Assert.That(_mockTradeQueryService.LastCalledAssetIdOut, Is.EqualTo(assetIdOut));
         }
+
+        [Test]
+        public async Task GetTrades_WithAdvancedFilter_ReturnsPagedResult()
+        {
+            // Act
+            var result = await _controller.GetTrades(
+                assetId: 123,
+                trader: "TRADER",
+                poolAddress: "POOL",
+                poolAppId: 456,
+                protocol: DEXProtocol.Pact,
+                tradeState: TxState.Confirmed,
+                minValueUSD: 100m,
+                sortBy: "valueUSD",
+                sortDirection: "asc",
+                offset: 10,
+                size: 25);
+
+            // Assert
+            Assert.That(result, Is.TypeOf<OkObjectResult>());
+            var okResult = result as OkObjectResult;
+            Assert.That(okResult?.Value, Is.TypeOf<PagedResult<Trade>>());
+            Assert.That(_mockTradeQueryService.LastCalledFilter, Is.Not.Null);
+            Assert.That(_mockTradeQueryService.LastCalledFilter?.AssetId, Is.EqualTo(123));
+            Assert.That(_mockTradeQueryService.LastCalledFilter?.Trader, Is.EqualTo("TRADER"));
+            Assert.That(_mockTradeQueryService.LastCalledFilter?.PoolAddress, Is.EqualTo("POOL"));
+            Assert.That(_mockTradeQueryService.LastCalledFilter?.PoolAppId, Is.EqualTo(456));
+            Assert.That(_mockTradeQueryService.LastCalledFilter?.Protocol, Is.EqualTo(DEXProtocol.Pact));
+            Assert.That(_mockTradeQueryService.LastCalledFilter?.TradeState, Is.EqualTo(TxState.Confirmed));
+            Assert.That(_mockTradeQueryService.LastCalledFilter?.MinValueUSD, Is.EqualTo(100m));
+            Assert.That(_mockTradeQueryService.LastCalledFilter?.SortBy, Is.EqualTo("valueUSD"));
+            Assert.That(_mockTradeQueryService.LastCalledFilter?.SortDirection, Is.EqualTo("asc"));
+            Assert.That(_mockTradeQueryService.LastCalledFilter?.Offset, Is.EqualTo(10));
+            Assert.That(_mockTradeQueryService.LastCalledFilter?.Size, Is.EqualTo(25));
+        }
     }
 
     // Mock implementation for testing
@@ -150,6 +187,7 @@ namespace AVMTradeReporterTests.Controllers
         public string? LastCalledTxId { get; private set; }
         public int LastCalledOffset { get; private set; }
         public int LastCalledSize { get; private set; }
+        public TradeFilter? LastCalledFilter { get; private set; }
 
         public Task<IEnumerable<Trade>> GetTradesAsync(
             ulong? assetIdIn = null,
@@ -166,6 +204,20 @@ namespace AVMTradeReporterTests.Controllers
             LastCalledSize = size;
 
             return Task.FromResult<IEnumerable<Trade>>(new List<Trade>());
+        }
+
+        public Task<PagedResult<Trade>> GetTradesAsync(TradeFilter filter, CancellationToken cancellationToken = default)
+        {
+            LastCalledFilter = filter;
+
+            return Task.FromResult(new PagedResult<Trade>
+            {
+                Items = new List<Trade>(),
+                Total = 0,
+                Offset = filter.Offset,
+                Size = filter.Size,
+                HasMore = false
+            });
         }
 
         public Task<Dictionary<string, (decimal Volume1H, decimal Volume24H, decimal Volume7D)>> GetPoolVolumesAsync(IEnumerable<string> poolAddresses, CancellationToken cancellationToken = default)
