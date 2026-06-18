@@ -102,7 +102,6 @@ metadata:
     nginx.ingress.kubernetes.io/session-cookie-hash: "sha1"
     cert-manager.io/cluster-issuer: letsencrypt
 spec:
-spec:
   ingressClassName: "nginx"
   tls:
     - hosts:
@@ -110,6 +109,37 @@ spec:
       secretName: tls-algorand-trades.de-4.biatec.io
   rules:
     - host: algorand-trades.de-4.biatec.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: avm-trade-reporter-service
+                port:
+                  number: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: avm-trade-reporter-ingress-main2
+  namespace: biatec-scan
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/session-cookie-name: "route"
+    nginx.ingress.kubernetes.io/session-cookie-hash: "sha1"
+    cert-manager.io/cluster-issuer: letsencrypt
+spec:
+  ingressClassName: "nginx"
+  tls:
+    - hosts:
+        - api.algorand.scan.biatec.io
+      secretName: tls-api.algorand.scan.biatec.io
+  rules:
+    - host: api.algorand.scan.biatec.io
       http:
         paths:
           - path: /
