@@ -26,6 +26,7 @@ Architecture
   - AssetRepository: asset metadata via Algod with optional Redis cache
   - BlockRepository: hub publishing for new blocks
   - IndexerRepository: progress tracking (round, genesis)
+  - StatsRepository: read-only Elasticsearch sum aggregations for DefiLlama DEX stats export
 - Processors (protocol-specific pool logic): PactPoolProcessor, TinyPoolProcessor, BiatecPoolProcessor
 - Models: see AVMTradeReporter/Model/* (Trade, Liquidity, Pool, AggregatedPool, Block, configuration types)
 
@@ -113,6 +114,13 @@ REST API
   - Returns details for a specific pool address
 - GET /api/pool/stats
   - Optional: assetIdA, assetIdB
+- GET /api/stats/dex (no authentication required, designed for DefiLlama adapters)
+  - Query: dex (Biatec|Pact|Tiny), timestamp (DateTimeOffset, inclusive window start)
+  - Returns aggregated 24-hour statistics for the given DEX protocol over [timestamp, timestamp+1day)
+  - Only confirmed trades are included in the aggregation
+  - Response fields: protocol, from, to, volumeUSD, feesUSD, feesLPUSD, feesProtocolUSD
+  - Powered by Elasticsearch sum aggregations on valueUSD, feesUSD, feesUSDProvider, feesUSDProtocol
+  - Example: GET /api/stats/dex?dex=Biatec&timestamp=2024-01-15T00:00:00Z
 - Test utilities (development)
   - GET /api/signalr/auth-test
   - GET /api/signalr/auth-test-authorized (requires auth)

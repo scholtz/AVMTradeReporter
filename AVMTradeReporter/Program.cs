@@ -93,6 +93,8 @@ namespace AVMTradeReporter
             builder.Services.AddSingleton<ITradeQueryService, TradeQueryService>();
             builder.Services.AddSingleton<ILiquidityQueryService, LiquidityQueryService>();
             builder.Services.AddSingleton<IOHLCService, OHLCService>();
+            builder.Services.AddSingleton<IStatsRepository, StatsRepository>();
+            builder.Services.AddSingleton<IStatsService, StatsService>();
 
             // Add Pool Processors
             builder.Services.AddSingleton<PactPoolProcessor>();
