@@ -39,35 +39,50 @@ needing to bump `<Version>` manually for every change. Bump the base `<Version>`
 in the `.csproj` only when you want to signal a semantic version change (e.g. a
 breaking change bumps the major version).
 
-## One-time setup: NuGet API key secret
+## One-time setup: NuGet Trusted Publishing (no long-lived secrets)
 
-The workflow pushes the package using an API key stored in the repository secret
-`NUGET_API_KEY`. To set this up:
+nuget.org now recommends **Trusted Publishing** over long-lived API keys for
+CI/CD publishing (API keys are still supported, but discouraged for automation).
+Trusted Publishing works via GitHub's OIDC token: on every run, the workflow
+exchanges a short-lived, cryptographically signed GitHub token for a temporary
+(1-hour) nuget.org API key — scoped to exactly this repo and workflow file, and
+never stored anywhere. This is what [`publish-nuget.yml`](.github/workflows/publish-nuget.yml)
+uses via the [`NuGet/login`](https://github.com/NuGet/login) action.
 
-1. **Create a NuGet.org API key**
+1. **Create a Trusted Publishing policy on nuget.org**
    - Sign in at [nuget.org](https://www.nuget.org) with the account/organization
      that owns (or will own) the `AVMTradeReporter.Models` package.
-   - Go to **Account -> API Keys -> Create**.
-   - Give it a name (e.g. `AVMTradeReporter-github-actions`).
-   - Set **Glob Pattern** to `AVMTradeReporter.Models*` (or `AVMTradeReporter.Models` for
-     an exact match) so the key can only push this package, not your whole account.
-   - Select scope **Push new packages and package versions**.
-   - Set an expiration date and copy the generated key — NuGet only shows it once.
+   - Click your username -> **Trusted Publishing** -> **Add a policy**.
+   - Fill in:
+     - **Repository Owner:** `scholtz`
+     - **Repository:** `AVMTradeReporter`
+     - **Workflow File:** `publish-nuget.yml` (file name only, not the
+       `.github/workflows/` path)
+     - **Environment:** leave empty (the workflow doesn't use a GitHub Actions
+       `environment:`)
+   - Choose the policy owner (your user, or the org, if the package should be
+     owned by an org). This must match the account you'll publish under.
 
-2. **Add the key as a GitHub Actions secret**
-   - In the GitHub repository, go to **Settings -> Secrets and variables -> Actions**.
-   - Click **New repository secret**.
-   - Name: `NUGET_API_KEY`
-   - Value: paste the API key from step 1.
-   - Click **Add secret**.
+2. **(Optional but recommended) Add a `NUGET_USER` secret**
+   - The `NuGet/login` action needs your nuget.org **profile name** (not email)
+     passed as `user`. The workflow reads it from the `NUGET_USER` repository
+     secret so it isn't hardcoded in the workflow file.
+   - In the GitHub repository, go to **Settings -> Secrets and variables ->
+     Actions -> New repository secret**.
+   - Name: `NUGET_USER`
+   - Value: your nuget.org username (profile name shown at
+     `nuget.org/profiles/<username>`).
 
-3. **First publish**
-   - The very first push of a new package ID reserves the package name for the
-     publishing account on NuGet.org. After that, only the same account (or a key
-     scoped to the package) can publish new versions, so keep the API key secret
-     safe and rotate it before it expires (repeat step 1-2 with a new key).
+3. **First publish activates the policy**
+   - If this is a public repo, the policy is active immediately. For a private
+     repo, a newly created policy is only *temporarily* active for 7 days —
+     the first successful publish supplies nuget.org with the GitHub repo/owner
+     IDs needed to lock the policy permanently. If 7 days pass with no publish,
+     just restart the 7-day window on nuget.org.
+   - No repository secret holds a long-lived credential; there is nothing to
+     rotate or revoke beyond the policy itself.
 
-No other secrets are required for this workflow.
+No `NUGET_API_KEY` secret is used or required by this workflow.
 
 ## Consuming the package
 
