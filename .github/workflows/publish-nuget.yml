@@ -1,0 +1,48 @@
+name: Publish NuGet Package
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'AVMTradeReporter.Models/**'
+      - '.github/workflows/publish-nuget.yml'
+  workflow_dispatch: {}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Compute package version
+        id: version
+        run: |
+          BASE_VERSION=$(grep -oPm1 "(?<=<Version>)[^<]+" AVMTradeReporter.Models/AVMTradeReporter.Models.csproj)
+          BUILD_STAMP=$(date -u +'%Y%m%d%H')
+          FULL_VERSION="${BASE_VERSION}.${BUILD_STAMP}"
+          echo "Package version: $FULL_VERSION"
+          echo "full_version=$FULL_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Restore
+        run: dotnet restore AVMTradeReporter.Models/AVMTradeReporter.Models.csproj
+
+      - name: Pack
+        run: >
+          dotnet pack AVMTradeReporter.Models/AVMTradeReporter.Models.csproj
+          -c Release
+          -p:Version=${{ steps.version.outputs.full_version }}
+          -o ${{ github.workspace }}/nupkg
+
+      - name: Push to NuGet.org
+        run: >
+          dotnet nuget push "${{ github.workspace }}/nupkg/*.nupkg"
+          --api-key ${{ secrets.NUGET_API_KEY }}
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate

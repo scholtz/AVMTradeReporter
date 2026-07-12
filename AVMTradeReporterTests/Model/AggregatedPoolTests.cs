@@ -364,7 +364,7 @@ namespace AVMTradeReporterTests.Model
             var priceLevel1 = aggregatedPool.VirtualSumBLevel1 / aggregatedPool.VirtualSumALevel1;
             Assert.That(priceLevel1, Is.EqualTo(0.2419287836457800044215208276m));
             var priceLevel2 = aggregatedPool.VirtualSumBLevel2 / aggregatedPool.VirtualSumALevel2;
-            Assert.That(priceLevel2, Is.EqualTo(0.2248087775069365526107028402m));
+            Assert.That(priceLevel2, Is.EqualTo(0.2248261907172968357188469714m));
 
         }
         [Test]

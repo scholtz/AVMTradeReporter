@@ -226,7 +226,7 @@ namespace AVMTradeReporter.Models.Data
                             {
                                 // special case when PMin == PMax, we can calculate the virtual amount directly
 
-                                return RealAmountA;
+                                return RealAmountB;
                             }
                             var a = Convert.ToDecimal(A.Value) / 1000000000;
                             var b = Convert.ToDecimal(B.Value) / 1000000000;

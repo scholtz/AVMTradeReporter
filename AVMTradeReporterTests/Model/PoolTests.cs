@@ -38,6 +38,29 @@ namespace AVMTradeReporterTests.Model
 
         }
         [Test]
+        public void ClAMMTest_FixedPrice_PMinEqualsPMax()
+        {
+            // Arrange - zero-width range (fixed-price) CLAMM pool, e.g. mainnet pool 3132508926
+            var pool = new AVMTradeReporter.Models.Data.Pool
+            {
+                AssetIdA = 1,
+                AssetADecimals = 6,
+                AssetIdB = 2,
+                AssetBDecimals = 6,
+                PMin = 0.9m,
+                PMax = 0.9m,
+                A = 104_999_836_495,
+                B = 80_777_888_079,
+                Protocol = DEXProtocol.Biatec,
+                AMMType = AMMType.ConcentratedLiquidityAMM,
+            };
+
+            // VirtualAmountA/B must reflect each side's own real balance, not both collapse to RealAmountA
+            Assert.That(pool.VirtualAmountA, Is.EqualTo(pool.RealAmountA));
+            Assert.That(pool.VirtualAmountB, Is.EqualTo(pool.RealAmountB));
+        }
+
+        [Test]
         public void ClAMMTest3136517663()
         {
             // Arrange
