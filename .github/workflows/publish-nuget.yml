@@ -36,11 +36,32 @@ jobs:
       - name: Restore
         run: dotnet restore AVMTradeReporter.Models/AVMTradeReporter.Models.csproj
 
+      # The project sets <GeneratePackageOnBuild>true</GeneratePackageOnBuild> (for local `dotnet
+      # build` convenience), which makes `dotnet pack` skip its own Build step and assume the DLL
+      # was already built. On a clean checkout there is no prior build, so pack fails with NU5026
+      # ("file to be packed was not found on disk") unless we build explicitly first.
+      #
+      # AssemblyVersion/FileVersion are pinned separately from the package Version: those are
+      # System.Version fields with UInt16 components (max 65535), so the yyyyMMddHH build stamp
+      # (which fits NuGet's own Int32-per-component limit, see NUGET_PUBLISHING.md) overflows them
+      # and fails the compile with CS7034 if left to default to Version.
+      - name: Build
+        run: >
+          dotnet build AVMTradeReporter.Models/AVMTradeReporter.Models.csproj
+          -c Release
+          --no-restore
+          -p:Version=${{ steps.version.outputs.full_version }}
+          -p:AssemblyVersion=1.0.0.0
+          -p:FileVersion=1.0.0.0
+
       - name: Pack
         run: >
           dotnet pack AVMTradeReporter.Models/AVMTradeReporter.Models.csproj
           -c Release
+          --no-build
           -p:Version=${{ steps.version.outputs.full_version }}
+          -p:AssemblyVersion=1.0.0.0
+          -p:FileVersion=1.0.0.0
           -o ${{ github.workspace }}/nupkg
 
       # Exchanges a short-lived GitHub OIDC token for a temporary (1-hour) nuget.org API key,

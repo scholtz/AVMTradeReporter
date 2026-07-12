@@ -39,6 +39,15 @@ needing to bump `<Version>` manually for every change. Bump the base `<Version>`
 in the `.csproj` only when you want to signal a semantic version change (e.g. a
 breaking change bumps the major version).
 
+> **Note:** the workflow's `Build`/`Pack` steps also pin `-p:AssemblyVersion=1.0.0.0
+> -p:FileVersion=1.0.0.0`. Those two are separate, older `System.Version` fields
+> baked into the compiled DLL, whose components must fit in a `UInt16` (max
+> 65535) — much stricter than the package version's Int32-per-component limit
+> above. Without pinning them, the build-stamped `<Version>` would overflow that
+> and fail to compile with `CS7034`. Pinning them to a stable value also means
+> the assembly's own identity doesn't churn on every build (only the NuGet
+> package version does), which is the conventional approach.
+
 ## One-time setup: NuGet Trusted Publishing (no long-lived secrets)
 
 nuget.org now recommends **Trusted Publishing** over long-lived API keys for
