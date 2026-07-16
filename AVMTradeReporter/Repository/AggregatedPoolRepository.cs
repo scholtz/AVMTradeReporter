@@ -396,7 +396,7 @@ namespace AVMTradeReporter.Repository
                     priceCache[assetId] = asset.PriceUSD;
 
                     // Set historical prices
-                    var ohlcService = _serviceProvider.GetService<IOHLCService>();
+                    var ohlcService = _serviceProvider?.GetService<IOHLCService>();
                     
                     if (ohlcService != null)
                     {
