@@ -103,7 +103,10 @@ namespace AVMTradeReporter
 
             // Register the background services
             builder.Services.AddHostedService<TradeReporterBackgroundService>();
-            builder.Services.AddHostedService<GossipBackgroundService>();
+            // Registered as a singleton (not just AddHostedService) so GossipController can resolve the same
+            // running instance to report live relay connection status.
+            builder.Services.AddSingleton<GossipBackgroundService>();
+            builder.Services.AddHostedService(sp => sp.GetRequiredService<GossipBackgroundService>());
 
             // Register Pool Refresh Background Service only if enabled
             if (appConfig?.PoolRefresh?.Enabled == true)
@@ -291,8 +294,10 @@ namespace AVMTradeReporter
 
             var bw = app.Services.GetService<TradeReporterBackgroundService>();
             bw?.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
-            var bwG = app.Services.GetService<GossipBackgroundService>();
-            bwG?.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
+            // GossipBackgroundService is now resolvable via DI (registered as a singleton above so
+            // GossipController can query it), so it must NOT also be started manually here - the generic
+            // host already starts every registered IHostedService (including it) when app.Run() below
+            // begins; starting it a second time here would run ExecuteAsync twice concurrently.
 
             app.Run();
         }

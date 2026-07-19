@@ -13,6 +13,15 @@ using System.Collections.Concurrent;
 
 namespace AVMTradeReporter.Services
 {
+    public class GossipRelayStatus
+    {
+        public string Host { get; set; } = string.Empty;
+        public DateTime ConnectedAtUtc { get; set; }
+        public long MessageCount { get; set; }
+        public long WinCount { get; set; }
+        public DateTime? LastMessageUtc { get; set; }
+    }
+
     public class GossipBackgroundService : BackgroundService, ITradeService, ILiquidityService
     {
         private readonly ILogger<GossipBackgroundService> _logger;
@@ -86,46 +95,50 @@ namespace AVMTradeReporter.Services
 
         ConcurrentDictionary<string, RelayCandidate> _relayCandidates = new();
 
+        public IEnumerable<GossipRelayStatus> GetRelayStatus()
+        {
+            return _relayCandidates.Values.Select(c => new GossipRelayStatus
+            {
+                Host = c.Host,
+                ConnectedAtUtc = c.ConnectedAtUtc,
+                MessageCount = c.MessageCount,
+                WinCount = c.WinCount,
+                LastMessageUtc = c.LastMessageUtc == default ? (DateTime?)null : c.LastMessageUtc,
+            });
+        }
+
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             var staticConfigs = _appConfig.Value.GossipWebsocketClientConfigurations;
-            var hasConfiguredHost = staticConfigs != null && staticConfigs.Any(c => !string.IsNullOrWhiteSpace(c.Host));
-
-            if (hasConfiguredHost)
-            {
-                foreach (var clientConfig in staticConfigs!)
-                {
-                    if (string.IsNullOrWhiteSpace(clientConfig.Host)) continue;
-                    _logger.LogInformation($"Starting {clientConfig.Host}");
-                    await ConnectRelayAsync(clientConfig.Host);
-                }
-
-                while (!stoppingToken.IsCancellationRequested)
-                {
-                    await Task.Delay(1000, stoppingToken);
-                }
-                return;
-            }
-
-            // No static relay configured: discover all known relays, race them, and keep only the fastest ones connected.
+            var staticHosts = staticConfigs?.Where(c => !string.IsNullOrWhiteSpace(c.Host)).Select(c => c.Host).Distinct().ToList() ?? new List<string>();
+            var hasConfiguredHost = staticHosts.Count > 0;
             var discoveryConfig = _appConfig.Value.GossipDiscovery;
 
             List<string> relayHosts;
-            try
+            if (hasConfiguredHost)
             {
-                var gossipHttpConfig = new GossipHttpConfiguration(GossipNodePurpose.Relay, GossipNetwork.AlgorandMainNet, "ws");
-                relayHosts = gossipHttpConfig.Hosts
-                    .Select(h => $"{h}/v1/{gossipHttpConfig.GenesisId}/gossip")
-                    .Distinct()
-                    .ToList();
+                relayHosts = staticHosts;
+                _logger.LogInformation($"Using {relayHosts.Count} statically configured gossip relay(s).");
             }
-            catch (Exception ex)
+            else
             {
-                _logger.LogError(ex, "Failed to resolve gossip relay hosts via DNS SRV");
-                relayHosts = new List<string>();
-            }
+                // No static relay configured: discover all known relays via DNS SRV.
+                try
+                {
+                    var gossipHttpConfig = new GossipHttpConfiguration(GossipNodePurpose.Relay, GossipNetwork.AlgorandMainNet, "ws");
+                    relayHosts = gossipHttpConfig.Hosts
+                        .Select(h => $"{h}/v1/{gossipHttpConfig.GenesisId}/gossip")
+                        .Distinct()
+                        .ToList();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to resolve gossip relay hosts via DNS SRV");
+                    relayHosts = new List<string>();
+                }
 
-            _logger.LogInformation($"Discovered {relayHosts.Count} gossip relays. Connecting to all of them to determine the fastest {discoveryConfig.MaxActiveRelayConnections}.");
+                _logger.LogInformation($"Discovered {relayHosts.Count} gossip relays. Connecting to all of them to determine the fastest {discoveryConfig.MaxActiveRelayConnections}.");
+            }
 
             foreach (var host in relayHosts)
             {
@@ -133,7 +146,8 @@ namespace AVMTradeReporter.Services
             }
 
             var startedUtc = DateTime.UtcNow;
-            var warmedUp = false;
+            // A static relay list is already the exact set we want connected, so there's nothing to prune down to.
+            var warmedUp = hasConfiguredHost;
             var lastEvaluationUtc = DateTime.UtcNow;
 
             while (!stoppingToken.IsCancellationRequested)
@@ -157,6 +171,8 @@ namespace AVMTradeReporter.Services
                     continue;
                 }
                 lastEvaluationUtc = DateTime.UtcNow;
+                // Reconnects any relay (static or discovered) that has gone silent for too long, so a dead
+                // relay never permanently starves this service of gossip traffic.
                 await ReplaceStaleRelaysAsync(relayHosts, discoveryConfig);
             }
         }
