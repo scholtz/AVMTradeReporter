@@ -47,7 +47,12 @@ AppConfiguration
 - StartRound, MinRound, MaxRound: optional round bounds
 - Algod, Algod2, Algod3: AlgodConfiguration endpoints (Host, ApiKey, Header)
 - Elastic: ElasticConfiguration (Host, ApiKey)
-- GossipWebsocketClientConfigurations: list of websocket peers (if used by gossip service)
+- GossipWebsocketClientConfigurations: list of websocket peers (if used by gossip service). If the first entry's Host is empty (e.g. left unset via `AppConfiguration__GossipWebsocketClientConfigurations__0__Host`), the gossip service instead discovers all relays via DNS SRV, connects to all of them, and keeps only the fastest ones connected per GossipDiscovery.
+- GossipDiscovery: dynamic relay discovery/ranking used when no gossip relay is statically configured
+  - MaxActiveRelayConnections: how many relays to stay connected to once ranked (default 10)
+  - WarmUpSeconds: how long to race all discovered relays before pruning down (default 120)
+  - ReEvaluationIntervalSeconds: how often to check active relays' health once pruned (default 300)
+  - StaleRelaySeconds: a connected relay silent for longer than this is replaced with a fresh candidate (default 600)
 - Redis: RedisConfiguration
   - ConnectionString: e.g., localhost:6379
   - KeyPrefix: default avmtrade:pools:

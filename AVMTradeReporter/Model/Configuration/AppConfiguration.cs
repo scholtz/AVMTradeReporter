@@ -40,6 +40,12 @@ namespace AVMTradeReporter.Model.Configuration
         /// </summary>
         public List<GossipWebsocketClientConfiguration> GossipWebsocketClientConfigurations { get; set; } = new();
 
+        /// <summary>
+        /// Configures the dynamic relay discovery/ranking used when no gossip relay is statically
+        /// configured (i.e. GossipWebsocketClientConfigurations is empty or its first Host is not set).
+        /// </summary>
+        public GossipDiscoveryConfiguration GossipDiscovery { get; set; } = new GossipDiscoveryConfiguration();
+
         public RedisConfiguration Redis { get; set; } = new RedisConfiguration();
 
         /// <summary>
@@ -109,6 +115,32 @@ namespace AVMTradeReporter.Model.Configuration
         /// How often to update volumes (in seconds). Default is 60 seconds.
         /// </summary>
         public int IntervalSeconds { get; set; } = 60;
+    }
+
+    public class GossipDiscoveryConfiguration
+    {
+        /// <summary>
+        /// How many gossip relays to stay connected to once the fastest relays have been determined. Default is 10.
+        /// </summary>
+        public int MaxActiveRelayConnections { get; set; } = 10;
+
+        /// <summary>
+        /// How long to stay connected to all discovered relays before ranking them by delivery speed and
+        /// pruning down to <see cref="MaxActiveRelayConnections"/>. Default is 120 seconds.
+        /// </summary>
+        public int WarmUpSeconds { get; set; } = 120;
+
+        /// <summary>
+        /// How often, once pruned, to check the active relays' health and top up the connection count back
+        /// to <see cref="MaxActiveRelayConnections"/> if any relay has gone silent. Default is 300 seconds.
+        /// </summary>
+        public int ReEvaluationIntervalSeconds { get; set; } = 300;
+
+        /// <summary>
+        /// A connected relay that hasn't delivered any transaction within this many seconds is considered
+        /// stale and is replaced with a fresh candidate from the discovered relay list. Default is 600 seconds.
+        /// </summary>
+        public int StaleRelaySeconds { get; set; } = 600;
     }
 
     public class BlockProcessingConfiguration
