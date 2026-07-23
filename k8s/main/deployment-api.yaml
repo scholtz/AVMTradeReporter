@@ -47,10 +47,27 @@ spec:
             - name: avm-trade-reporter-main-conf
               mountPath: /app/appsettings.json
               subPath: appsettings.json
+            - name: avm-trade-reporter-images
+              mountPath: /app/images
       volumes:
         - name: avm-trade-reporter-main-conf
           configMap:
             name: avm-trade-reporter-main-conf
+        - name: avm-trade-reporter-images
+          persistentVolumeClaim:
+            claimName: avm-trade-reporter-images-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: avm-trade-reporter-images-pvc
+  namespace: biatec-scan
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
 ---
 apiVersion: v1
 kind: Service

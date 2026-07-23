@@ -4,6 +4,7 @@ using AVMTradeReporter.Processors.Image;
 using AVMTradeReporter.Repository;
 using Microsoft.AspNetCore.Mvc;
 using System.Net;
+using System.Text;
 
 namespace AVMTradeReporter.Controllers
 {
@@ -11,6 +12,18 @@ namespace AVMTradeReporter.Controllers
     [Route("api/asset")]
     public class AssetController : ControllerBase
     {
+        private const string NativeAlgoLogoSvg = """
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="198px" height="198px" viewBox="0 0 198 198" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>algorand-logomark-blue-RGB</title>
+    <g id="Page-1" stroke="none" strokeWidth="1" fill="none" fill-rule="evenodd">
+        <g id="algorand-logomark-blue-RGB" transform="translate(0.3, 0)" fill="#2D2DF1" fill-rule="nonzero">
+            <polygon id="Path" points="197.2 197.6 166.4 197.6 146.3 123 103.1 197.6 68.6 197.6 135.3 82.1 124.5 41.8 34.5 197.6 2.84217094e-14 197.6 114.1 0 144.4 0 157.5 49.2 188.7 49.2 167.5 86.2"></polygon>
+        </g>
+    </g>
+</svg>
+""";
+
         private readonly ILogger<AssetController> _logger;
         private readonly IAssetRepository _assetRepository;
 
@@ -66,15 +79,19 @@ namespace AVMTradeReporter.Controllers
         {
             try
             {
+                if (assetId == 0)
+                {
+                    SetImageCacheHeaders();
+                    return File(Encoding.UTF8.GetBytes(NativeAlgoLogoSvg), "image/svg+xml");
+                }
+
                 var cancellationToken = HttpContext.RequestAborted;
 
                 var processor = new MainnetImageProcessor();
                 var data = await processor.LoadImageAsync(assetId, cancellationToken);
                 if (data.Length > 100)
                 {
-                    // add cache headers to cache for 1 week
-                    Response.Headers["Cache-Control"] = "public,max-age=604800"; // 1
-                    Response.Headers["Expires"] = DateTime.UtcNow.AddDays(7).ToString("R");
+                    SetImageCacheHeaders();
                 }
                 return File(data, "image/png");
             }
@@ -93,6 +110,12 @@ namespace AVMTradeReporter.Controllers
                 _logger.LogError(ex, "Failed to retrieve asset image for id {AssetId}", assetId);
                 return StatusCode(500, new { error = "Failed to retrieve asset image" });
             }
+        }
+
+        private void SetImageCacheHeaders()
+        {
+            Response.Headers["Cache-Control"] = "public,max-age=604800";
+            Response.Headers["Expires"] = DateTime.UtcNow.AddDays(7).ToString("R");
         }
     }
 }
