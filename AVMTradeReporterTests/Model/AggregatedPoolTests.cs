@@ -27,6 +27,109 @@ namespace AVMTradeReporterTests.Model
         }
 
         [Test]
+        public void FromPools_ExcludesOutOfRangePoolsFromPriceCalculation()
+        {
+            // Arrange - GoldDAO/USDC scenario from issue #17: two zero-width "wall" pools sit out of range
+            // (a huge one with ~100k GoldDAO waiting at price 1.0), one in-range CLAMM pool and one
+            // traditional AMM pool trade around ~0.98. The walls must not skew the aggregated price.
+            ulong goldDao = 1241945177, usdc = 31566704;
+
+            var wallAt1 = new AVMTradeReporter.Models.Data.Pool // mainnet 3109603139 (FW6O)
+            {
+                AssetIdA = goldDao,
+                AssetADecimals = 6,
+                AssetIdB = usdc,
+                AssetBDecimals = 6,
+                PMin = 1m,
+                PMax = 1m,
+                A = 100_100_867_000_000, // 100100.867 GoldDAO
+                B = 8_000_000,           // 0.008 USDC
+                Protocol = DEXProtocol.Biatec,
+                AMMType = AMMType.ConcentratedLiquidityAMM,
+            };
+            var wallAt09 = new AVMTradeReporter.Models.Data.Pool // mainnet 3132508926 (CYXT)
+            {
+                AssetIdA = goldDao,
+                AssetADecimals = 6,
+                AssetIdB = usdc,
+                AssetBDecimals = 6,
+                PMin = 0.9m,
+                PMax = 0.9m,
+                A = 815_000_000,         // 0.815 GoldDAO
+                B = 260_800_000_000,     // 260.8 USDC
+                Protocol = DEXProtocol.Biatec,
+                AMMType = AMMType.ConcentratedLiquidityAMM,
+            };
+            var inRangeClamm = new AVMTradeReporter.Models.Data.Pool // mainnet 3098469455 (LBLO)
+            {
+                AssetIdA = goldDao,
+                AssetADecimals = 6,
+                AssetIdB = usdc,
+                AssetBDecimals = 6,
+                PMin = 0.9m,
+                PMax = 1m,
+                A = 2_041_000_000,       // 2.041 GoldDAO
+                B = 15_008_000_000,      // 15.008 USDC
+                Protocol = DEXProtocol.Biatec,
+                AMMType = AMMType.ConcentratedLiquidityAMM,
+            };
+            var traditional = new AVMTradeReporter.Models.Data.Pool // mainnet 1243421154 (Pact)
+            {
+                AssetIdA = goldDao,
+                AssetADecimals = 6,
+                AssetIdB = usdc,
+                AssetBDecimals = 6,
+                A = 2_962_721_000,       // 2962.721 GoldDAO
+                AF = 0,
+                B = 2_898_207_000,       // 2898.207 USDC
+                BF = 0,
+                Protocol = DEXProtocol.Pact,
+                AMMType = AMMType.OldAMM,
+            };
+
+            // Act
+            var result = AggregatedPool.FromPools(new[] { wallAt1, wallAt09, inRangeClamm, traditional });
+            var agg = result.Single(r => r.AssetIdA == goldDao && r.AssetIdB == usdc);
+
+            // Assert - price must come only from the two in-range pools (~0.98), not be dragged
+            // towards 1.0 by the 100k GoldDAO wall (previously reported 0.999)
+            var price = agg.VirtualSumBLevel1ForPrice!.Value / agg.VirtualSumALevel1ForPrice!.Value;
+            var expectedPrice = (traditional.VirtualAmountBForPrice + inRangeClamm.VirtualAmountBForPrice)
+                / (traditional.VirtualAmountAForPrice + inRangeClamm.VirtualAmountAForPrice);
+            Assert.That(price, Is.EqualTo(expectedPrice).Within(0.0000000001m));
+            Assert.That(price, Is.InRange(0.95m, 0.99m));
+
+            // Total virtual sums and TVL still count all pools - the wall liquidity is real, it just cannot vote on price
+            Assert.That(agg.PoolCount, Is.EqualTo(4));
+            Assert.That(agg.TVL_A, Is.EqualTo(wallAt1.RealAmountA + wallAt09.RealAmountA + inRangeClamm.RealAmountA + traditional.RealAmountA));
+        }
+
+        [Test]
+        public void FromPools_WallPoolsOnly_StillProducePrice()
+        {
+            // When a pair has only zero-width pools, fall back to using them so the pair is not left priceless
+            var wall = new AVMTradeReporter.Models.Data.Pool
+            {
+                AssetIdA = 1,
+                AssetADecimals = 6,
+                AssetIdB = 2,
+                AssetBDecimals = 6,
+                PMin = 0.9m,
+                PMax = 0.9m,
+                A = 815_000_000,
+                B = 260_800_000_000,
+                Protocol = DEXProtocol.Biatec,
+                AMMType = AMMType.ConcentratedLiquidityAMM,
+            };
+
+            var result = AggregatedPool.FromPools(new[] { wall });
+            var agg = result.Single(r => r.AssetIdA == 1 && r.AssetIdB == 2);
+
+            var price = agg.VirtualSumBLevel1ForPrice!.Value / agg.VirtualSumALevel1ForPrice!.Value;
+            Assert.That(price, Is.EqualTo(0.9m).Within(0.0000000001m));
+        }
+
+        [Test]
         public void FromPools_AggregatesAcrossBothDirections()
         {
             // Arrange

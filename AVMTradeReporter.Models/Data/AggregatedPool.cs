@@ -176,14 +176,32 @@ namespace AVMTradeReporter.Models.Data
                 //Console.WriteLine(JsonConvert.SerializeObject(g.Sum(p => p.VirtualAmountA)));
                 //Console.WriteLine(JsonConvert.SerializeObject(g.Sum(p => p.VirtualAmountB)));
                 //Console.WriteLine(JsonConvert.SerializeObject(g));
+                var groupPools = g.ToList();
+
+                // Pools with a zero-width price range (PMin == PMax) are limit orders, not price discovery -
+                // they cannot be used to establish the market price. Compute a preliminary price from the
+                // remaining pools, then include in the price sums only pools whose [PMin, PMax] range contains
+                // that price. Out-of-range pools hold all liquidity on one side (orders waiting to be reached)
+                // and would otherwise skew the aggregated price by their depth.
+                var priceDiscoveryPools = groupPools.Where(p => !p.HasZeroWidthPriceRange).ToList();
+                if (priceDiscoveryPools.Count == 0) priceDiscoveryPools = groupPools;
+                var poolsForPrice = priceDiscoveryPools;
+                var preliminarySumA = priceDiscoveryPools.Sum(p => p.VirtualAmountAForPrice);
+                if (preliminarySumA > 0)
+                {
+                    var preliminaryPrice = priceDiscoveryPools.Sum(p => p.VirtualAmountBForPrice) / preliminarySumA;
+                    var inRangePools = groupPools.Where(p => p.IsPriceWithinRange(preliminaryPrice)).ToList();
+                    if (inRangePools.Count > 0) poolsForPrice = inRangePools;
+                }
+
                 ret[$"{g.Key.A}-{g.Key.B}"] = new AggregatedPool
                 {
                     AssetIdA = g.Key.A,
                     AssetIdB = g.Key.B,
                     VirtualSumALevel1 = g.Sum(p => p.VirtualAmountA),
-                    VirtualSumALevel1ForPrice = g.Sum(p => p.VirtualAmountAForPrice),
+                    VirtualSumALevel1ForPrice = poolsForPrice.Sum(p => p.VirtualAmountAForPrice),
                     VirtualSumBLevel1 = g.Sum(p => p.VirtualAmountB),
-                    VirtualSumBLevel1ForPrice = g.Sum(p => p.VirtualAmountBForPrice),
+                    VirtualSumBLevel1ForPrice = poolsForPrice.Sum(p => p.VirtualAmountBForPrice),
                     TotalTVLAssetAInUSD = g.Sum(p => p.TotalTVLAssetAInUSD ?? 0),
                     TotalTVLAssetBInUSD = g.Sum(p => p.TotalTVLAssetBInUSD ?? 0),
                     Volume1H = g.Sum(p => p.Volume1H),

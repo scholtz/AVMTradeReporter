@@ -314,6 +314,26 @@ namespace AVMTradeReporter.Models.Data
                 return VirtualAmountB;
             }
         }
+        /// <summary>
+        /// True when the pool has a zero-width price range (PMin == PMax), i.e. it acts as a limit order
+        /// at a single price rather than a two-sided AMM curve.
+        /// </summary>
+        public bool HasZeroWidthPriceRange => PMin.HasValue && PMax.HasValue && PMin.Value == PMax.Value;
+
+        /// <summary>
+        /// Returns true when the given price falls within this pool's price range [PMin, PMax].
+        /// Pools without a bounded range (traditional AMMs with PMin = 0 / PMax = infinity or missing values)
+        /// are considered always in range. Pools whose range does not contain the current market price hold
+        /// all their liquidity on one side (limit orders waiting to be reached) and must not contribute
+        /// to price calculation.
+        /// </summary>
+        public bool IsPriceWithinRange(decimal price)
+        {
+            if (PMin.HasValue && PMin.Value > 0 && price < PMin.Value) return false;
+            if (PMax.HasValue && PMax.Value > 0 && price > PMax.Value) return false;
+            return true;
+        }
+
         public decimal RealAmountB
         {
             get
