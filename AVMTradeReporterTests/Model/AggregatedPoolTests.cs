@@ -364,7 +364,9 @@ namespace AVMTradeReporterTests.Model
             var priceLevel1 = aggregatedPool.VirtualSumBLevel1 / aggregatedPool.VirtualSumALevel1;
             Assert.That(priceLevel1, Is.EqualTo(0.2419287836457800044215208276m));
             var priceLevel2 = aggregatedPool.VirtualSumBLevel2 / aggregatedPool.VirtualSumALevel2;
-            Assert.That(priceLevel2, Is.EqualTo(0.2248261907172968357188469714m));
+            // dataset contains wall pool 3132508926 (pMin == pMax == 0.9, issue #17); its virtual amounts
+            // are now derived from the wall price instead of raw balances, slightly shifting the level-2 sum
+            Assert.That(priceLevel2, Is.EqualTo(0.224806843084827140038560109m));
 
         }
         [Test]

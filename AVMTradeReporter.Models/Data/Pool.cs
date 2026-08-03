@@ -114,8 +114,12 @@ namespace AVMTradeReporter.Models.Data
 
                             if (PMin == PMax)
                             {
-                                // special case when PMin == PMax, we can calculate the virtual amount directly
-
+                                // zero-width range (limit order / price wall) - the pool trades at exactly PMin,
+                                // so derive virtual amounts from the wall price to keep VirtualAmountB / VirtualAmountA == PMin
+                                if (PMin.Value > 0)
+                                {
+                                    return RealAmountA + RealAmountB / PMin.Value;
+                                }
                                 return RealAmountA;
                             }
 
@@ -224,8 +228,12 @@ namespace AVMTradeReporter.Models.Data
 
                             if (PMin == PMax)
                             {
-                                // special case when PMin == PMax, we can calculate the virtual amount directly
-
+                                // zero-width range (limit order / price wall) - the pool trades at exactly PMin,
+                                // so derive virtual amounts from the wall price to keep VirtualAmountB / VirtualAmountA == PMin
+                                if (PMin.Value > 0)
+                                {
+                                    return RealAmountA * PMin.Value + RealAmountB;
+                                }
                                 return RealAmountB;
                             }
                             var a = Convert.ToDecimal(A.Value) / 1000000000;

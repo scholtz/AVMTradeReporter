@@ -55,9 +55,35 @@ namespace AVMTradeReporterTests.Model
                 AMMType = AMMType.ConcentratedLiquidityAMM,
             };
 
-            // VirtualAmountA/B must reflect each side's own real balance, not both collapse to RealAmountA
-            Assert.That(pool.VirtualAmountA, Is.EqualTo(pool.RealAmountA));
-            Assert.That(pool.VirtualAmountB, Is.EqualTo(pool.RealAmountB));
+            // Zero-width range pools trade at exactly PMin (== PMax); virtual amounts must be derived
+            // from the wall price so that VirtualAmountB / VirtualAmountA == PMin, instead of falling
+            // back to raw balances whose quotient can be far outside [PMin, PMax] (issue #17)
+            Assert.That(pool.VirtualAmountA, Is.EqualTo(pool.RealAmountA + pool.RealAmountB / 0.9m));
+            Assert.That(pool.VirtualAmountB, Is.EqualTo(pool.RealAmountA * 0.9m + pool.RealAmountB));
+            Assert.That(pool.VirtualAmountB / pool.VirtualAmountA, Is.EqualTo(0.9m).Within(0.0000000001m));
+        }
+
+        [Test]
+        public void ClAMMTest_FixedPrice_OutOfRange_AllLiquidityOnOneSide()
+        {
+            // Arrange - wall pool with nearly all liquidity on one side, e.g. mainnet pool 3132508926
+            // (0.815 GoldDAO vs 260.8 USDC, pMin == pMax == 0.9); raw quotient would be ~320
+            var pool = new AVMTradeReporter.Models.Data.Pool
+            {
+                AssetIdA = 1,
+                AssetADecimals = 6,
+                AssetIdB = 2,
+                AssetBDecimals = 6,
+                PMin = 0.9m,
+                PMax = 0.9m,
+                A = 815_000_000,        // 0.815
+                B = 260_800_000_000,    // 260.8
+                Protocol = DEXProtocol.Biatec,
+                AMMType = AMMType.ConcentratedLiquidityAMM,
+            };
+
+            var price = pool.VirtualAmountB / pool.VirtualAmountA;
+            Assert.That(price, Is.EqualTo(0.9m).Within(0.0000000001m), "Wall pool price must equal PMin, not the raw balance quotient");
         }
 
         [Test]
