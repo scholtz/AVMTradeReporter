@@ -15,7 +15,7 @@ it's also running in production - both environments get the exact same image on 
 | ConfigMap | `avm-trade-reporter-main-conf` | `avm-trade-reporter-stage-main-conf` |
 | Secret | `avm-trade-reporter-secret` / `avm-trade-reporter2-secret` / `avm-trade-reporter-subscriber-secret` (managed by hand in-cluster) | `avm-trade-reporter-stage-secret` / `avm-trade-reporter-subscriber-stage-secret` (re-created by CI from `STAGE_ELASTIC_*`/`STAGE_REDIS_*` GitHub secrets on every deploy) |
 | Redis key prefixes / pub-sub channels | `avmtrade:pools:`, `avmtrade:aggregatedpools:`, `avmtrade:pool:updates`, `avmtrade:aggregatedpool:updates` | `avmtrade:stage:pools:`, `avmtrade:stage:aggregatedpools:`, `avmtrade:stage:pool:updates`, `avmtrade:stage:aggregatedpool:updates` |
-| Hostnames | `algorand-trades.de-4.biatec.io`, `api.algorand.scan.biatec.io` | `stage-algorand-trades.de-4.biatec.io`, `stage-api.algorand.scan.biatec.io` |
+| Hostnames | `algorand-trades.de-4.biatec.io`, `api.algorand.scan.biatec.io` | `stage-algorand-trades.de-4.biatec.io`, `testnet.scan.biatec.io` |
 
 Because the two environments share the `biatec-scan` namespace, distinct resource names are what keep
 them from colliding - there's no separate stage namespace to fall back on.

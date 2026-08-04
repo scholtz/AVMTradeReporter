@@ -89,7 +89,7 @@ running under that Environment, so no workflow changes are needed to adopt this 
   as the production hostnames, before the first `deploy-stage` run, so cert-manager can issue TLS
   certificates for them:
   - `stage-algorand-trades.de-4.biatec.io`
-  - `stage-api.algorand.scan.biatec.io`
+  - `testnet.scan.biatec.io`
 
 ## Manifests updated by this workflow
 

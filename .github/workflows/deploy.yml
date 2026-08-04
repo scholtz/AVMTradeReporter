@@ -157,7 +157,7 @@ jobs:
     # they can never be referenced by the production job by mistake. See docs/CICD_GITHUB_ACTIONS.md.
     environment:
       name: stage
-      url: https://stage-api.algorand.scan.biatec.io
+      url: https://testnet.scan.biatec.io
     steps:
       - name: Checkout
         uses: actions/checkout@v4
