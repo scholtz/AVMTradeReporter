@@ -1,0 +1,143 @@
+# Stage environment for AVMTradeReporter (testnet) - deployed automatically by
+# .github/workflows/deploy.yml on every push to master. Lives in the same "biatec-scan" namespace as
+# production (k8s/main/deployment-api.yaml) but under entirely distinct resource names/hosts/ConfigMap/
+# Secret, so it can never collide with or be confused for the production Deployment/Service/Ingress.
+# See docs/CICD_GITHUB_ACTIONS.md for the full pipeline and docs/STAGE_ENVIRONMENT.md for what is (and
+# isn't) isolated between stage and production.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: avm-trade-reporter-stage-app-deployment
+  namespace: biatec-scan
+spec:
+  selector:
+    matchLabels:
+      app: avm-trade-reporter-stage-app
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: avm-trade-reporter-stage-app
+    spec:
+      containers:
+        - name: avm-trade-reporter-stage-app
+          image: scholtz2/avm-trade-reporter:1.2026.08.04-main
+          imagePullPolicy: Always
+          resources:
+            requests:
+              cpu: 100m
+              memory: "150Mi"
+            limits:
+              cpu: 2000m
+              memory: "1500Mi"
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          envFrom:
+            # Dedicated stage secret, deliberately separate from production's avm-trade-reporter-secret.
+            # Re-created on every deploy from the STAGE_ELASTIC_*/STAGE_REDIS_* GitHub secrets - see
+            # the "Update stage secret from GitHub secrets" step in .github/workflows/deploy.yml.
+            - secretRef:
+                name: avm-trade-reporter-stage-secret
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 2
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 2
+            terminationGracePeriodSeconds: 1
+          volumeMounts:
+            - name: avm-trade-reporter-stage-main-conf
+              mountPath: /app/appsettings.json
+              subPath: appsettings.json
+      volumes:
+        - name: avm-trade-reporter-stage-main-conf
+          configMap:
+            name: avm-trade-reporter-stage-main-conf
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: avm-trade-reporter-stage-service
+  namespace: biatec-scan
+spec:
+  type: ClusterIP
+  selector:
+    app: avm-trade-reporter-stage-app
+  ports:
+    - name: http
+      protocol: TCP
+      appProtocol: http
+      port: 8080
+      targetPort: 8080
+---
+# stage-algorand-trades.de-4.biatec.io / stage-api.algorand.scan.biatec.io are new DNS records that
+# must be created (pointing at the same ingress-nginx load balancer IP as the production hosts) before
+# cert-manager can issue TLS certs for them - see docs/CICD_GITHUB_ACTIONS.md.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: avm-trade-reporter-stage-ingress-main
+  namespace: biatec-scan
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/session-cookie-name: "route"
+    nginx.ingress.kubernetes.io/session-cookie-hash: "sha1"
+    cert-manager.io/cluster-issuer: letsencrypt
+spec:
+  ingressClassName: "nginx"
+  tls:
+    - hosts:
+        - stage-algorand-trades.de-4.biatec.io
+      secretName: tls-stage-algorand-trades.de-4.biatec.io
+  rules:
+    - host: stage-algorand-trades.de-4.biatec.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: avm-trade-reporter-stage-service
+                port:
+                  number: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: avm-trade-reporter-stage-ingress-main2
+  namespace: biatec-scan
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/session-cookie-name: "route"
+    nginx.ingress.kubernetes.io/session-cookie-hash: "sha1"
+    cert-manager.io/cluster-issuer: letsencrypt
+spec:
+  ingressClassName: "nginx"
+  tls:
+    - hosts:
+        - stage-api.algorand.scan.biatec.io
+      secretName: tls-stage-api.algorand.scan.biatec.io
+  rules:
+    - host: stage-api.algorand.scan.biatec.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: avm-trade-reporter-stage-service
+                port:
+                  number: 8080

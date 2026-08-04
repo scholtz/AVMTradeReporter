@@ -1,0 +1,44 @@
+# Stage counterpart of k8s/main/subscriber-deployment.yaml - subscribes to the stage API's Redis
+# pub/sub channels (avmtrade:stage:*, distinct from production's avmtrade:* channels/key prefixes so
+# they can never cross-talk even if both point at the same Redis instance). See
+# docs/CICD_GITHUB_ACTIONS.md / docs/STAGE_ENVIRONMENT.md.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: avmtradereporter-subscriber-stage
+  namespace: biatec-scan
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: avmtradereporter-subscriber-stage
+  template:
+    metadata:
+      labels:
+        app: avmtradereporter-subscriber-stage
+    spec:
+      containers:
+        - name: subscriber
+          image: scholtz2/avm-trade-reporter-subscriber:1.2026.08.04-main
+          env:
+            - name: POOL_CHANNEL
+              value: "avmtrade:stage:pool:updates"
+            - name: AGGREGATED_POOL_CHANNEL
+              value: "avmtrade:stage:aggregatedpool:updates"
+            - name: POOL_KEY_PREFIX
+              value: "avmtrade:stage:pools:"
+            - name: AGGREGATED_POOL_KEY_PREFIX
+              value: "avmtrade:stage:aggregatedpools:"
+          envFrom:
+            # Dedicated stage secret (REDIS_CONNECTION only), re-created on every deploy from the
+            # STAGE_REDIS_CONNECTION_STRING GitHub secret - see .github/workflows/deploy.yml.
+            - secretRef:
+                name: avm-trade-reporter-subscriber-stage-secret
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+      restartPolicy: Always

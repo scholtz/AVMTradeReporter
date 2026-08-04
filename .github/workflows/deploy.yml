@@ -1,0 +1,239 @@
+name: Build and Deploy
+
+# Replaces the old SSH-triggered flow (deploy-trade-reporter.sh running on the staging host, which did
+# `docker build`/`docker push` + `kubectl apply` locally over an SSH session). This workflow does the
+# same work natively in GitHub Actions: build both images here, push them to Docker Hub, and apply the
+# Kubernetes manifests directly from the runner via a kubeconfig secret. Image naming/tag scheme is
+# unchanged from the old deploy-trade-reporter.sh: 1.<year>.<month>.<day>-main.
+#
+# Every push to master builds both images once and deploys them to BOTH the production environment
+# (k8s/main/*, mainnet) and the stage environment (k8s/stage/*, testnet) in parallel. See
+# docs/CICD_GITHUB_ACTIONS.md for the full list of required secrets and docs/STAGE_ENVIRONMENT.md for
+# what stage is and how it differs from production.
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+env:
+  IMAGE_API: scholtz2/avm-trade-reporter
+  IMAGE_SUBSCRIBER: scholtz2/avm-trade-reporter-subscriber
+  NAMESPACE: biatec-scan
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Same versioning scheme historically used by deploy-trade-reporter.sh / compose.sh:
+      # 1.<year>.<month>.<day>-main. Both images always share this one tag.
+      - name: Compute version
+        id: version
+        run: |
+          ver="1.$(date -u '+%Y').$(date -u '+%m').$(date -u '+%d')"
+          version="$ver-main"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Computed version: $version"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: AVMTradeReporter/Dockerfile
+          push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: ${{ env.IMAGE_API }}:${{ steps.version.outputs.version }}
+
+      - name: Build and push Subscriber image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: AVMTradeReporter.Subscriber/Dockerfile
+          push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: ${{ env.IMAGE_SUBSCRIBER }}:${{ steps.version.outputs.version }}
+
+  deploy-production:
+    name: Deploy to production (mainnet)
+    needs: build
+    runs-on: ubuntu-latest
+    # Scoped to the "production" GitHub Environment - see docs/CICD_GITHUB_ACTIONS.md for exactly
+    # which secrets live at repo level (shared by every job) vs. inside this environment.
+    environment:
+      name: production
+      url: https://api.algorand.scan.biatec.io
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Update production manifests with new image tags
+        run: |
+          version="${{ needs.build.outputs.version }}"
+          sed -i "s~${IMAGE_API}.*~${IMAGE_API}:${version}~g" k8s/main/deployment-api.yaml
+          sed -i "s~${IMAGE_API}.*~${IMAGE_API}:${version}~g" k8s/main/deployment2-api.yaml
+          sed -i "s~${IMAGE_SUBSCRIBER}.*~${IMAGE_SUBSCRIBER}:${version}~g" k8s/main/subscriber-deployment.yaml
+
+      - name: Commit updated production manifests
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet -- k8s/main/deployment-api.yaml k8s/main/deployment2-api.yaml k8s/main/subscriber-deployment.yaml; then
+            git add k8s/main/deployment-api.yaml k8s/main/deployment2-api.yaml k8s/main/subscriber-deployment.yaml
+            git commit -m "cicd deploy ${{ needs.build.outputs.version }} to production [skip ci]"
+            for i in 1 2 3 4 5; do
+              git pull --rebase origin master && git push && break
+              echo "Push attempt $i failed, retrying..."
+              sleep $((i * 3))
+            done
+          else
+            echo "No manifest changes to commit"
+          fi
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p "$HOME/.kube"
+          echo "$KUBE_CONFIG" | base64 -d > "$HOME/.kube/config"
+          chmod 600 "$HOME/.kube/config"
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+
+      # Must run BEFORE "Apply Kubernetes manifests": on a freshly scheduled Pod, kubectl apply
+      # schedules Pods immediately, so if the ConfigMap a Pod's volume mounts doesn't exist yet, the
+      # Pod fails to start. Using `apply` (dry-run client -> apply) instead of delete+create means
+      # there's never a window where the ConfigMap doesn't exist at all.
+      - name: Update production config map
+        run: |
+          kubectl create configmap avm-trade-reporter-main-conf --from-file=k8s/main/conf-api -n "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Apply Kubernetes manifests (production)
+        run: |
+          kubectl apply -f k8s/main/deployment-api.yaml -n "$NAMESPACE"
+          kubectl apply -f k8s/main/deployment2-api.yaml -n "$NAMESPACE"
+          kubectl apply -f k8s/main/subscriber-deployment.yaml -n "$NAMESPACE"
+
+      - name: Roll out production deployments
+        run: |
+          kubectl rollout restart deployment/avm-trade-reporter-app-deployment -n "$NAMESPACE"
+          kubectl rollout status deployment/avm-trade-reporter-app-deployment -n "$NAMESPACE"
+          kubectl rollout restart deployment/avm-trade-reporter2-app-deployment -n "$NAMESPACE"
+          kubectl rollout status deployment/avm-trade-reporter2-app-deployment -n "$NAMESPACE"
+          kubectl rollout restart deployment/avmtradereporter-subscriber -n "$NAMESPACE"
+          kubectl rollout status deployment/avmtradereporter-subscriber -n "$NAMESPACE"
+
+      - name: Remove kubeconfig
+        if: always()
+        run: rm -f "$HOME/.kube/config"
+
+  deploy-stage:
+    name: Deploy to stage (testnet)
+    needs: build
+    runs-on: ubuntu-latest
+    # Scoped to the "stage" GitHub Environment - ELASTIC_HOST/ELASTIC_API_KEY/REDIS_CONNECTION_STRING
+    # below are defined ONLY inside this environment (Settings -> Environments -> stage -> Secrets), so
+    # they can never be referenced by the production job by mistake. See docs/CICD_GITHUB_ACTIONS.md.
+    environment:
+      name: stage
+      url: https://stage-api.algorand.scan.biatec.io
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Update stage manifests with new image tags
+        run: |
+          version="${{ needs.build.outputs.version }}"
+          sed -i "s~${IMAGE_API}.*~${IMAGE_API}:${version}~g" k8s/stage/deployment-api-stage.yaml
+          sed -i "s~${IMAGE_SUBSCRIBER}.*~${IMAGE_SUBSCRIBER}:${version}~g" k8s/stage/subscriber-deployment-stage.yaml
+
+      - name: Commit updated stage manifests
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet -- k8s/stage/deployment-api-stage.yaml k8s/stage/subscriber-deployment-stage.yaml; then
+            git add k8s/stage/deployment-api-stage.yaml k8s/stage/subscriber-deployment-stage.yaml
+            git commit -m "cicd deploy ${{ needs.build.outputs.version }} to stage [skip ci]"
+            for i in 1 2 3 4 5; do
+              git pull --rebase origin master && git push && break
+              echo "Push attempt $i failed, retrying..."
+              sleep $((i * 3))
+            done
+          else
+            echo "No manifest changes to commit"
+          fi
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p "$HOME/.kube"
+          echo "$KUBE_CONFIG" | base64 -d > "$HOME/.kube/config"
+          chmod 600 "$HOME/.kube/config"
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+
+      # Stage's Elastic/Redis credentials live only as GitHub secrets, never committed to the repo.
+      # This step (re-)creates the Secret from those GitHub secrets on every deploy, so rotating a
+      # GitHub secret and re-running the workflow is enough to rotate the deployed value - no manual
+      # kubectl step needed, unlike production's secrets which are managed by hand outside this repo.
+      - name: Update stage secret from GitHub secrets
+        run: |
+          kubectl create secret generic avm-trade-reporter-stage-secret \
+            --namespace="$NAMESPACE" \
+            --from-literal=AppConfiguration__Elastic__Host="$ELASTIC_HOST" \
+            --from-literal=AppConfiguration__Elastic__ApiKey="$ELASTIC_API_KEY" \
+            --from-literal=AppConfiguration__Redis__ConnectionString="$REDIS_CONNECTION_STRING" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create secret generic avm-trade-reporter-subscriber-stage-secret \
+            --namespace="$NAMESPACE" \
+            --from-literal=REDIS_CONNECTION="$REDIS_CONNECTION_STRING" \
+            --dry-run=client -o yaml | kubectl apply -f -
+        env:
+          ELASTIC_HOST: ${{ secrets.ELASTIC_HOST }}
+          ELASTIC_API_KEY: ${{ secrets.ELASTIC_API_KEY }}
+          REDIS_CONNECTION_STRING: ${{ secrets.REDIS_CONNECTION_STRING }}
+
+      - name: Update stage config map
+        run: |
+          kubectl create configmap avm-trade-reporter-stage-main-conf --from-file=k8s/stage/conf-api-stage -n "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Apply Kubernetes manifests (stage)
+        run: |
+          kubectl apply -f k8s/stage/deployment-api-stage.yaml -n "$NAMESPACE"
+          kubectl apply -f k8s/stage/subscriber-deployment-stage.yaml -n "$NAMESPACE"
+
+      - name: Roll out stage deployments
+        run: |
+          kubectl rollout restart deployment/avm-trade-reporter-stage-app-deployment -n "$NAMESPACE"
+          kubectl rollout status deployment/avm-trade-reporter-stage-app-deployment -n "$NAMESPACE"
+          kubectl rollout restart deployment/avmtradereporter-subscriber-stage -n "$NAMESPACE"
+          kubectl rollout status deployment/avmtradereporter-subscriber-stage -n "$NAMESPACE"
+
+      - name: Remove kubeconfig
+        if: always()
+        run: rm -f "$HOME/.kube/config"
