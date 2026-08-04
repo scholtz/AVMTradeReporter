@@ -58,7 +58,8 @@ namespace AVMTradeReporter.Repository
             {
                 Name = "aggregatedpools_template",
                 IndexPatterns = new[] { "aggregatedpools-*" },
-                DataStream = new DataStreamVisibility(),
+                // Not a data stream: aggregated pools are upserted by id (mutable latest-state docs),
+                // which data streams reject - same failure mode TradeRepository hit on the fresh stage cluster.
                 Template = new IndexTemplateMapping
                 {
                     Mappings = new TypeMapping

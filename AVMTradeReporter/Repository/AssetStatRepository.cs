@@ -34,7 +34,8 @@ namespace AVMTradeReporter.Repository
             {
                 Name = "assetstats_template",
                 IndexPatterns = new[] { "assetstats-*" },
-                DataStream = new DataStreamVisibility(),
+                // Not a data stream: asset stats are upserted by id (mutable latest-state docs), which
+                // data streams reject - same failure mode TradeRepository hit on the fresh stage cluster.
                 Template = new IndexTemplateMapping
                 {
                     Mappings = new TypeMapping

@@ -44,7 +44,14 @@ namespace AVMTradeReporter.Repository
             {
                 Name = "trades_template",          // Name of the index template
                 IndexPatterns = new[] { "trades" },    // Pattern to match indexes
-                DataStream = new DataStreamVisibility(),
+                // Deliberately NOT a data stream (no DataStream property here): trades are written with
+                // _id = TxId upsert semantics to dedupe re-processing of the same transaction, and Trade
+                // serializes "timestamp", not the "@timestamp" field data streams mandate. Declaring
+                // DataStreamVisibility here once made any FRESH cluster (e.g. the testnet stage
+                // environment) auto-create "trades" as a data stream on first write, which then rejected
+                // every bulk write - first "only write ops with an op_type of create are allowed in data
+                // streams", then "data stream timestamp field [@timestamp] is missing". Production never
+                // hit this only because its plain "trades" index predates the template.
                 Template = new IndexTemplateMapping
                 {
                     Mappings = new TypeMapping
@@ -121,14 +128,11 @@ namespace AVMTradeReporter.Repository
 
                 foreach (var trade in trades)
                 {
-                    // "trades" is provisioned as a data stream (see CreateTradeIndexTemplateAsync), which
-                    // only accepts op_type "create" in bulk requests - "index" (upsert-by-id) is rejected
-                    // outright with "only write ops with an op_type of create are allowed in data streams".
-                    // This is also the right semantics here: TxId is used as the doc _id purely to dedupe
-                    // re-processing of the same confirmed transaction, not to update an existing trade in
-                    // place, so a "create" conflict on an already-indexed TxId is expected and handled by
-                    // the existing failedItem/IsValid logging below rather than silently overwriting.
-                    bulkRequest.Operations.Add(new BulkCreateOperation<Trade>(trade)
+                    // Upsert by TxId: re-processing the same transaction (e.g. a TxPool-state trade later
+                    // confirmed, or a block replayed after restart) overwrites the same doc instead of
+                    // duplicating it. Requires "trades" to be a plain index, not a data stream - see the
+                    // comment in CreateTradeIndexTemplateAsync.
+                    bulkRequest.Operations.Add(new BulkIndexOperation<Trade>(trade)
                     {
                         Id = trade.TxId
                     });
