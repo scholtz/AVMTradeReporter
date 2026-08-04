@@ -91,7 +91,7 @@ namespace AVMTradeReporter.Services
             // Pools
             try
             {
-                var exactPools = await _poolRepository.GetPoolsAsync(null, null, q, null, 10, cancellationToken);
+                var exactPools = await _poolRepository.GetPoolsAsync(null, null, q, null, 10, cancellationToken: cancellationToken);
                 foreach (var p in exactPools.Take(10)) res.Pools.Add(p);
 
                 if (_elastic != null && res.Pools.Count < 10)

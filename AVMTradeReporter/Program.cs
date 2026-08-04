@@ -28,6 +28,22 @@ namespace AVMTradeReporter
 
             // Add services to the container.
             builder.Services.AddControllers();
+
+            // Response compression (gzip/brotli) - large JSON list responses compress extremely well
+            builder.Services.AddResponseCompression(options =>
+            {
+                options.EnableForHttps = true;
+                options.Providers.Add<Microsoft.AspNetCore.ResponseCompression.BrotliCompressionProvider>();
+                options.Providers.Add<Microsoft.AspNetCore.ResponseCompression.GzipCompressionProvider>();
+            });
+            builder.Services.Configure<Microsoft.AspNetCore.ResponseCompression.BrotliCompressionProviderOptions>(options =>
+            {
+                options.Level = System.IO.Compression.CompressionLevel.Fastest;
+            });
+            builder.Services.Configure<Microsoft.AspNetCore.ResponseCompression.GzipCompressionProviderOptions>(options =>
+            {
+                options.Level = System.IO.Compression.CompressionLevel.Fastest;
+            });
             // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
             builder.Services.AddEndpointsApiExplorer(); builder.Services.AddSwaggerGen(c =>
             {
@@ -202,6 +218,9 @@ namespace AVMTradeReporter
             var app = builder.Build();
 
             // Configure the HTTP request pipeline
+            // Compression first so that all subsequent response-producing middleware is compressed
+            app.UseResponseCompression();
+
             // CORS must be before authentication/authorization
             app.UseCors();
 

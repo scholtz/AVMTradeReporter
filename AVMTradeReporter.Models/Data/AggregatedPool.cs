@@ -71,14 +71,20 @@ namespace AVMTradeReporter.Models.Data
         public int PoolCount { get; set; }
         /// <summary>
         /// List of direcr pools that were aggregated into this result.
+        /// Null when a lightweight representation was requested; omitted from JSON in that case.
         /// </summary>
-        public SortedSet<string> Level1Pools { get; set; } = new SortedSet<string>();
+        [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public SortedSet<string>? Level1Pools { get; set; } = new SortedSet<string>();
         /// <summary>
         /// Gets or sets the collection of Level 2 pool identifiers.
+        /// Null when a lightweight representation was requested; omitted from JSON in that case.
         /// </summary>
         /// <remarks>The collection ensures that all identifiers are unique and automatically maintains
         /// them in sorted order.</remarks>
-        public SortedSet<string> Level2Pools { get; set; } = new SortedSet<string>();
+        [JsonProperty(NullValueHandling = NullValueHandling.Ignore)]
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public SortedSet<string>? Level2Pools { get; set; } = new SortedSet<string>();
 
 
         /// <summary>
@@ -289,11 +295,12 @@ namespace AVMTradeReporter.Models.Data
                             //{
 
                             //}
-                            foreach (var poolAddress in aggregatedPoolAC.Level1Pools)
+                            pool.Level2Pools ??= new SortedSet<string>();
+                            foreach (var poolAddress in aggregatedPoolAC.Level1Pools ?? Enumerable.Empty<string>())
                             {
                                 pool.Level2Pools.Add(poolAddress + "|" + p);
                             }
-                            foreach (var poolAddress in aggregatedPoolCB.Level1Pools)
+                            foreach (var poolAddress in aggregatedPoolCB.Level1Pools ?? Enumerable.Empty<string>())
                             {
                                 pool.Level2Pools.Add(poolAddress + "|" + p);
                             }
@@ -333,6 +340,19 @@ namespace AVMTradeReporter.Models.Data
                 Volume24H = Volume24H,
                 Volume7D = Volume7D,
             };
+        }
+
+        /// <summary>
+        /// Returns a shallow copy of this aggregated pool without the <see cref="Level1Pools"/> and
+        /// <see cref="Level2Pools"/> collections. These collections dominate the JSON payload size of
+        /// list responses and are only needed on detail views; when null they are omitted from JSON.
+        /// </summary>
+        public AggregatedPool ToLightweight()
+        {
+            var copy = (AggregatedPool)MemberwiseClone();
+            copy.Level1Pools = null;
+            copy.Level2Pools = null;
+            return copy;
         }
     }
 }

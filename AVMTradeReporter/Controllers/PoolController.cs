@@ -27,13 +27,15 @@ namespace AVMTradeReporter.Controllers
         /// </summary>
         /// <param name="protocol">Optional protocol filter (Pact, Tiny, Biatec)</param>
         /// <param name="size">Number of pools to return (default: 100)</param>
+        /// <param name="orderBy">Optional server-side ordering (TVL, Volume1H, Volume24H, Volume7D, LastUpdated). Defaults to LastUpdated (timestamp descending)</param>
+        /// <param name="direction">Sort direction (default: Desc)</param>
         /// <returns>List of pools</returns>
         [HttpGet]
-        public async Task<ActionResult<List<Pool>>> GetPools([FromQuery] ulong? assetIdA, [FromQuery] ulong? assetIdB, [FromQuery] string? address, [FromQuery] DEXProtocol? protocol = null, [FromQuery] int size = 100)
+        public async Task<ActionResult<List<Pool>>> GetPools([FromQuery] ulong? assetIdA, [FromQuery] ulong? assetIdB, [FromQuery] string? address, [FromQuery] DEXProtocol? protocol = null, [FromQuery] int size = 100, [FromQuery] PoolOrderBy? orderBy = null, [FromQuery] SortDirection direction = SortDirection.Desc)
         {
             try
             {
-                var pools = await _poolRepository.GetPoolsAsync(assetIdA, assetIdB, address, protocol, size, HttpContext.RequestAborted);
+                var pools = await _poolRepository.GetPoolsAsync(assetIdA, assetIdB, address, protocol, size, orderBy, direction, HttpContext.RequestAborted);
                 return Ok(pools);
             }
             catch (Exception ex)

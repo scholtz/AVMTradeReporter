@@ -1,5 +1,6 @@
 using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Models.Data;
+using AVMTradeReporter.Models.Data.Enums;
 using AVMTradeReporter.Repository;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -23,18 +24,27 @@ namespace AVMTradeReporter.Controllers
         }
 
         /// <summary>
-        /// Get all pools or filter by protocol
+        /// Get all aggregated pools or filter by asset ids. An asset id filter matches the asset on either side of the pair.
         /// </summary>
-        /// <param name="protocol">Optional protocol filter (Pact, Tiny, Biatec)</param>
+        /// <param name="assetIdA">Optional asset filter; matches pairs containing this asset on either side</param>
+        /// <param name="assetIdB">Optional asset filter; matches pairs containing this asset on either side</param>
+        /// <param name="offset">Number of pools to skip (default: 0)</param>
         /// <param name="size">Number of pools to return (default: 100)</param>
-        /// <returns>List of pools</returns>
+        /// <param name="orderBy">Server-side ordering (default: TVL) so that size/offset return the top items. Options: TVL, Volume1H, Volume24H, Volume7D, LastUpdated, PoolCount</param>
+        /// <param name="direction">Sort direction (default: Desc)</param>
+        /// <param name="light">When true, omits the level1Pools/level2Pools collections from the response to reduce payload size</param>
+        /// <returns>List of aggregated pools</returns>
         [HttpGet]
-        public ActionResult<List<AggregatedPool>> GetPools([FromQuery] ulong? assetIdA, [FromQuery] ulong? assetIdB, [FromQuery] int offset = 0, [FromQuery] int size = 100)
+        public ActionResult<List<AggregatedPool>> GetPools([FromQuery] ulong? assetIdA, [FromQuery] ulong? assetIdB, [FromQuery] int offset = 0, [FromQuery] int size = 100, [FromQuery] PoolOrderBy orderBy = PoolOrderBy.TVL, [FromQuery] SortDirection direction = SortDirection.Desc, [FromQuery] bool light = false)
         {
             try
             {
-                var pools = _aggregatedPoolRepository.GetAllAggregatedPools(assetIdA, assetIdB, offset, size);
-                return Ok(pools);
+                var pools = _aggregatedPoolRepository.GetAllAggregatedPools(assetIdA, assetIdB, offset, size, orderBy, direction);
+                if (light)
+                {
+                    pools = pools.Select(p => p.ToLightweight());
+                }
+                return Ok(pools.ToList());
             }
             catch (Exception ex)
             {

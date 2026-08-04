@@ -675,10 +675,12 @@ namespace AVMTradeReporter.Repository
         /// <param name="address">The address of the pool. Can be <see langword="null"/> or empty to ignore this filter.</param>
         /// <param name="protocol">The decentralized exchange (DEX) protocol to filter by. Can be <see langword="null"/> to ignore this filter.</param>
         /// <param name="size">The maximum number of pools to return. Must be a positive integer. Defaults to 100.</param>
+        /// <param name="orderBy">Optional server-side ordering. When not specified the list is sorted by timestamp descending.</param>
+        /// <param name="direction">Sort direction applied when <paramref name="orderBy"/> is specified. Defaults to descending.</param>
         /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
         /// <returns>A list of <see cref="Pool"/> objects that match the specified criteria. The list is sorted by timestamp in
-        /// descending order.</returns>
-        public async Task<List<Pool>> GetPoolsAsync(ulong? assetIdA, ulong? assetIdB, string? address, DEXProtocol? protocol = null, int size = 100, CancellationToken cancellationToken = default)
+        /// descending order unless <paramref name="orderBy"/> is specified.</returns>
+        public async Task<List<Pool>> GetPoolsAsync(ulong? assetIdA, ulong? assetIdB, string? address, DEXProtocol? protocol = null, int size = 100, PoolOrderBy? orderBy = null, SortDirection direction = SortDirection.Desc, CancellationToken cancellationToken = default)
         {
             await EnsureInitialized(cancellationToken);
 
@@ -707,10 +709,20 @@ namespace AVMTradeReporter.Repository
                 filteredPools = filteredPools.Where(p => p.Protocol == protocol.Value);
             }
 
-            // Sort by timestamp descending and limit size
-            filteredPools = filteredPools
-                .OrderByDescending(p => p.Timestamp ?? DateTimeOffset.MinValue)
-                .Take(size);
+            // Sort (by timestamp descending when no explicit ordering is requested) and limit size
+            Func<Pool, decimal> sortKey = orderBy switch
+            {
+                PoolOrderBy.TVL => p => (p.TotalTVLAssetAInUSD ?? 0) + (p.TotalTVLAssetBInUSD ?? 0),
+                PoolOrderBy.Volume1H => p => p.Volume1H ?? 0,
+                PoolOrderBy.Volume24H => p => p.Volume24H ?? 0,
+                PoolOrderBy.Volume7D => p => p.Volume7D ?? 0,
+                _ => p => (p.Timestamp ?? DateTimeOffset.MinValue).UtcTicks,
+            };
+            var ordered = orderBy.HasValue && direction == SortDirection.Asc
+                ? filteredPools.OrderBy(sortKey)
+                : filteredPools.OrderByDescending(sortKey);
+            // Deterministic tie-break so that pagination is stable.
+            filteredPools = ordered.ThenBy(p => p.PoolAddress).Take(size);
 
             var result = new List<Pool>();
             foreach (var p in filteredPools)

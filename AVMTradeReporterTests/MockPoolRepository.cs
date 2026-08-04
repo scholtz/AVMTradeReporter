@@ -49,7 +49,7 @@ namespace AVMTradeReporterTests
             return Task.CompletedTask;
         }
 
-        public async Task<List<AVMTradeReporter.Models.Data.Pool>> GetPoolsAsync(ulong? assetIdA, ulong? assetIdB, string? address, DEXProtocol? protocol = null, int size = 100, CancellationToken cancellationToken = default)
+        public async Task<List<AVMTradeReporter.Models.Data.Pool>> GetPoolsAsync(ulong? assetIdA, ulong? assetIdB, string? address, DEXProtocol? protocol = null, int size = 100, PoolOrderBy? orderBy = null, SortDirection direction = SortDirection.Desc, CancellationToken cancellationToken = default)
         {
             var filteredPools = pools.AsEnumerable();
 

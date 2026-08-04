@@ -159,9 +159,13 @@ namespace AVMTradeReporter.Repository
         /// langword="null"/> to ignore this filter.</param>
         /// <param name="offset">The number of items to skip before starting to return results. Must be non-negative.</param>
         /// <param name="size">The maximum number of items to return. Must be greater than zero.</param>
+        /// <param name="orderBy">Optional server-side ordering. When specified, the result set is sorted before
+        /// <paramref name="offset"/>/<paramref name="size"/> are applied so that pagination returns the top items.
+        /// Pass <see langword="null"/> to keep the (undefined) cache enumeration order.</param>
+        /// <param name="direction">Sort direction applied when <paramref name="orderBy"/> is specified. Defaults to descending.</param>
         /// <returns>A collection of <see cref="AggregatedPool"/> objects that match the specified filters and pagination
         /// parameters. If no filters are applied, all available pools are returned within the specified range.</returns>
-        public IEnumerable<AggregatedPool> GetAllAggregatedPools(ulong? assetIdA, ulong? assetIdB, int offset = 0, int size = 100)
+        public IEnumerable<AggregatedPool> GetAllAggregatedPools(ulong? assetIdA, ulong? assetIdB, int offset = 0, int size = 100, Models.Data.Enums.PoolOrderBy? orderBy = null, Models.Data.Enums.SortDirection direction = Models.Data.Enums.SortDirection.Desc)
         {
             var filteredPools = _cache.Values.AsEnumerable();
             if (assetIdA.HasValue && assetIdB.HasValue)
@@ -177,7 +181,30 @@ namespace AVMTradeReporter.Repository
             {
                 filteredPools = filteredPools.Where(p => p.AssetIdA == assetIdB.Value || p.AssetIdB == assetIdB.Value);
             }
+            if (orderBy.HasValue)
+            {
+                filteredPools = ApplyOrdering(filteredPools, orderBy.Value, direction);
+            }
             return filteredPools.Skip(offset).Take(size);
+        }
+
+        private static IEnumerable<AggregatedPool> ApplyOrdering(IEnumerable<AggregatedPool> pools, Models.Data.Enums.PoolOrderBy orderBy, Models.Data.Enums.SortDirection direction)
+        {
+            Func<AggregatedPool, decimal> key = orderBy switch
+            {
+                Models.Data.Enums.PoolOrderBy.TVL => p => (p.TotalTVLAssetAInUSD ?? 0) + (p.TotalTVLAssetBInUSD ?? 0),
+                Models.Data.Enums.PoolOrderBy.Volume1H => p => p.Volume1H ?? 0,
+                Models.Data.Enums.PoolOrderBy.Volume24H => p => p.Volume24H ?? 0,
+                Models.Data.Enums.PoolOrderBy.Volume7D => p => p.Volume7D ?? 0,
+                Models.Data.Enums.PoolOrderBy.PoolCount => p => p.PoolCount,
+                Models.Data.Enums.PoolOrderBy.LastUpdated => p => (p.LastUpdated ?? DateTimeOffset.MinValue).UtcTicks,
+                _ => p => 0m
+            };
+            var ordered = direction == Models.Data.Enums.SortDirection.Asc
+                ? pools.OrderBy(key)
+                : pools.OrderByDescending(key);
+            // Deterministic tie-break so that offset-based pagination is stable.
+            return ordered.ThenBy(p => p.AssetIdA).ThenBy(p => p.AssetIdB);
         }
         /// <summary>
         /// Retrieves the aggregated pool associated with the specified asset pair.
