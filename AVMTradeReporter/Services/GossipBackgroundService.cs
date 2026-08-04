@@ -125,7 +125,7 @@ namespace AVMTradeReporter.Services
                 // No static relay configured: discover all known relays via DNS SRV.
                 try
                 {
-                    var gossipHttpConfig = new GossipHttpConfiguration(GossipNodePurpose.Relay, GossipNetwork.AlgorandMainNet, "ws");
+                    var gossipHttpConfig = new GossipHttpConfiguration(GossipNodePurpose.Relay, discoveryConfig.Network, "ws");
                     relayHosts = gossipHttpConfig.Hosts
                         .Select(h => $"{h}/v1/{gossipHttpConfig.GenesisId}/gossip")
                         .Distinct()

@@ -138,6 +138,15 @@ namespace AVMTradeReporter.Model.Configuration
     public class GossipDiscoveryConfiguration
     {
         /// <summary>
+        /// Which network's relays to discover via DNS SRV when no static
+        /// <see cref="AppConfiguration.GossipWebsocketClientConfigurations"/> entry is configured. Defaults to
+        /// <see cref="GossipNetwork.AlgorandMainNet"/> - non-mainnet deployments (e.g. a testnet stage
+        /// environment) must set this explicitly, otherwise dynamic discovery falls back to mainnet relays
+        /// regardless of which network Algod/Elastic/Redis are pointed at.
+        /// </summary>
+        public GossipNetwork Network { get; set; } = GossipNetwork.AlgorandMainNet;
+
+        /// <summary>
         /// How many gossip relays to stay connected to once the fastest relays have been determined. Default is 10.
         /// </summary>
         public int MaxActiveRelayConnections { get; set; } = 10;

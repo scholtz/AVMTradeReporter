@@ -9,16 +9,24 @@ it's also running in production - both environments get the exact same image on 
 
 | | Production | Stage |
 |---|---|---|
-| Network | Algorand mainnet (`algorand-algod-public.de-4.biatec.io`) | Algorand testnet (`testnet-api.4160.nodely.dev`) |
+| Network (Algod) | Algorand mainnet (`algorand-algod-public.de-4.biatec.io`) | Algorand testnet (`testnet-api.4160.nodely.dev`) |
+| Network (gossip relay discovery) | `AppConfiguration.GossipDiscovery.Network = AlgorandMainNet` (default) | `AppConfiguration.GossipDiscovery.Network = TestNet` (set explicitly in `k8s/stage/conf-api-stage/appsettings.json` - see note below) |
 | Namespace | `biatec-scan` | `biatec-scan` (same namespace, distinct resource names) |
 | Deployments | `avm-trade-reporter-app-deployment`, `avm-trade-reporter2-app-deployment`, `avmtradereporter-subscriber` | `avm-trade-reporter-stage-app-deployment`, `avmtradereporter-subscriber-stage` |
 | ConfigMap | `avm-trade-reporter-main-conf` | `avm-trade-reporter-stage-main-conf` |
-| Secret | `avm-trade-reporter-secret` / `avm-trade-reporter2-secret` / `avm-trade-reporter-subscriber-secret` (managed by hand in-cluster) | `avm-trade-reporter-stage-secret` / `avm-trade-reporter-subscriber-stage-secret` (re-created by CI from `STAGE_ELASTIC_*`/`STAGE_REDIS_*` GitHub secrets on every deploy) |
+| Secret | `avm-trade-reporter-secret` / `avm-trade-reporter2-secret` / `avm-trade-reporter-subscriber-secret` (managed by hand in-cluster) | `avm-trade-reporter-stage-secret` / `avm-trade-reporter-subscriber-stage-secret` (re-created by CI from the `stage` Environment's `ELASTIC_*`/`REDIS_*` GitHub secrets on every deploy) |
 | Redis key prefixes / pub-sub channels | `avmtrade:pools:`, `avmtrade:aggregatedpools:`, `avmtrade:pool:updates`, `avmtrade:aggregatedpool:updates` | `avmtrade:stage:pools:`, `avmtrade:stage:aggregatedpools:`, `avmtrade:stage:pool:updates`, `avmtrade:stage:aggregatedpool:updates` |
 | Hostnames | `algorand-trades.de-4.biatec.io`, `api.algorand.scan.biatec.io` | `stage-algorand-trades.de-4.biatec.io`, `testnet.scan.biatec.io` |
 
 Because the two environments share the `biatec-scan` namespace, distinct resource names are what keep
 them from colliding - there's no separate stage namespace to fall back on.
+
+> **Gossip relay discovery bug fixed 2026-08-05:** `GossipBackgroundService` discovers gossip relays
+> via DNS SRV whenever no static `AppConfiguration.GossipWebsocketClientConfigurations` entry is set
+> (true for both environments here). It used to hardcode mainnet, so stage was silently pulling
+> mainnet transactions over gossip regardless of `Algod`/`Elastic`/`Redis` being pointed at testnet.
+> `GossipDiscoveryConfiguration.Network` now controls this, defaulting to `AlgorandMainNet` (production
+> unaffected) with stage's ConfigMap setting it to `TestNet`.
 
 ## What is NOT isolated (and why)
 
