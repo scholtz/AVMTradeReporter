@@ -121,7 +121,14 @@ namespace AVMTradeReporter.Repository
 
                 foreach (var trade in trades)
                 {
-                    bulkRequest.Operations.Add(new BulkIndexOperation<Trade>(trade)
+                    // "trades" is provisioned as a data stream (see CreateTradeIndexTemplateAsync), which
+                    // only accepts op_type "create" in bulk requests - "index" (upsert-by-id) is rejected
+                    // outright with "only write ops with an op_type of create are allowed in data streams".
+                    // This is also the right semantics here: TxId is used as the doc _id purely to dedupe
+                    // re-processing of the same confirmed transaction, not to update an existing trade in
+                    // place, so a "create" conflict on an already-indexed TxId is expected and handled by
+                    // the existing failedItem/IsValid logging below rather than silently overwriting.
+                    bulkRequest.Operations.Add(new BulkCreateOperation<Trade>(trade)
                     {
                         Id = trade.TxId
                     });
