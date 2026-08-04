@@ -114,6 +114,12 @@ namespace AVMTradeReporter.Services
             var hasConfiguredHost = staticHosts.Count > 0;
             var discoveryConfig = _appConfig.Value.GossipDiscovery;
 
+            if (!hasConfiguredHost && !discoveryConfig.Enabled)
+            {
+                _logger.LogInformation("Gossip relay discovery is disabled (AppConfiguration.GossipDiscovery.Enabled=false) and no static relay is configured - GossipBackgroundService will not connect to any relay.");
+                return;
+            }
+
             List<string> relayHosts;
             if (hasConfiguredHost)
             {

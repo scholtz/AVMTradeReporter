@@ -138,11 +138,20 @@ namespace AVMTradeReporter.Model.Configuration
     public class GossipDiscoveryConfiguration
     {
         /// <summary>
-        /// Which network's relays to discover via DNS SRV when no static
+        /// Whether GossipBackgroundService should run at all when no static
         /// <see cref="AppConfiguration.GossipWebsocketClientConfigurations"/> entry is configured. Defaults to
-        /// <see cref="GossipNetwork.AlgorandMainNet"/> - non-mainnet deployments (e.g. a testnet stage
-        /// environment) must set this explicitly, otherwise dynamic discovery falls back to mainnet relays
-        /// regardless of which network Algod/Elastic/Redis are pointed at.
+        /// true (existing behavior, unaffected). Set to false for deployments where dynamic discovery isn't
+        /// usable - notably Algorand testnet: <see cref="GossipNetwork"/> only has mainnet-family members
+        /// (AlgorandMainNet, VoiMainNet, AramidMainNetBiatec, AramidMainNetAWallet), so there is no testnet
+        /// value to discover with, and leaving discovery enabled without a static host previously caused
+        /// non-mainnet deployments to silently connect to and gossip with Algorand mainnet relays.
+        /// </summary>
+        public bool Enabled { get; set; } = true;
+
+        /// <summary>
+        /// Which network's relays to discover via DNS SRV when <see cref="Enabled"/> is true and no static
+        /// <see cref="AppConfiguration.GossipWebsocketClientConfigurations"/> entry is configured. Defaults to
+        /// <see cref="GossipNetwork.AlgorandMainNet"/>.
         /// </summary>
         public GossipNetwork Network { get; set; } = GossipNetwork.AlgorandMainNet;
 

@@ -9,7 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Algorand4" Version="4.7.4.2026071920" />
+    <PackageReference Include="Algorand4" Version="4.7.4.2026080422" />
     <PackageReference Include="AlgorandAuthentication" Version="2.2.0" />
     <PackageReference Include="Elastic.Clients.Elasticsearch" Version="9.4.2" />
     <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.23.0" />
