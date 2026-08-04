@@ -59,6 +59,11 @@ namespace AVMTradeReporter.Model.Configuration
         public VolumeUpdateConfiguration VolumeUpdate { get; set; } = new VolumeUpdateConfiguration();
 
         /// <summary>
+        /// Asset stats (TVL/volume/fees/APR rollup) background service configuration
+        /// </summary>
+        public AssetStatsConfiguration AssetStats { get; set; } = new AssetStatsConfiguration();
+
+        /// <summary>
         /// Block processing configuration
         /// </summary>
         public BlockProcessingConfiguration BlockProcessing { get; set; } = new BlockProcessingConfiguration();
@@ -115,6 +120,19 @@ namespace AVMTradeReporter.Model.Configuration
         /// How often to update volumes (in seconds). Default is 60 seconds.
         /// </summary>
         public int IntervalSeconds { get; set; } = 60;
+    }
+
+    public class AssetStatsConfiguration
+    {
+        /// <summary>
+        /// Enables or disables the asset stats background service
+        /// </summary>
+        public bool Enabled { get; set; } = true;
+
+        /// <summary>
+        /// How often to recompute asset stats (in seconds). Default is 120 seconds.
+        /// </summary>
+        public int IntervalSeconds { get; set; } = 120;
     }
 
     public class GossipDiscoveryConfiguration

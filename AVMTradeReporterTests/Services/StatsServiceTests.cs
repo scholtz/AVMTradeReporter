@@ -176,5 +176,17 @@ namespace AVMTradeReporterTests.Services
 
             return Task.FromResult((VolumeUSD, FeesUSD, FeesUSDProvider, FeesUSDProtocol));
         }
+
+        /// <inheritdoc />
+        public Task<Dictionary<string, decimal>> GetFeesUSDProviderByPoolAsync(
+            DateTimeOffset from,
+            DateTimeOffset to,
+            CancellationToken cancellationToken = default)
+        {
+            if (ThrowOnQuery)
+                throw new InvalidOperationException("Simulated repository failure.");
+
+            return Task.FromResult(new Dictionary<string, decimal>());
+        }
     }
 }

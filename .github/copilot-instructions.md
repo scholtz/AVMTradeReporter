@@ -132,4 +132,36 @@ This is an ASP.NET Core (.NET 8) Web API + SignalR service that:
   - USD valuation (`InUSDValuation == true`)
 - When querying OHLC, the API can select USD vs asset series; when a document loaded from Elasticsearch does not contain `InUSDValuation`, it is treated as **asset valuation**.
 
+### Asset stats (backend-computed TVL/volume/fees/APR)
+
+- **`AssetStat`** (`AVMTradeReporter.Models.Data.AssetStat`) is a backend-computed per-asset rollup so clients
+  don't have to aggregate pools on-chain themselves. Keyed by `(AssetId, Protocol)` where `Protocol` (a
+  `DEXProtocol?`) is `null` for the combined "all protocols" row and set for a per-protocol row — mirrors the
+  `protocol` query-param convention used by `PoolController`/`AggregatedPoolController`.
+- **Fields**: `AssetId`, `Protocol`, `Id` (derived, `"{AssetId}-{Protocol ?? "All"}"`), `AssetName`, `UnitName`,
+  `Decimals`, `ImageUrl`, `PriceUSD` (sourced from `BiatecAsset`), `TVLUSD`, `Volume24hUSD`, `Volume7dUSD`,
+  `Fees24hUSD`, `Fees7dUSD`, `Apr24h`, `Apr7d`, `PoolCount`, `LastUpdated`.
+- **APR formula** (`AssetStat.ComputeApr`, load-bearing business rule — annualizes trailing fees against current TVL):
+  ```
+  Apr24h = TVLUSD > 0 ? Fees24hUSD * 365     / TVLUSD * 100 : 0
+  Apr7d  = TVLUSD > 0 ? Fees7dUSD  * 365/7   / TVLUSD * 100 : 0
+  ```
+  APR is `0` (not infinite/undefined) when TVL is zero or negative.
+- **Computation** (`AssetStatsService.ComputeAssetStatsAsync`): for every asset that appears in at least one
+  `Pool`, and for `null` (all protocols) plus each distinct `DEXProtocol` present among that asset's pools —
+  sums `TotalTVLAssetAInUSD`/`TotalTVLAssetBInUSD` (whichever side matches the asset), `Volume24H`/`Volume7D`,
+  and per-pool LP fees (`StatsRepository.GetFeesUSDProviderByPoolAsync`, a terms aggregation on
+  `poolAddress.keyword` summing `feesUSDProvider`, called once for the 24h window and once for the 7d window
+  and reused across every asset/protocol slice).
+- **Storage**: `IAssetStatRepository`/`AssetStatRepository` — in-memory cache + Elasticsearch index `assetstats`
+  (template `assetstats_template`), following the same pattern as `AggregatedPoolRepository`.
+- **Background service**: `AssetStatsBackgroundService` recomputes on a timer (`AppConfiguration.AssetStats`:
+  `Enabled`, `IntervalSeconds`, default 120s) and pushes each row to SignalR via `BiatecScanHub.PublishAssetStatAsync`.
+- **API**: `GET api/asset-stat` (optional `protocol`, `sortBy` in {TVLUSD, Volume24hUSD, Volume7dUSD, Apr24h,
+  Apr7d}, `direction`) and `GET api/asset-stat/{assetId}` (optional `protocol`) — both `[Authorize]`, matching
+  `AggregatedPoolController`/`PoolController` conventions.
+- **SignalR**: new channel `"AssetStat"` (`BiatecScanHub.Subscriptions.ASSET_STAT`). Subscribe via
+  `SubscriptionFilter.RecentAssetStats = true` (optionally narrowed by `AssetIds` or `Protocols`); replayed
+  on subscribe from the bounded `BiatecScanHub.RecentAssetStatUpdates` queue (last 200).
+
 The application can run in development mode without external services but will log connection errors. For full functionality, configure Elasticsearch, Redis, and Algorand node endpoints in appsettings.Development.json.

@@ -111,6 +111,8 @@ namespace AVMTradeReporter
             builder.Services.AddSingleton<IOHLCService, OHLCService>();
             builder.Services.AddSingleton<IStatsRepository, StatsRepository>();
             builder.Services.AddSingleton<IStatsService, StatsService>();
+            builder.Services.AddSingleton<IAssetStatRepository, AssetStatRepository>();
+            builder.Services.AddSingleton<IAssetStatsService, AssetStatsService>();
 
             // Add Pool Processors
             builder.Services.AddSingleton<PactPoolProcessor>();
@@ -134,6 +136,12 @@ namespace AVMTradeReporter
             if (appConfig?.VolumeUpdate?.Enabled != false) // default enabled
             {
                 builder.Services.AddHostedService<VolumeUpdateBackgroundService>();
+            }
+
+            // Register Asset Stats Background Service only if enabled
+            if (appConfig?.AssetStats?.Enabled != false) // default enabled
+            {
+                builder.Services.AddHostedService<AssetStatsBackgroundService>();
             }
 
             builder.Services.AddSingleton<ElasticsearchClient>(sp =>
@@ -164,6 +172,9 @@ namespace AVMTradeReporter
                     .IdProperty(t => t.Id))
                 .DefaultMappingFor<Models.Data.OHLC>(m => m
                     .IndexName("ohlc")
+                    .IdProperty(t => t.Id))
+                .DefaultMappingFor<Models.Data.AssetStat>(m => m
+                    .IndexName("assetstats")
                     .IdProperty(t => t.Id))
                 ;
 

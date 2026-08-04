@@ -8,6 +8,7 @@
         public bool RecentPool { get; set; } = false;
         public bool RecentAggregatedPool { get; set; } = false;
         public bool RecentAssets { get; set; } = false;
+        public bool RecentAssetStats { get; set; } = false;
 
         public bool MainAggregatedPools { get; set; } = false;
 

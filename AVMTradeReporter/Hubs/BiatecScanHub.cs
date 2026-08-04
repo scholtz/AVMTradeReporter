@@ -21,6 +21,7 @@ namespace AVMTradeReporter.Hubs
             public const string POOL = "Pool";
             public const string AGGREGATED_POOL = "AggregatedPool";
             public const string ASSET = "Asset";
+            public const string ASSET_STAT = "AssetStat";
             public const string ERROR = "Error";
             public const string INFO = "Info";
         }
@@ -32,6 +33,7 @@ namespace AVMTradeReporter.Hubs
         public static readonly ConcurrentQueue<AggregatedPool> RecentAggregatedPoolUpdates = new ConcurrentQueue<AggregatedPool>();
         public static readonly ConcurrentQueue<Model.Data.Block> RecentBlockUpdates = new ConcurrentQueue<Model.Data.Block>();
         public static readonly ConcurrentQueue<BiatecAsset> RecentAssetUpdates = new ConcurrentQueue<BiatecAsset>();
+        public static readonly ConcurrentQueue<AssetStat> RecentAssetStatUpdates = new ConcurrentQueue<AssetStat>();
         public static AggregatedPool? ALGOUSD = null;
 
 
@@ -137,6 +139,13 @@ namespace AVMTradeReporter.Hubs
                 foreach (var item in RecentAggregatedPoolUpdates.OrderBy(t => t.LastUpdated))
                 {
                     await Clients.User(userId).SendAsync(BiatecScanHub.Subscriptions.AGGREGATED_POOL, item);
+                }
+            }
+            if (filter.RecentAssetStats)
+            {
+                foreach (var item in RecentAssetStatUpdates.OrderBy(t => t.LastUpdated))
+                {
+                    await Clients.User(userId).SendAsync(BiatecScanHub.Subscriptions.ASSET_STAT, item);
                 }
             }
         }
@@ -307,6 +316,65 @@ namespace AVMTradeReporter.Hubs
             if (filter.RecentAssets) return true;
             if (filter.AssetIds.Contains(item.Index.ToString())) return true;
             return false;
+        }
+        public static bool ShouldSendAssetStatToUser(SubscriptionFilter filter, AssetStat item)
+        {
+            if (filter.RecentAssetStats)
+            {
+                // Optional protocol filter: if the caller specified protocol scopes, only match rows in that scope.
+                if (filter.Protocols != null && filter.Protocols.Count > 0)
+                {
+                    var protocolKey = item.Protocol.HasValue ? item.Protocol.Value.ToString() : "All";
+                    return filter.Protocols.Contains(protocolKey);
+                }
+                return true;
+            }
+            if (filter.AssetIds.Contains(item.AssetId.ToString())) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Broadcasts an <see cref="AssetStat"/> update to subscribed clients and enqueues it for
+        /// subscribe-time replay. Mirrors the AggregatedPool push pattern (see
+        /// <c>AggregatedPoolRepository.PublishToHubAsync</c>), but lives on the hub itself since
+        /// AssetStatsBackgroundService is the sole caller and has no dedicated repository push method.
+        /// </summary>
+        public static async Task PublishAssetStatAsync(IHubContext<BiatecScanHub> hubContext, AssetStat stat, CancellationToken cancellationToken = default)
+        {
+            if (stat == null) throw new ArgumentNullException(nameof(stat));
+
+            RecentAssetStatUpdates.Enqueue(stat);
+            while (RecentAssetStatUpdates.Count > 200)
+            {
+                RecentAssetStatUpdates.TryDequeue(out _);
+            }
+
+            try
+            {
+                if (hubContext == null)
+                {
+                    return;
+                }
+
+                var subscriptions = GetSubscriptions();
+                var subscribedClientsConnections = new HashSet<string>();
+
+                foreach (var subscription in subscriptions)
+                {
+                    var userId = subscription.Key;
+                    var filter = subscription.Value;
+
+                    if (ShouldSendAssetStatToUser(filter, stat))
+                    {
+                        subscribedClientsConnections.Add(userId);
+                    }
+                }
+                await hubContext.Clients.Users(subscribedClientsConnections).SendAsync(Subscriptions.ASSET_STAT, stat, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to publish AssetStat update for {stat.Id}: {ex.Message}");
+            }
         }
     }
 }

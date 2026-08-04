@@ -85,5 +85,76 @@ namespace AVMTradeReporter.Repository
                 return (0, 0, 0, 0);
             }
         }
+
+        /// <inheritdoc />
+        public async Task<Dictionary<string, decimal>> GetFeesUSDProviderByPoolAsync(
+            DateTimeOffset from,
+            DateTimeOffset to,
+            CancellationToken cancellationToken = default)
+        {
+            var result = new Dictionary<string, decimal>();
+
+            if (_elasticClient == null)
+            {
+                _logger.LogWarning("Elasticsearch client not available; returning empty per-pool fee aggregation");
+                return result;
+            }
+
+            try
+            {
+                var mustClauses = new List<Action<QueryDescriptor<Trade>>>
+                {
+                    f => f.Term(t => t.Field("tradeState.keyword").Value("Confirmed")),
+                    f => f.Range(r => r.Date(d => d
+                        .Field(fld => fld.Timestamp)
+                        .Gte(from.ToString("o"))
+                        .Lt(to.ToString("o"))
+                    ))
+                };
+
+                var searchResponse = await _elasticClient.SearchAsync<Trade>(s => s
+                    .Indices("trades")
+                    .Size(0)
+                    .Query(q => q.Bool(b => b.Must(mustClauses.ToArray())))
+                    .Aggregations(a => a
+                        .Add("byPool", agg => agg
+                            .Terms(t => t.Field("poolAddress.keyword").Size(10000))
+                            .Aggregations(sub => sub
+                                .Add("feesUSDProvider", sumAgg => sumAgg.Sum(sum => sum.Field("feesUSDProvider")))
+                            )
+                        )
+                    ),
+                    cancellationToken);
+
+                if (!searchResponse.IsValidResponse)
+                {
+                    _logger.LogError(
+                        "Elasticsearch per-pool fee aggregation query failed [{From} – {To}]: {Error}",
+                        from, to, searchResponse.DebugInformation);
+                    return result;
+                }
+
+                var byPool = searchResponse.Aggregations?.GetStringTerms("byPool");
+                if (byPool?.Buckets != null)
+                {
+                    foreach (var bucket in byPool.Buckets)
+                    {
+                        var poolAddress = bucket.Key.ToString();
+                        var fees = bucket.Aggregations?.GetSum("feesUSDProvider")?.Value ?? 0;
+                        if (!string.IsNullOrEmpty(poolAddress))
+                        {
+                            result[poolAddress] = (decimal)fees;
+                        }
+                    }
+                }
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to execute per-pool fee aggregation query [{From} – {To}]", from, to);
+                return result;
+            }
+        }
     }
 }
