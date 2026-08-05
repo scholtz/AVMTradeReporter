@@ -328,7 +328,7 @@ namespace AVMTradeReporter.Repository
                 {
                     BiatecScanHub.RecentAggregatedPoolUpdates.TryDequeue(out _);
                 }
-                if (send.AssetIdA == 0 && send.AssetIdB == 31566704)
+                if (send.AssetIdA == 0 && send.AssetIdB == _appConfig.UsdReferenceAssetId)
                 {
                     BiatecScanHub.ALGOUSD = send;
                 }
@@ -347,10 +347,12 @@ namespace AVMTradeReporter.Repository
             if (_assetRepository == null) return; // Feature disabled if repository not supplied
             try
             {
-                // Assets potentially affected: both sides plus reference assets (ALGO=0, USDC=31566704)
-                var affected = new HashSet<ulong> { updatedPool.AssetIdA, updatedPool.AssetIdB, 0UL, 31566704UL };
-                // Ensure ALGO/USDC prices first so that derived prices can use them
-                var ordered = affected.OrderBy(a => a == 0 ? 0 : a == 31566704 ? 1 : 2).ToArray();
+                var usdRef = _appConfig.UsdReferenceAssetId;
+
+                // Assets potentially affected: both sides plus reference assets (ALGO=0, usdRef)
+                var affected = new HashSet<ulong> { updatedPool.AssetIdA, updatedPool.AssetIdB, 0UL, usdRef };
+                // Ensure ALGO/usdRef prices first so that derived prices can use them
+                var ordered = affected.OrderBy(a => a == 0 ? 0 : a == usdRef ? 1 : 2).ToArray();
 
                 // Cache for quick price lookup
                 var priceCache = new Dictionary<ulong, decimal>();
@@ -361,8 +363,8 @@ namespace AVMTradeReporter.Repository
                     if (asset == null) continue;
                     var changed = false;
 
-                    // Set USDC price to 1
-                    if (asset.Index == 31566704UL && asset.PriceUSD != 1m)
+                    // Peg this network's reference stable asset (e.g. USDC) to $1
+                    if (asset.Index == usdRef && asset.PriceUSD != 1m)
                     {
                         asset.PriceUSD = 1m;
                         changed = true;
@@ -370,33 +372,33 @@ namespace AVMTradeReporter.Repository
 
                     // Calculate PriceUSD
                     decimal newPrice = asset.PriceUSD;
-                    if (assetId == 31566704UL)
+                    if (assetId == usdRef)
                     {
-                        newPrice = 1m; // USDC assumed $1
+                        newPrice = 1m; // reference stable asset assumed $1
                     }
                     else if (assetId == 0UL)
                     {
-                        // ALGO price from ALGO/USDC pair (orientation A=0, B=USDC if possible)
-                        var algoUsdc = GetAggregatedPool(0, 31566704);
+                        // ALGO price from ALGO/usdRef pair (orientation A=0, B=usdRef if possible)
+                        var algoUsdc = GetAggregatedPool(0, usdRef);
                         if (algoUsdc != null)
                         {
-                            var orient = algoUsdc.AssetIdB == 31566704 ? algoUsdc : algoUsdc.Reverse();
+                            var orient = algoUsdc.AssetIdB == usdRef ? algoUsdc : algoUsdc.Reverse();
                             if (orient.VirtualSumALevel1ForPrice > 0)
                             {
-                                newPrice = (orient.VirtualSumBLevel1ForPrice ?? 0) / (orient.VirtualSumALevel1ForPrice ?? 0); // USDC per ALGO
+                                newPrice = (orient.VirtualSumBLevel1ForPrice ?? 0) / (orient.VirtualSumALevel1ForPrice ?? 0); // usdRef per ALGO
                             }
                         }
                     }
                     else
                     {
-                        // 1. Try direct asset-USDC pair
-                        var pairUsdc = GetAggregatedPool(assetId, 31566704);
+                        // 1. Try direct asset-usdRef pair
+                        var pairUsdc = GetAggregatedPool(assetId, usdRef);
                         if (pairUsdc != null)
                         {
-                            var orient = pairUsdc.AssetIdB == 31566704 ? pairUsdc : pairUsdc.Reverse();
+                            var orient = pairUsdc.AssetIdB == usdRef ? pairUsdc : pairUsdc.Reverse();
                             if (orient.VirtualSumALevel1ForPrice > 0)
                             {
-                                newPrice = (orient.VirtualSumBLevel1ForPrice ?? 0) / (orient.VirtualSumALevel1ForPrice ?? 0); // USDC per asset
+                                newPrice = (orient.VirtualSumBLevel1ForPrice ?? 0) / (orient.VirtualSumALevel1ForPrice ?? 0); // usdRef per asset
                             }
                         }
                         else
@@ -436,13 +438,9 @@ namespace AVMTradeReporter.Repository
                     // Calculate Real TVL (TVL_USD) and Total TVL (TotalTVLAssetInUSD)
                     // Real TVL: Only trusted tokens from pools paired with trusted references
                     // Total TVL: All assets (both sides) from pools paired with trusted references
-                    // Trusted reference tokens: ALGO=0, USDC=31566704, and other stablecoins/major tokens
-                    HashSet<ulong> refs = new HashSet<ulong>() {
-                        0UL, 31566704UL, 1134696561UL, 2537013734UL, 1185173782UL,
-                        386192725UL,1058926737UL,2400334372UL,760037151UL,386195940UL,
-                        246516580UL, 246519683UL,227855942UL, 2320775407UL, 887406851UL,887648583UL,
-                        1241945177UL, 1241944285UL, 2320804780UL
-                    }; // duplicates automatically removed by HashSet
+                    // Trusted reference tokens: ALGO=0, this network's usdRef, and configured
+                    // other stablecoins/major tokens (AppConfiguration.TrustedReferenceAssetIds).
+                    HashSet<ulong> refs = new HashSet<ulong>(_appConfig.TrustedReferenceAssetIds) { 0UL, usdRef }; // duplicates automatically removed by HashSet
                     decimal realTvlUsd = 0m;    // Real TVL: sum of trusted token values only
                     decimal totalTvlUsd = 0m;   // Total TVL: sum of all asset values
 
@@ -470,8 +468,8 @@ namespace AVMTradeReporter.Repository
                         priceCache.TryGetValue(assetId, out var priceAssetCurrent);
                         if (priceAssetCurrent <= 0) priceAssetCurrent = asset.PriceUSD;
 
-                        // Set PriceUSD if paired with USDC
-                        if (otherAssetId == 31566704UL && ap.VirtualSumALevel1ForPrice > 0 && ap.VirtualSumBLevel1ForPrice > 0)
+                        // Set PriceUSD if paired with this network's usdRef
+                        if (otherAssetId == usdRef && ap.VirtualSumALevel1ForPrice > 0 && ap.VirtualSumBLevel1ForPrice > 0)
                         {
                             decimal calculatedPrice;
                             if (ap.AssetIdA == assetId)

@@ -1,9 +1,11 @@
+using AVMTradeReporter.Model.Configuration;
 using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Model.DTO.OHLC;
 using AVMTradeReporter.Repository;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.QueryDsl;
+using Microsoft.Extensions.Options;
 
 namespace AVMTradeReporter.Services
 {
@@ -12,6 +14,7 @@ namespace AVMTradeReporter.Services
         private readonly ElasticsearchClient _elastic;
         private readonly IAssetRepository _assetRepo;
         private readonly AggregatedPoolRepository _aggRepo;
+        private readonly ulong _usdReferenceAssetId;
         private static readonly Dictionary<string, string> _resolutionMap = new(StringComparer.Ordinal)
         {
             {"1","1m"}, {"1m","1m"},
@@ -25,11 +28,12 @@ namespace AVMTradeReporter.Services
         };
         private static readonly string[] _supportedResolutions = { "1", "5", "15", "60", "240", "1D", "1W", "1M" };
 
-        public OHLCService(ElasticsearchClient elastic, IAssetRepository assetRepo, AggregatedPoolRepository aggRepo)
+        public OHLCService(ElasticsearchClient elastic, IAssetRepository assetRepo, AggregatedPoolRepository aggRepo, IOptions<AppConfiguration>? appConfig = null)
         {
             _elastic = elastic;
             _assetRepo = assetRepo;
             _aggRepo = aggRepo;
+            _usdReferenceAssetId = appConfig?.Value.UsdReferenceAssetId ?? 31566704UL;
         }
 
         public object GetConfig() => new OHLCConfigDto
@@ -288,7 +292,7 @@ namespace AVMTradeReporter.Services
             var fromDt = targetTime.UtcDateTime;
             var toDt = now.UtcDateTime;
 
-            var usdcAssetId = 31566704UL;
+            var usdcAssetId = _usdReferenceAssetId;
 
             var request = new SearchRequest<OHLC>("ohlc")
             {

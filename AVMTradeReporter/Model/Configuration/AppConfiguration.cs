@@ -73,6 +73,32 @@ namespace AVMTradeReporter.Model.Configuration
         /// Higher value means more stable / preferred base asset for USD price reporting.
         /// </summary>
         public Dictionary<ulong, int> AssetStabilityIndex { get; set; } = new();
+
+        /// <summary>
+        /// This network's primary USD-pegged stable asset (e.g. USDC). Assumed to always be
+        /// worth exactly $1 and used by AggregatedPoolRepository as the reference asset every
+        /// other asset's USD price is derived from (directly, when paired with it; via ALGO
+        /// otherwise). Defaults to Algorand mainnet USDC so existing mainnet deployments keep
+        /// working unchanged - every other network (testnet, Voi, ...) MUST override this in
+        /// its own appsettings.json/ConfigMap, since asset ids are not portable across networks
+        /// (e.g. Algorand testnet USDC is 10458941, Voi's Aramid USDC is 302190).
+        /// </summary>
+        public ulong UsdReferenceAssetId { get; set; } = 31566704UL;
+
+        /// <summary>
+        /// Trusted reference tokens (major/stable assets) used by AggregatedPoolRepository to
+        /// separate "Real TVL" (only pools paired with one of these) from "Total TVL" (every
+        /// pool). ALGO (asset 0) and UsdReferenceAssetId are always treated as trusted even if
+        /// omitted here. Defaults to the mainnet set of major Algorand ASAs for backward
+        /// compatibility - override per network, since these ids are mainnet-specific.
+        /// </summary>
+        public HashSet<ulong> TrustedReferenceAssetIds { get; set; } = new HashSet<ulong>
+        {
+            31566704UL, 1134696561UL, 2537013734UL, 1185173782UL,
+            386192725UL, 1058926737UL, 2400334372UL, 760037151UL, 386195940UL,
+            246516580UL, 246519683UL, 227855942UL, 2320775407UL, 887406851UL, 887648583UL,
+            1241945177UL, 1241944285UL, 2320804780UL
+        };
     }
 
     public class RedisConfiguration

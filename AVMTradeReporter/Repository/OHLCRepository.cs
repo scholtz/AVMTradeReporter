@@ -1,3 +1,4 @@
+using AVMTradeReporter.Model.Configuration;
 using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Models.Data;
 using Elastic.Clients.Elasticsearch;
@@ -5,6 +6,7 @@ using Elastic.Clients.Elasticsearch.Mapping;
 using Elastic.Clients.Elasticsearch.IndexManagement;
 using Elastic.Clients.Elasticsearch.Core.Bulk;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using System.Runtime.CompilerServices;
 using Algorand.Algod.Model;
 
@@ -16,6 +18,7 @@ namespace AVMTradeReporter.Repository
         private readonly ElasticsearchClient _elasticClient;
         private readonly ILogger<OHLCRepository> _logger;
         private readonly IAssetRepository? _assetRepository;
+        private readonly ulong _usdReferenceAssetId;
 
         internal static readonly (string code, TimeSpan span)[] Intervals = new[]
         {
@@ -29,11 +32,12 @@ namespace AVMTradeReporter.Repository
             ("1M", TimeSpan.FromDays(31))
         };
 
-        public OHLCRepository(ElasticsearchClient client, ILogger<OHLCRepository> logger, IAssetRepository? assetRepository = null)
+        public OHLCRepository(ElasticsearchClient client, ILogger<OHLCRepository> logger, IAssetRepository? assetRepository = null, IOptions<AppConfiguration>? appConfig = null)
         {
             _elasticClient = client;
             _logger = logger;
             _assetRepository = assetRepository;
+            _usdReferenceAssetId = appConfig?.Value.UsdReferenceAssetId ?? 31566704UL;
             CreateTemplateAsync().Wait();
         }
 
@@ -144,7 +148,7 @@ namespace AVMTradeReporter.Repository
             decimal adjustedVolBase = volBase / powA;
             decimal adjustedVolQuote = volQuote / powB;
             decimal price = adjustedVolQuote / adjustedVolBase;
-            var usdcAssetId = 31566704UL;
+            var usdcAssetId = _usdReferenceAssetId;
             // Asset valuation: quote-per-base using raw on-chain volumes.
             // var price = volQuote / volBase;
 
