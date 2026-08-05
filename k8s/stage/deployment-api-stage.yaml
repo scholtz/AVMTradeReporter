@@ -77,40 +77,6 @@ spec:
       port: 8080
       targetPort: 8080
 ---
-# stage-algorand-trades.de-4.biatec.io / testnet.scan.biatec.io are new DNS records that
-# must be created (pointing at the same ingress-nginx load balancer IP as the production hosts) before
-# cert-manager can issue TLS certs for them - see docs/CICD_GITHUB_ACTIONS.md.
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: avm-trade-reporter-stage-ingress-main
-  namespace: biatec-scan
-  annotations:
-    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
-    nginx.ingress.kubernetes.io/affinity: "cookie"
-    nginx.ingress.kubernetes.io/session-cookie-name: "route"
-    nginx.ingress.kubernetes.io/session-cookie-hash: "sha1"
-    cert-manager.io/cluster-issuer: letsencrypt
-spec:
-  ingressClassName: "nginx"
-  tls:
-    - hosts:
-        - stage-algorand-trades.de-4.biatec.io
-      secretName: tls-stage-algorand-trades.de-4.biatec.io
-  rules:
-    - host: stage-algorand-trades.de-4.biatec.io
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: avm-trade-reporter-stage-service
-                port:
-                  number: 8080
----
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -128,10 +94,10 @@ spec:
   ingressClassName: "nginx"
   tls:
     - hosts:
-        - testnet.scan.biatec.io
-      secretName: tls-testnet.scan.biatec.io
+        - api.testnet.scan.biatec.io
+      secretName: tls-api.testnet.scan.biatec.io
   rules:
-    - host: testnet.scan.biatec.io
+    - host: api.testnet.scan.biatec.io
       http:
         paths:
           - path: /
