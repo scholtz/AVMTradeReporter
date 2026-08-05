@@ -299,6 +299,10 @@ namespace AVMTradeReporter
             app.MapControllers();
             app.MapHub<BiatecScanHub>("/biatecScanHub");
 
+            // Index page: redirect to the Swagger UI. ExcludeFromDescription keeps this
+            // endpoint itself out of the generated OpenAPI document.
+            app.MapGet("/", () => Results.Redirect("/swagger")).ExcludeFromDescription();
+
             // initialize all singletons
 
             using var cancellationTokenSource = new CancellationTokenSource();
