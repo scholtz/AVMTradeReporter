@@ -13,11 +13,13 @@ namespace AVMTradeReporter.Controllers
     {
         private readonly ILogger<AssetController> _logger;
         private readonly IAssetRepository _assetRepository;
+        private readonly MainnetImageProcessor _imageProcessor;
 
-        public AssetController(ILogger<AssetController> logger, IAssetRepository assetRepository)
+        public AssetController(ILogger<AssetController> logger, IAssetRepository assetRepository, MainnetImageProcessor imageProcessor)
         {
             _logger = logger;
             _assetRepository = assetRepository;
+            _imageProcessor = imageProcessor;
         }
 
         /// <summary>
@@ -68,8 +70,7 @@ namespace AVMTradeReporter.Controllers
             {
                 var cancellationToken = HttpContext.RequestAborted;
 
-                var processor = new MainnetImageProcessor();
-                var data = await processor.LoadImageAsync(assetId, cancellationToken);
+                var data = await _imageProcessor.LoadImageAsync(assetId, cancellationToken);
                 if (data.Length > 100)
                 {
                     // add cache headers to cache for 1 week

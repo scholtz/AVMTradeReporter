@@ -4,6 +4,7 @@ using AlgorandAuthenticationV2;
 using AVMIndexReporter.Repository;
 using AVMTradeReporter.Hubs;
 using AVMTradeReporter.Model.Configuration;
+using AVMTradeReporter.Processors.Image;
 using AVMTradeReporter.Processors.Pool;
 using AVMTradeReporter.Repository;
 using AVMTradeReporter.Services;
@@ -97,6 +98,7 @@ namespace AVMTradeReporter
             });
             builder.Services.AddSingleton<BlockRepository>();
             builder.Services.AddSingleton<IAssetRepository, AssetRepository>();
+            builder.Services.AddSingleton<MainnetImageProcessor>();
             builder.Services.AddSingleton<IndexerRepository>();
             builder.Services.AddSingleton<IPoolRepository, PoolRepository>();
             builder.Services.AddSingleton<PoolRepository>();

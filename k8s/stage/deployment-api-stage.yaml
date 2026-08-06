@@ -56,10 +56,17 @@ spec:
             - name: avm-trade-reporter-stage-main-conf
               mountPath: /app/appsettings.json
               subPath: appsettings.json
+            # Same PVC (and thus the same on-disk icon cache) as production's API deployments -
+            # see k8s/main/pv-images.yaml for why this is intentionally shared across environments.
+            - name: avm-trade-reporter-images
+              mountPath: /app/images
       volumes:
         - name: avm-trade-reporter-stage-main-conf
           configMap:
             name: avm-trade-reporter-stage-main-conf
+        - name: avm-trade-reporter-images
+          persistentVolumeClaim:
+            claimName: avm-trade-reporter-images-pvc
 ---
 apiVersion: v1
 kind: Service

@@ -75,6 +75,7 @@ ConfigMap/appsettings.json:
 - **Redis instance.** `REDIS_CONNECTION_STRING` can safely point at the same Redis instance as
   production, because stage uses entirely distinct key prefixes and pub/sub channel names (see table
   above) - the two environments' keys/messages never overlap even on a shared instance.
+- **ASA icon image cache.** Deliberately shared, not a leftover gap - see `docs/ICON_SHARING.md`.
 
 ## Rotating stage's Elastic/Redis credentials
 

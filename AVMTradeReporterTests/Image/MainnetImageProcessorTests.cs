@@ -1,4 +1,6 @@
-﻿using AVMTradeReporter.Processors.Image;
+﻿using AVMTradeReporter.Model.Configuration;
+using AVMTradeReporter.Processors.Image;
+using Microsoft.Extensions.Options;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -9,12 +11,15 @@ namespace AVMTradeReporterTests.Image
 {
     public class MainnetImageProcessorTests
     {
+        private static MainnetImageProcessor CreateProcessor() =>
+            new MainnetImageProcessor(new MockAssetRepository(), Options.Create(new AppConfiguration()));
+
         [Test]
         public async Task LoadImageForAsset0Async()
         {
             // Arrange
             ulong assetId = 0; // Example asset ID
-            var processor = new MainnetImageProcessor();
+            var processor = CreateProcessor();
             using var cancellationTokenSource = new CancellationTokenSource();
             // Act
             var imageData = await processor.LoadImageAsync(assetId, cancellationTokenSource.Token);
@@ -29,7 +34,7 @@ namespace AVMTradeReporterTests.Image
 
             // Arrange
             ulong assetId = 1241945177; // Example asset ID
-            var processor = new MainnetImageProcessor();
+            var processor = CreateProcessor();
             using var cancellationTokenSource = new CancellationTokenSource();
             // Act
             var imageData = await processor.LoadImageAsync(assetId, cancellationTokenSource.Token);
@@ -44,7 +49,7 @@ namespace AVMTradeReporterTests.Image
 
             // Arrange
             ulong assetId = 3054226103; // Example asset ID
-            var processor = new MainnetImageProcessor();
+            var processor = CreateProcessor();
             using var cancellationTokenSource = new CancellationTokenSource();
             // Act
             var imageData = await processor.LoadImageAsync(assetId, cancellationTokenSource.Token);
@@ -59,7 +64,7 @@ namespace AVMTradeReporterTests.Image
 
             // Arrange
             ulong assetId = 123; // Example asset ID
-            var processor = new MainnetImageProcessor();
+            var processor = CreateProcessor();
             using var cancellationTokenSource = new CancellationTokenSource();
             // Act
             var imageData = await processor.LoadImageAsync(assetId, cancellationTokenSource.Token);

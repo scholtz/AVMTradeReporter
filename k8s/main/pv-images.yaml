@@ -1,0 +1,47 @@
+# Shared storage for cached ASA icon images, mounted (ReadWriteMany) by every API deployment
+# that serves /api/asset/image/{assetId} - production's avm-trade-reporter-app-deployment and
+# avm-trade-reporter2-app-deployment (k8s/main/deployment-api.yaml, deployment2-api.yaml) *and*
+# stage's avm-trade-reporter-stage-app-deployment (k8s/stage/deployment-api-stage.yaml).
+#
+# Sharing this volume across environments is what lets a testnet asset's icon request reuse an
+# icon already downloaded for its mainnet counterpart with the same unit name/ticker, instead of
+# every environment maintaining its own private, ephemeral, pod-local icon cache. See
+# MainnetImageProcessor.cs for the by-unitname fallback that relies on this being shared, and
+# docs/ICON_SHARING.md for the full picture.
+#
+# Backed by a fixed path on the host node's disk (hostPath), per user-provided infra:
+# /mnt/nvme1/biatec-scan-shared-drive/avm-trade-reporter-images. hostPath volumes are tied to
+# whichever node the path lives on - this only provides real multi-pod/multi-deployment sharing
+# if every pod that mounts avm-trade-reporter-images-pvc is scheduled on that same node (single-
+# node cluster, or a nodeSelector/nodeAffinity pinning them there), or if that path is itself a
+# network mount already present identically on every node. If pods can land on different nodes
+# without such a mount, switch storageClassName below to a real RWX network filesystem
+# provisioner (NFS, Azure Files, Longhorn, etc.) instead.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: avm-trade-reporter-images-pv
+spec:
+  capacity:
+    storage: 20Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: biatec-scan-shared-hostpath
+  hostPath:
+    path: /mnt/nvme1/biatec-scan-shared-drive/avm-trade-reporter-images
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: avm-trade-reporter-images-pvc
+  namespace: biatec-scan
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: biatec-scan-shared-hostpath
+  resources:
+    requests:
+      storage: 20Gi
+  volumeName: avm-trade-reporter-images-pv
