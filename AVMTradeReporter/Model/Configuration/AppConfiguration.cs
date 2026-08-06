@@ -64,6 +64,11 @@ namespace AVMTradeReporter.Model.Configuration
         public AssetStatsConfiguration AssetStats { get; set; } = new AssetStatsConfiguration();
 
         /// <summary>
+        /// Top assets highlight lists (Popular/Trending/Gainers/Losers) background service configuration
+        /// </summary>
+        public TopAssetsConfiguration TopAssets { get; set; } = new TopAssetsConfiguration();
+
+        /// <summary>
         /// Block processing configuration
         /// </summary>
         public BlockProcessingConfiguration BlockProcessing { get; set; } = new BlockProcessingConfiguration();
@@ -159,6 +164,30 @@ namespace AVMTradeReporter.Model.Configuration
         /// How often to recompute asset stats (in seconds). Default is 120 seconds.
         /// </summary>
         public int IntervalSeconds { get; set; } = 120;
+    }
+
+    public class TopAssetsConfiguration
+    {
+        /// <summary>
+        /// Enables or disables the top assets background service
+        /// </summary>
+        public bool Enabled { get; set; } = true;
+
+        /// <summary>
+        /// How often to recompute and re-cache the top assets lists (in seconds). Default is 300 seconds (5 minutes).
+        /// </summary>
+        public int IntervalSeconds { get; set; } = 300;
+
+        /// <summary>
+        /// Size of the candidate universe: assets are first ordered by real TVL descending and cut to this
+        /// many entries before stable assets are excluded. Default is 150.
+        /// </summary>
+        public int UniverseSize { get; set; } = 150;
+
+        /// <summary>
+        /// How many assets each highlight list contains. Default is 3.
+        /// </summary>
+        public int ListSize { get; set; } = 3;
     }
 
     public class GossipDiscoveryConfiguration

@@ -115,6 +115,7 @@ namespace AVMTradeReporter
             builder.Services.AddSingleton<IStatsService, StatsService>();
             builder.Services.AddSingleton<IAssetStatRepository, AssetStatRepository>();
             builder.Services.AddSingleton<IAssetStatsService, AssetStatsService>();
+            builder.Services.AddSingleton<ITopAssetsService, TopAssetsService>();
 
             // Add Pool Processors
             builder.Services.AddSingleton<PactPoolProcessor>();
@@ -144,6 +145,12 @@ namespace AVMTradeReporter
             if (appConfig?.AssetStats?.Enabled != false) // default enabled
             {
                 builder.Services.AddHostedService<AssetStatsBackgroundService>();
+            }
+
+            // Register Top Assets Background Service only if enabled
+            if (appConfig?.TopAssets?.Enabled != false) // default enabled
+            {
+                builder.Services.AddHostedService<TopAssetsBackgroundService>();
             }
 
             builder.Services.AddSingleton<ElasticsearchClient>(sp =>
