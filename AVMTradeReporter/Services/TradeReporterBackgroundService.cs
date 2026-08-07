@@ -434,7 +434,7 @@ namespace AVMTradeReporter.Services
                     return;
                 }
 
-                _logger.LogInformation("Found transactions: {txCount}", block.Block?.Transactions?.Count);
+                _logger.LogInformation("Found transactions: {txCount}", block.Block?.Transactions?.Count ?? 0);
                 await _transactionProcessor.ProcessBlock(block, this, this, cancellationToken);
 
                 var result = await _tradeRepository.StoreTradesAsync(_trades.Values.ToArray(), cancellationToken);

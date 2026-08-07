@@ -25,6 +25,10 @@ namespace AVMTradeReporter
         {
             var builder = WebApplication.CreateBuilder(args);
 
+            // Remove the default Console/Debug/EventSource logging providers so only NLog's
+            // JSON console target writes to stdout - otherwise every log line is emitted twice,
+            // once as plain "info: Category[0]\n      Message" text and once as JSON.
+            builder.Logging.ClearProviders();
             builder.UseNLog();
 
             // Add services to the container.
