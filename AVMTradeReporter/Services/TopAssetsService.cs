@@ -22,8 +22,10 @@ namespace AVMTradeReporter.Services
     public class TopAssetsService : ITopAssetsService
     {
         private const string CacheKey = "asset:top:summary";
-        private const string TvlSnapshotKeyPrefix = "asset:tvl:hourly:";
-        private static readonly TimeSpan TvlSnapshotTtl = TimeSpan.FromHours(30);
+        public const string TvlSnapshotKeyPrefix = "asset:tvl:hourly:";
+        // 8 days so the 7d asset timeseries endpoint (AssetTimeseriesService) can always build a
+        // full week of hourly TVL candles from these snapshots.
+        private static readonly TimeSpan TvlSnapshotTtl = TimeSpan.FromDays(8);
 
         private readonly IAssetRepository _assetRepository;
         private readonly ILogger<TopAssetsService> _logger;
@@ -187,8 +189,10 @@ namespace AVMTradeReporter.Services
         private static long UnixHour(DateTimeOffset time) => time.ToUnixTimeSeconds() / 3600;
 
         /// <summary>
-        /// Persists the current real TVL of every candidate asset into this hour's snapshot hash.
-        /// Runs on every recompute (idempotent overwrite within the hour keeps the snapshot fresh).
+        /// Persists the current real TVL of every candidate asset into this hour's snapshot hash as an
+        /// intra-hour OHLC value (see <see cref="TvlSnapshotCodec"/>). Runs on every ~5 minute
+        /// recompute, merging into the hour's existing candle so high/low capture movement within the
+        /// hour instead of just the last observation.
         /// </summary>
         private async Task StoreTvlSnapshotAsync(IEnumerable<BiatecAsset> universe, DateTimeOffset now, CancellationToken cancellationToken)
         {
@@ -196,8 +200,16 @@ namespace AVMTradeReporter.Services
             try
             {
                 var key = TvlSnapshotKeyPrefix + UnixHour(now);
+                var existingEntries = await _redisDatabase.HashGetAllAsync(key);
+                var existing = existingEntries.ToDictionary(e => e.Name.ToString(), e => e.Value.ToString());
+
                 var entries = universe
-                    .Select(a => new HashEntry(a.Index.ToString(CultureInfo.InvariantCulture), a.TVL_USD.ToString(CultureInfo.InvariantCulture)))
+                    .Select(a =>
+                    {
+                        var field = a.Index.ToString(CultureInfo.InvariantCulture);
+                        existing.TryGetValue(field, out var prev);
+                        return new HashEntry(field, TvlSnapshotCodec.Merge(prev, a.TVL_USD));
+                    })
                     .ToArray();
                 if (entries.Length == 0) return;
                 await _redisDatabase.HashSetAsync(key, entries);
@@ -231,7 +243,7 @@ namespace AVMTradeReporter.Services
                     foreach (var entry in entries)
                     {
                         if (ulong.TryParse(entry.Name.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var assetId)
-                            && decimal.TryParse(entry.Value.ToString(), NumberStyles.Number, CultureInfo.InvariantCulture, out var tvl))
+                            && TvlSnapshotCodec.TryParse(entry.Value.ToString(), out _, out _, out _, out var tvl))
                         {
                             result[assetId] = tvl;
                         }

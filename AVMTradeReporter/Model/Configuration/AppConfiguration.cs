@@ -69,6 +69,11 @@ namespace AVMTradeReporter.Model.Configuration
         public TopAssetsConfiguration TopAssets { get; set; } = new TopAssetsConfiguration();
 
         /// <summary>
+        /// 7d hourly asset timeseries (price/TVL OHLC sparklines) background service configuration
+        /// </summary>
+        public AssetTimeseriesConfiguration AssetTimeseries { get; set; } = new AssetTimeseriesConfiguration();
+
+        /// <summary>
         /// Block processing configuration
         /// </summary>
         public BlockProcessingConfiguration BlockProcessing { get; set; } = new BlockProcessingConfiguration();
@@ -188,6 +193,20 @@ namespace AVMTradeReporter.Model.Configuration
         /// How many assets each highlight list contains. Default is 3.
         /// </summary>
         public int ListSize { get; set; } = 3;
+    }
+
+    public class AssetTimeseriesConfiguration
+    {
+        /// <summary>
+        /// Enables or disables the hourly asset timeseries precompute background service.
+        /// The API endpoint keeps working either way (computing on demand), precompute just makes it fast.
+        /// </summary>
+        public bool Enabled { get; set; } = true;
+
+        /// <summary>
+        /// How many top-TVL assets get their 7d series precomputed every hour. Default is 200.
+        /// </summary>
+        public int UniverseSize { get; set; } = 200;
     }
 
     public class GossipDiscoveryConfiguration
