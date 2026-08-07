@@ -6,10 +6,12 @@ name: Build and Deploy
 # Kubernetes manifests directly from the runner via a kubeconfig secret. Image naming/tag scheme is
 # unchanged from the old deploy-trade-reporter.sh: 1.<year>.<month>.<day>-main.
 #
-# Every push to master builds both images once and deploys them to BOTH the production environment
-# (k8s/main/*, mainnet) and the stage environment (k8s/stage/*, testnet) in parallel. See
-# docs/CICD_GITHUB_ACTIONS.md for the full list of required secrets and docs/STAGE_ENVIRONMENT.md for
-# what stage is and how it differs from production.
+# Every push to master builds both images once and deploys them to the stage environment (k8s/stage/*,
+# testnet). Production is NOT deployed from here - promoting a built version to production is a manual,
+# separate action. See promote-production.yml, which is triggered by hand once a version has been
+# verified on stage; it re-tags that version's already-pushed images as "latest" and deploys them to
+# k8s/main/* (mainnet). See docs/CICD_GITHUB_ACTIONS.md for the full list of required secrets and
+# docs/STAGE_ENVIRONMENT.md for what stage is and how it differs from production.
 on:
   push:
     branches:
@@ -71,82 +73,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           tags: ${{ env.IMAGE_SUBSCRIBER }}:${{ steps.version.outputs.version }}
-
-  deploy-production:
-    name: Deploy to production (mainnet)
-    needs: build
-    runs-on: ubuntu-latest
-    # Scoped to the "production" GitHub Environment - see docs/CICD_GITHUB_ACTIONS.md for exactly
-    # which secrets live at repo level (shared by every job) vs. inside this environment.
-    environment:
-      name: production
-      url: https://api.algorand.scan.biatec.io
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Update production manifests with new image tags
-        run: |
-          version="${{ needs.build.outputs.version }}"
-          sed -i "s~${IMAGE_API}.*~${IMAGE_API}:${version}~g" k8s/main/deployment-api.yaml
-          sed -i "s~${IMAGE_API}.*~${IMAGE_API}:${version}~g" k8s/main/deployment2-api.yaml
-          sed -i "s~${IMAGE_SUBSCRIBER}.*~${IMAGE_SUBSCRIBER}:${version}~g" k8s/main/subscriber-deployment.yaml
-
-      - name: Commit updated production manifests
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          if ! git diff --quiet -- k8s/main/deployment-api.yaml k8s/main/deployment2-api.yaml k8s/main/subscriber-deployment.yaml; then
-            git add k8s/main/deployment-api.yaml k8s/main/deployment2-api.yaml k8s/main/subscriber-deployment.yaml
-            git commit -m "cicd deploy ${{ needs.build.outputs.version }} to production [skip ci]"
-            for i in 1 2 3 4 5; do
-              git pull --rebase origin master && git push && break
-              echo "Push attempt $i failed, retrying..."
-              sleep $((i * 3))
-            done
-          else
-            echo "No manifest changes to commit"
-          fi
-
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
-
-      - name: Configure kubeconfig
-        run: |
-          mkdir -p "$HOME/.kube"
-          echo "$KUBE_CONFIG" | base64 -d > "$HOME/.kube/config"
-          chmod 600 "$HOME/.kube/config"
-        env:
-          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
-
-      # Must run BEFORE "Apply Kubernetes manifests": on a freshly scheduled Pod, kubectl apply
-      # schedules Pods immediately, so if the ConfigMap a Pod's volume mounts doesn't exist yet, the
-      # Pod fails to start. Using `apply` (dry-run client -> apply) instead of delete+create means
-      # there's never a window where the ConfigMap doesn't exist at all.
-      - name: Update production config map
-        run: |
-          kubectl create configmap avm-trade-reporter-main-conf --from-file=k8s/main/conf-api -n "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
-
-      - name: Apply Kubernetes manifests (production)
-        run: |
-          kubectl apply -f k8s/main/deployment-api.yaml -n "$NAMESPACE"
-          kubectl apply -f k8s/main/deployment2-api.yaml -n "$NAMESPACE"
-          kubectl apply -f k8s/main/subscriber-deployment.yaml -n "$NAMESPACE"
-
-      - name: Roll out production deployments
-        run: |
-          kubectl rollout restart deployment/avm-trade-reporter-app-deployment -n "$NAMESPACE"
-          kubectl rollout status deployment/avm-trade-reporter-app-deployment -n "$NAMESPACE"
-          kubectl rollout restart deployment/avm-trade-reporter2-app-deployment -n "$NAMESPACE"
-          kubectl rollout status deployment/avm-trade-reporter2-app-deployment -n "$NAMESPACE"
-          kubectl rollout restart deployment/avmtradereporter-subscriber -n "$NAMESPACE"
-          kubectl rollout status deployment/avmtradereporter-subscriber -n "$NAMESPACE"
-
-      - name: Remove kubeconfig
-        if: always()
-        run: rm -f "$HOME/.kube/config"
 
   deploy-stage:
     name: Deploy to stage (testnet)

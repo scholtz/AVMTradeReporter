@@ -10,34 +10,38 @@ directly via a kubeconfig secret. Nothing SSHes into any host anymore, and `depl
 is no longer used (safe to delete from the old staging host once this workflow is verified).
 
 The image tag naming is unchanged: `1.<year>.<month>.<day>-main` (e.g. `1.2026.08.04-main`), computed
-once in the `build` job and reused by both the production and stage deploy jobs, for both
-`scholtz2/avm-trade-reporter` and `scholtz2/avm-trade-reporter-subscriber`.
+once in the `build` job and reused by the stage deploy job, for both `scholtz2/avm-trade-reporter` and
+`scholtz2/avm-trade-reporter-subscriber`.
 
-Three jobs run on every push to `master`:
+Two jobs run on every push to `master`:
 
 1. **build** - builds and pushes both Docker images to Docker Hub.
-2. **deploy-production** (needs `build`) - updates `k8s/main/*.yaml` image tags, commits them back to
-   the repo, then `kubectl apply`s them against the `biatec-scan` namespace and restarts the mainnet
-   Deployments. This is the direct replacement for the old `deploy-trade-reporter.sh` + `update-config.sh`
-   flow.
-3. **deploy-stage** (needs `build`) - the new part: deploys the exact same images to a stage
-   environment that runs against Algorand **testnet** instead of mainnet. See
-   [`STAGE_ENVIRONMENT.md`](./STAGE_ENVIRONMENT.md) for what stage is for and how it's isolated from
-   production. Unlike production, stage's Elasticsearch and Redis credentials are not managed by hand
-   in the cluster - they come entirely from GitHub secrets and are written into the
-   `avm-trade-reporter-stage-secret` / `avm-trade-reporter-subscriber-stage-secret` Kubernetes Secrets
-   fresh on every run.
+2. **deploy-stage** (needs `build`) - deploys the exact same images to a stage environment that runs
+   against Algorand **testnet** instead of mainnet. See [`STAGE_ENVIRONMENT.md`](./STAGE_ENVIRONMENT.md)
+   for what stage is for and how it's isolated from production. Unlike production, stage's Elasticsearch
+   and Redis credentials are not managed by hand in the cluster - they come entirely from GitHub secrets
+   and are written into the `avm-trade-reporter-stage-secret` / `avm-trade-reporter-subscriber-stage-secret`
+   Kubernetes Secrets fresh on every run.
 
-Both deploy jobs run in parallel and are independent - a failure in one does not block the other.
+**Production is no longer deployed automatically from this workflow.** Promoting a version to
+production is a separate, manual-only pipeline: `.github/workflows/promote-production.yml`, triggered
+by hand (`workflow_dispatch`) with the version string to promote (as produced by the `build` job above,
+e.g. `1.2026.08.04-main`). It re-tags that version's already-pushed images as `:latest` on Docker Hub,
+then updates `k8s/main/*.yaml` image tags, commits them back to the repo, `kubectl apply`s them against
+the `biatec-scan` namespace, and restarts the mainnet Deployments - the same steps the old
+`deploy-production` job used to run automatically. This is the direct replacement for the old
+`deploy-trade-reporter.sh` + `update-config.sh` flow, just moved behind a manual gate instead of running
+on every push.
 
 ## Required GitHub Secrets
 
-The workflow uses GitHub's **Environments** feature to keep stage-only credentials physically separate
-from everything else - the `deploy-stage` job runs under the `stage` Environment and the
-`deploy-production` job runs under the `production` Environment (each declared via `environment:` in
-`.github/workflows/deploy.yml`). A secret defined inside an Environment is only ever visible to jobs
-running under that Environment; it cannot be read by the `build` job or by the other deploy job. Repo
-secrets, by contrast, are visible to every job, so put a value there only when it's genuinely shared.
+The workflows use GitHub's **Environments** feature to keep stage-only credentials physically separate
+from everything else - the `deploy-stage` job (in `deploy.yml`) runs under the `stage` Environment and
+the `deploy-production` job (in `promote-production.yml`) runs under the `production` Environment (each
+declared via `environment:` in its workflow file). A secret defined inside an Environment is only ever
+visible to jobs running under that Environment; it cannot be read by the `build` job or by the other
+deploy job. Repo secrets, by contrast, are visible to every job, so put a value there only when it's
+genuinely shared.
 
 ### Global (repository) secrets
 
@@ -70,8 +74,9 @@ Create this Environment too (**Settings → Environments → New environment →
 `avm-trade-reporter2-secret` / `avm-trade-reporter-subscriber-secret` in the `biatec-scan` namespace -
 the mainnet Elastic/Redis/Algod config) are **not** managed by this workflow at all and continue to be
 set by hand directly in the cluster, same as before this change. The Environment still needs to exist
-so the `deploy-production` job's `environment: production` reference resolves and (optionally) so you
-can attach protection rules (e.g. required reviewers) to production deploys later.
+so the `deploy-production` job (in `promote-production.yml`)'s `environment: production` reference
+resolves and (optionally) so you can attach protection rules (e.g. required reviewers) to production
+promotions.
 
 ### Splitting `KUBE_CONFIG` per environment (optional hardening)
 
@@ -91,12 +96,12 @@ running under that Environment, so no workflow changes are needed to adopt this 
   - `stage-algorand-trades.de-4.biatec.io`
   - `testnet.scan.biatec.io`
 
-## Manifests updated by this workflow
+## Manifests updated by these workflows
 
-- `k8s/main/deployment-api.yaml`, `k8s/main/deployment2-api.yaml`, `k8s/main/subscriber-deployment.yaml`
-  (production image tags)
-- `k8s/stage/deployment-api-stage.yaml`, `k8s/stage/subscriber-deployment-stage.yaml` (stage image
-  tags)
+- `deploy.yml`: `k8s/stage/deployment-api-stage.yaml`, `k8s/stage/subscriber-deployment-stage.yaml`
+  (stage image tags), on every push to `master`.
+- `promote-production.yml`: `k8s/main/deployment-api.yaml`, `k8s/main/deployment2-api.yaml`,
+  `k8s/main/subscriber-deployment.yaml` (production image tags), only when manually triggered.
 
 Each deploy job commits its own manifest changes back to `master` with `[skip ci]` so the checked-in
 YAML always reflects what's actually deployed, then applies them with `kubectl apply`.
