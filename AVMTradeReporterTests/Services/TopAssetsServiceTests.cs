@@ -109,6 +109,29 @@ namespace AVMTradeReporterTests.Services
         }
 
         [Test]
+        public void Build_ValueListsRankByPercentChangeNotAbsoluteUsd()
+        {
+            var assets = new[]
+            {
+                // +$10000 but only +10% vs +$500 but +50% — percent ranking must win.
+                MakeAsset(1, "BIGUSD", tvl: 110000),
+                MakeAsset(2, "BIGPCT", tvl: 1500),
+                // -$20000 but only -20% vs -$400 but -40%.
+                MakeAsset(3, "BIGUSDLOSS", tvl: 80000),
+                MakeAsset(4, "BIGPCTLOSS", tvl: 600),
+            };
+            var snapshot = new Dictionary<ulong, decimal>
+            {
+                { 1, 100000m }, { 2, 1000m }, { 3, 100000m }, { 4, 1000m }
+            };
+
+            var result = TopAssetsService.Build(assets, snapshot, 3, DateTimeOffset.UtcNow);
+
+            Assert.That(result.TopValueGainers.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 2, 1 }));
+            Assert.That(result.TopValueLosers.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 4, 3 }));
+        }
+
+        [Test]
         public void Build_WithoutSnapshot_ValueListsAreEmpty()
         {
             var assets = new[] { MakeAsset(1, "A", tvl: 1000, volume24h: 10) };

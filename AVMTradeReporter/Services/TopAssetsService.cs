@@ -142,12 +142,12 @@ namespace AVMTradeReporter.Services
                     .OrderBy(i => i.PriceChange24HPercent)
                     .Take(listSize).ToList(),
                 TopValueGainers = candidates
-                    .Where(i => i.TVLChange24HUSD > 0)
-                    .OrderByDescending(i => i.TVLChange24HUSD)
+                    .Where(i => i.TVLChange24HPercent > 0)
+                    .OrderByDescending(i => i.TVLChange24HPercent)
                     .Take(listSize).ToList(),
                 TopValueLosers = candidates
-                    .Where(i => i.TVLChange24HUSD < 0)
-                    .OrderBy(i => i.TVLChange24HUSD)
+                    .Where(i => i.TVLChange24HPercent < 0)
+                    .OrderBy(i => i.TVLChange24HPercent)
                     .Take(listSize).ToList(),
                 GeneratedAt = now
             };

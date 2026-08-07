@@ -19,8 +19,8 @@ namespace AVMTradeReporter.Controllers
 
         /// <summary>
         /// Get the "top assets" highlight lists for the scan homepage header: Popular (24h volume),
-        /// Trending (1h volume), Top gainers/losers (24h price change) and Top value gainers/losers
-        /// (24h real TVL change). Candidates are the top 150 assets by real TVL excluding stable assets;
+        /// Trending (1h volume), Top gainers/losers (24h price change in percent) and Top liquidity
+        /// gainers/losers (24h real TVL change in percent). Candidates are the top 150 assets by real TVL excluding stable assets;
         /// each list holds up to 3 entries. The response is recomputed every 5 minutes and served from
         /// the Redis cache in between.
         /// </summary>
