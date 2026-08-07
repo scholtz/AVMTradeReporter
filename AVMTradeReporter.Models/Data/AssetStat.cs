@@ -59,6 +59,13 @@ namespace AVMTradeReporter.Models.Data
         public decimal TVLUSD { get; set; }
 
         /// <summary>
+        /// Total value locked in USD of the paired (other) side of each pool trading this asset,
+        /// summed across all pools for the given protocol scope. Together with <see cref="TVLUSD"/>
+        /// this gives the full both-sides TVL of the pools this asset participates in.
+        /// </summary>
+        public decimal TVLOtherUSD { get; set; }
+
+        /// <summary>
         /// 24 hours trading volume in USD, summed across all pools trading this asset.
         /// </summary>
         public decimal Volume24hUSD { get; set; }

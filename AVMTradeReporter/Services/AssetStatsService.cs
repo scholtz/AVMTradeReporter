@@ -97,6 +97,7 @@ namespace AVMTradeReporter.Services
                         if (poolsInScope.Count == 0) continue;
 
                         var tvlUsd = poolsInScope.Sum(p => (p.AssetIdA == assetId ? p.TotalTVLAssetAInUSD : p.TotalTVLAssetBInUSD) ?? 0m);
+                        var tvlOtherUsd = poolsInScope.Sum(p => (p.AssetIdA == assetId ? p.TotalTVLAssetBInUSD : p.TotalTVLAssetAInUSD) ?? 0m);
                         var volume24h = poolsInScope.Sum(p => p.Volume24H ?? 0m);
                         var volume7d = poolsInScope.Sum(p => p.Volume7D ?? 0m);
 
@@ -116,6 +117,7 @@ namespace AVMTradeReporter.Services
                             ImageUrl = asset?.Params?.Url,
                             PriceUSD = asset?.PriceUSD,
                             TVLUSD = tvlUsd,
+                            TVLOtherUSD = tvlOtherUsd,
                             Volume24hUSD = volume24h,
                             Volume7dUSD = volume7d,
                             Fees24hUSD = fees24h,
