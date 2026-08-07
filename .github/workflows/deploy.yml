@@ -148,6 +148,14 @@ jobs:
         run: |
           kubectl create configmap avm-trade-reporter-stage-main-conf --from-file=k8s/stage/conf-api-stage -n "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
+      # avm-trade-reporter-images-pvc (k8s/main/pv-images.yaml) is the shared icon cache volume
+      # mounted by both stage and production API deployments (see k8s/main/pv-images.yaml header
+      # comment). It must exist before the deployment below is applied, or its Pods stay stuck
+      # Pending with "persistentvolumeclaim ... not found".
+      - name: Apply shared images PV/PVC
+        run: |
+          kubectl apply -f k8s/main/pv-images.yaml -n "$NAMESPACE"
+
       - name: Apply Kubernetes manifests (stage)
         run: |
           kubectl apply -f k8s/stage/deployment-api-stage.yaml -n "$NAMESPACE"
