@@ -24,6 +24,35 @@ namespace AVMTradeReporter.Hubs
             public const string ASSET_STAT = "AssetStat";
             public const string ERROR = "Error";
             public const string INFO = "Info";
+            public const string OHLC = "OHLC";
+        }
+
+        /// <summary>
+        /// SignalR group name for real-time OHLC price ticks of an asset pair.
+        /// The pair is canonicalized (min-max) so both orderings map to one group;
+        /// ticks carry the actual series orientation (assetIdA = base asset).
+        /// </summary>
+        public static string OhlcGroupName(ulong assetIdA, ulong assetIdB)
+        {
+            var a = Math.Min(assetIdA, assetIdB);
+            var b = Math.Max(assetIdA, assetIdB);
+            return $"ohlc-{a}-{b}";
+        }
+
+        /// <summary>
+        /// Subscribes the calling connection to real-time OHLC ticks for a pair.
+        /// Intentionally anonymous: price ticks are public market data (same data as
+        /// the unauthenticated /api/OHLC/history endpoint), so unlike Subscribe this
+        /// does not require ARC-14 auth — the charting widget calls it directly.
+        /// </summary>
+        public async Task SubscribeToOHLC(ulong assetIdA, ulong assetIdB)
+        {
+            await Groups.AddToGroupAsync(Context.ConnectionId, OhlcGroupName(assetIdA, assetIdB));
+        }
+
+        public async Task UnsubscribeFromOHLC(ulong assetIdA, ulong assetIdB)
+        {
+            await Groups.RemoveFromGroupAsync(Context.ConnectionId, OhlcGroupName(assetIdA, assetIdB));
         }
 
         private static readonly ConcurrentDictionary<string, SubscriptionFilter> User2Subscription = new ConcurrentDictionary<string, SubscriptionFilter>();

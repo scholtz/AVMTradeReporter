@@ -43,7 +43,8 @@ namespace AVMTradeReporter.Services
             Supports_Marks = false,
             Supports_Timescale_Marks = false,
             Supports_Time = true,
-            Supported_Resolutions = _supportedResolutions
+            Supported_Resolutions = _supportedResolutions,
+            UsdReferenceAssetId = _usdReferenceAssetId
         };
 
         public long GetTime() => DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -136,7 +137,6 @@ namespace AVMTradeReporter.Services
         public async Task<object> GetHistoryAsync(ulong assetA, ulong assetB, string resolution, long from, long to, CancellationToken ct)
         {
             if (_elastic == null) return new HistoryResponseDto { S = "no_data" };
-            if (assetA == assetB) return new HistoryResponseDto { S = "no_data" };
 
             var wantsUsd = false;
             var rawResolution = (resolution ?? string.Empty).Trim();
@@ -157,9 +157,26 @@ namespace AVMTradeReporter.Services
             var toDt = DateTimeOffset.FromUnixTimeSeconds(to).UtcDateTime;
             if (toDt <= fromDt) return new HistoryResponseDto { S = "no_data" };
 
-            var a = Math.Min(assetA, assetB);
-            var b = Math.Max(assetA, assetB);
-            var invert = (a != assetA);
+            ulong a, b;
+            bool invert;
+            if (wantsUsd)
+            {
+                // USD-valuation candles are stored as (baseAsset, usdReferenceAsset)
+                // without id ordering (see OHLCRepository.GetIntervalBuckets), so the
+                // pair must NOT be canonicalized by min/max here. The base asset is
+                // whichever side of the request is not the USD reference asset; when
+                // the USD reference asset itself is charted both sides are equal.
+                a = (assetA == _usdReferenceAssetId && assetB != _usdReferenceAssetId) ? assetB : assetA;
+                b = _usdReferenceAssetId;
+                invert = false;
+            }
+            else
+            {
+                if (assetA == assetB) return new HistoryResponseDto { S = "no_data" };
+                a = Math.Min(assetA, assetB);
+                b = Math.Max(assetA, assetB);
+                invert = (a != assetA);
+            }
 
             // Explicit request object to avoid deep descriptor graphs
             var request = new SearchRequest<OHLC>("ohlc")

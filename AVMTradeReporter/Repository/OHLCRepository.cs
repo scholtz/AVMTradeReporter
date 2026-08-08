@@ -1,6 +1,9 @@
+using AVMTradeReporter.Hubs;
 using AVMTradeReporter.Model.Configuration;
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Model.DTO.OHLC;
 using AVMTradeReporter.Models.Data;
+using Microsoft.AspNetCore.SignalR;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Mapping;
 using Elastic.Clients.Elasticsearch.IndexManagement;
@@ -19,6 +22,7 @@ namespace AVMTradeReporter.Repository
         private readonly ILogger<OHLCRepository> _logger;
         private readonly IAssetRepository? _assetRepository;
         private readonly ulong _usdReferenceAssetId;
+        private readonly IHubContext<BiatecScanHub>? _hubContext;
 
         internal static readonly (string code, TimeSpan span)[] Intervals = new[]
         {
@@ -32,12 +36,13 @@ namespace AVMTradeReporter.Repository
             ("1M", TimeSpan.FromDays(31))
         };
 
-        public OHLCRepository(ElasticsearchClient client, ILogger<OHLCRepository> logger, IAssetRepository? assetRepository = null, IOptions<AppConfiguration>? appConfig = null)
+        public OHLCRepository(ElasticsearchClient client, ILogger<OHLCRepository> logger, IAssetRepository? assetRepository = null, IOptions<AppConfiguration>? appConfig = null, IHubContext<BiatecScanHub>? hubContext = null)
         {
             _elasticClient = client;
             _logger = logger;
             _assetRepository = assetRepository;
             _usdReferenceAssetId = appConfig?.Value.UsdReferenceAssetId ?? 31566704UL;
+            _hubContext = hubContext;
             CreateTemplateAsync().Wait();
         }
 
@@ -166,7 +171,9 @@ namespace AVMTradeReporter.Repository
                     usdPriceBase = trade.ValueUSD.Value / adjustedVolBase;
                 }
 
-                if (usdPriceBase.HasValue && aId != usdcAssetId)
+                // The USD reference asset itself is included (docId "{usd}-{usd}-...-usd-...")
+                // so its own USD price chart (e.g. USDC/USD) has data.
+                if (usdPriceBase.HasValue)
                 {
                     // For USD-valued series, keep volumeBase in base asset units, but express quote volume in USD.
                     var docIdUsd = $"{aId}-{usdcAssetId}-{code}-usd-{bucketStart:yyyyMMddHHmmss}";
@@ -181,7 +188,7 @@ namespace AVMTradeReporter.Repository
                     usdPriceQuote = trade.ValueUSD.Value / adjustedVolQuote;
                 }
 
-                if (usdPriceQuote.HasValue && bId != usdcAssetId)
+                if (usdPriceQuote.HasValue)
                 {
                     // For USD-valued series, keep volumeBase in base asset units, but express quote volume in USD.
                     var docIdUsd = $"{bId}-{usdcAssetId}-{code}-usd-{bucketStart:yyyyMMddHHmmss}";
@@ -192,12 +199,57 @@ namespace AVMTradeReporter.Repository
             return result;
         }
 
+        /// <summary>
+        /// Collapses per-interval bucket specs into one real-time tick per distinct
+        /// OHLC series (price/volume are identical across intervals of a series).
+        /// </summary>
+        internal static List<OhlcTickDto> GetTicks(IEnumerable<BucketSpec> buckets, DateTimeOffset timestamp)
+        {
+            return buckets
+                .GroupBy(b => (b.AssetIdA, b.AssetIdB, b.InUsdValuation))
+                .Select(g =>
+                {
+                    var f = g.First();
+                    return new OhlcTickDto
+                    {
+                        AssetIdA = f.AssetIdA,
+                        AssetIdB = f.AssetIdB,
+                        InUSDValuation = f.InUsdValuation,
+                        Price = f.Price,
+                        VolumeBase = f.VolumeBase,
+                        VolumeQuote = f.VolumeQuote,
+                        Timestamp = timestamp.ToUnixTimeSeconds()
+                    };
+                })
+                .ToList();
+        }
+
+        private async Task PublishTicksAsync(IEnumerable<BucketSpec> buckets, Trade trade, CancellationToken cancellationToken)
+        {
+            if (_hubContext == null || !trade.Timestamp.HasValue) return;
+            try
+            {
+                foreach (var tick in GetTicks(buckets, trade.Timestamp.Value))
+                {
+                    var group = BiatecScanHub.OhlcGroupName(tick.AssetIdA, tick.AssetIdB);
+                    await _hubContext.Clients.Group(group).SendAsync(BiatecScanHub.Subscriptions.OHLC, tick, cancellationToken);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to publish OHLC ticks for trade {txId}", trade.TxId);
+            }
+        }
+
         public async Task UpdateFromTradeAsync(Trade trade, CancellationToken cancellationToken)
         {
-            if (_elasticClient == null) return;
             if (trade.TradeState != Models.Data.Enums.TxState.Confirmed) return;
             var buckets = await GetIntervalBuckets(trade);
             if (!buckets.Any()) return;
+
+            await PublishTicksAsync(buckets, trade, cancellationToken);
+
+            if (_elasticClient == null) return;
 
             var bulkRequest = new BulkRequest("ohlc") { Operations = new BulkOperationsCollection() };
             var now = DateTimeOffset.UtcNow.UtcDateTime;

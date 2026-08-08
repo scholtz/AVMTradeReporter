@@ -19,6 +19,32 @@ namespace AVMTradeReporter.Model.DTO.OHLC
         [JsonPropertyName("supported_resolutions")] public string[] Supported_Resolutions { get; set; } = [];
         [JsonPropertyName("exchanges")] public object[] Exchanges { get; set; } = new object[] { new { value = "ALG", name = "Algorand", desc = "Algorand" } };
         [JsonPropertyName("symbols_types")] public object[] Symbols_Types { get; set; } = new object[] { new { name = "crypto", value = "crypto" } };
+        /// <summary>
+        /// The ASA id USD-valued candles are quoted against on this deployment
+        /// (mainnet USDC on production, testnet USDC on stage). Clients should use
+        /// this as the quote asset for USD price charts instead of hardcoding an id.
+        /// </summary>
+        [JsonPropertyName("usd_reference_asset_id")] public ulong UsdReferenceAssetId { get; set; }
+    }
+
+    /// <summary>
+    /// Real-time per-trade price tick broadcast over SignalR (event
+    /// <c>BiatecScanHub.Subscriptions.OHLC</c>) to the pair group
+    /// <c>BiatecScanHub.OhlcGroupName(assetIdA, assetIdB)</c>. One tick is sent per
+    /// distinct OHLC series a trade contributes to: the asset-valuation pair series
+    /// and up to two USD-valuation series (one per trade leg).
+    /// </summary>
+    public class OhlcTickDto
+    {
+        [JsonPropertyName("assetIdA")] public ulong AssetIdA { get; set; }
+        [JsonPropertyName("assetIdB")] public ulong AssetIdB { get; set; }
+        [JsonPropertyName("inUSDValuation")] public bool InUSDValuation { get; set; }
+        /// <summary>Trade price: quote-per-base for asset series, USD-per-base-unit for USD series.</summary>
+        [JsonPropertyName("price")] public decimal Price { get; set; }
+        [JsonPropertyName("volumeBase")] public decimal VolumeBase { get; set; }
+        [JsonPropertyName("volumeQuote")] public decimal VolumeQuote { get; set; }
+        /// <summary>Trade timestamp, unix seconds (UTC).</summary>
+        [JsonPropertyName("timestamp")] public long Timestamp { get; set; }
     }
 
     public class SymbolDto

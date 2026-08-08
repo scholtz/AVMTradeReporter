@@ -110,6 +110,82 @@ namespace AVMTradeReporterTests.Repository
         }
 
         [Test]
+        public async Task GetIntervalBuckets_TradeInvolvingUsdReferenceAsset_GeneratesUsdSeriesForBothSides()
+        {
+            const ulong usdcAssetId = 31566704UL;
+            // Trade of USDC against a newer asset (id > USDC id): sell 100 USDC for 50 X
+            var trade = new Trade
+            {
+                AssetIdIn = usdcAssetId,
+                AssetIdOut = 99999999UL,
+                AssetAmountIn = 100,
+                AssetAmountOut = 50,
+                ValueUSD = 100m,
+                Timestamp = DateTimeOffset.Parse("2024-01-02T03:04:05Z"),
+                TradeState = AVMTradeReporter.Models.Data.Enums.TxState.Confirmed
+            };
+
+            var buckets = (await _repo.GetIntervalBuckets(trade)).ToList();
+            var usdSeries = buckets.Where(b => b.InUsdValuation).ToList();
+
+            // USD series exist for BOTH legs, including the USD reference asset itself,
+            // so charting USDC/USD has data.
+            var usdcUsd = usdSeries.Where(b => b.AssetIdA == usdcAssetId).ToList();
+            var otherUsd = usdSeries.Where(b => b.AssetIdA == 99999999UL).ToList();
+
+            Assert.That(usdcUsd.Count, Is.EqualTo(OHLCRepository.Intervals.Length));
+            Assert.That(otherUsd.Count, Is.EqualTo(OHLCRepository.Intervals.Length));
+
+            // USDC priced in USD: 100 USD / 100 USDC = 1
+            Assert.That(usdcUsd.All(b => b.Price == 1m));
+            Assert.That(usdcUsd.All(b => b.AssetIdB == usdcAssetId));
+            Assert.That(usdcUsd.All(b => b.DocId.StartsWith($"{usdcAssetId}-{usdcAssetId}-{b.Interval}-usd-")));
+
+            // X priced in USD: 100 USD / 50 X = 2; stored as (X, USDC) even though X id > USDC id
+            Assert.That(otherUsd.All(b => b.Price == 2m));
+            Assert.That(otherUsd.All(b => b.AssetIdB == usdcAssetId));
+        }
+
+        [Test]
+        public async Task GetTicks_CollapsesIntervalsIntoOneTickPerSeries()
+        {
+            var trade = new Trade
+            {
+                AssetIdIn = 1,
+                AssetIdOut = 2,
+                AssetAmountIn = 100,
+                AssetAmountOut = 250,
+                ValueUSD = 1000m,
+                Timestamp = DateTimeOffset.Parse("2024-01-02T03:04:05Z"),
+                TradeState = AVMTradeReporter.Models.Data.Enums.TxState.Confirmed
+            };
+
+            var buckets = await _repo.GetIntervalBuckets(trade);
+            var ticks = OHLCRepository.GetTicks(buckets, trade.Timestamp!.Value);
+
+            // one asset-valuation tick + one usd tick per trade leg
+            Assert.That(ticks.Count, Is.EqualTo(3));
+            Assert.That(ticks.All(t => t.Timestamp == trade.Timestamp.Value.ToUnixTimeSeconds()));
+
+            var assetTick = ticks.Single(t => !t.InUSDValuation);
+            Assert.That(assetTick.AssetIdA, Is.EqualTo(1UL));
+            Assert.That(assetTick.AssetIdB, Is.EqualTo(2UL));
+            Assert.That(assetTick.Price, Is.EqualTo(2.5m));
+            Assert.That(assetTick.VolumeBase, Is.EqualTo(100m));
+            Assert.That(assetTick.VolumeQuote, Is.EqualTo(250m));
+
+            const ulong usdcAssetId = 31566704UL;
+            var usdTickA = ticks.Single(t => t.InUSDValuation && t.AssetIdA == 1UL);
+            Assert.That(usdTickA.AssetIdB, Is.EqualTo(usdcAssetId));
+            Assert.That(usdTickA.Price, Is.EqualTo(10m));
+            Assert.That(usdTickA.VolumeBase, Is.EqualTo(100m));
+            Assert.That(usdTickA.VolumeQuote, Is.EqualTo(1000m));
+
+            var usdTickB = ticks.Single(t => t.InUSDValuation && t.AssetIdA == 2UL);
+            Assert.That(usdTickB.Price, Is.EqualTo(4m));
+        }
+
+        [Test]
         public async Task GetIntervalBuckets_InvalidSameAsset_ReturnsEmpty()
         {
             var trade = new Trade
