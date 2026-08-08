@@ -729,7 +729,12 @@ namespace AVMTradeReporter.Repository
             foreach (var p in filteredPools)
             {
                 await EnsurePoolAssetDecimalsAsync(p, cancellationToken);
-                if (p.AssetADecimals.HasValue && p.AssetBDecimals.HasValue)
+                // Biatec pools store their amounts in the contract's 1e9 base scale, so the
+                // served real/virtual amounts do not depend on asset decimals — never drop
+                // them just because decimals enrichment failed (cold cache, algod hiccup).
+                // Other protocols store native units; without decimals their amounts would
+                // be wrong by 10^decimals, so those stay excluded until enrichment succeeds.
+                if (p.Protocol == DEXProtocol.Biatec || (p.AssetADecimals.HasValue && p.AssetBDecimals.HasValue))
                 {
                     result.Add(p);
                 }
