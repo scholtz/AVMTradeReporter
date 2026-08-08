@@ -78,7 +78,8 @@ namespace AVMTradeReporter.Model.DTO
         /// <summary>Top assets by 24h price loss in percent ("Top losers"). Only negative changes qualify.</summary>
         public List<TopAssetItem> TopLosers { get; set; } = new();
 
-        /// <summary>Top assets by relative real TVL growth in percent over 24h ("Top liquidity gainers"). Only positive changes qualify.</summary>
+        /// <summary>Top assets by relative real TVL growth in percent over 24h ("Top liquidity gainers"). Only positive changes qualify.
+        /// Newly funded assets (no TVL 24h ago) count as infinite relative growth: they rank first, ordered by absolute USD gain, with TVLChange24HPercent null.</summary>
         public List<TopAssetItem> TopValueGainers { get; set; } = new();
 
         /// <summary>Top assets by relative real TVL loss in percent over 24h ("Top liquidity losers"). Only negative changes qualify.</summary>

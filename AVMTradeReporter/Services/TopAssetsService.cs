@@ -16,8 +16,8 @@ namespace AVMTradeReporter.Services
     ///
     /// The 24h real-TVL change has no historical source anywhere else in the system, so this service
     /// also maintains hourly snapshots of each candidate asset's real TVL in Redis
-    /// (<c>asset:tvl:hourly:{unixHour}</c>, ~30h retention) and diffs against the snapshot closest to
-    /// 24 hours ago.
+    /// (<c>asset:tvl:hourly:{unixHour}</c>, 8 days retention) and diffs against the snapshot closest
+    /// to 24 hours ago. Assets missing from that snapshot are treated as having had zero TVL.
     /// </summary>
     public class TopAssetsService : ITopAssetsService
     {
@@ -155,13 +155,19 @@ namespace AVMTradeReporter.Services
                     .Where(i => i.PriceChange24HPercent < 0)
                     .OrderBy(i => i.PriceChange24HPercent)
                     .Take(listSize).ToList(),
+                // Gainers include newly funded assets (absent from the 24h-ago snapshot, so their
+                // whole TVL is the gain). Their percent change from a zero baseline is undefined
+                // (null) and conceptually infinite, so they rank above every finite percent change,
+                // ordered by absolute USD gain among themselves.
                 TopValueGainers = candidates
-                    .Where(i => i.TVLChange24HPercent > 0)
-                    .OrderByDescending(i => i.TVLChange24HPercent)
+                    .Where(i => i.TVLChange24HUSD > 0)
+                    .OrderByDescending(i => i.TVLChange24HPercent ?? decimal.MaxValue)
+                    .ThenByDescending(i => i.TVLChange24HUSD)
                     .Take(listSize).ToList(),
                 TopValueLosers = candidates
                     .Where(i => i.TVLChange24HPercent < 0)
                     .OrderBy(i => i.TVLChange24HPercent)
+                    .ThenBy(i => i.TVLChange24HUSD)
                     .Take(listSize).ToList(),
                 GeneratedAt = now
             };
@@ -209,8 +215,12 @@ namespace AVMTradeReporter.Services
                 item.PriceChange24HPercent = (asset.PriceUSD - asset.PriceUSD24H.Value) / asset.PriceUSD24H.Value * 100m;
             }
 
-            if (tvl24hAgo != null && tvl24hAgo.TryGetValue(asset.Index, out var oldTvl))
+            if (tvl24hAgo != null)
             {
+                // An asset absent from an existing 24h-ago snapshot did not exist (or held no
+                // liquidity) back then — its baseline is 0, so its whole current TVL is the 24h
+                // gain. Without this, newly funded tokens never show up in the value lists.
+                tvl24hAgo.TryGetValue(asset.Index, out var oldTvl);
                 item.RealTVLUSD24H = oldTvl;
                 item.TVLChange24HUSD = asset.TVL_USD - oldTvl;
                 if (oldTvl > 0)

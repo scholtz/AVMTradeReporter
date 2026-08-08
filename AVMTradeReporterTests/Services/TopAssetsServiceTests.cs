@@ -95,18 +95,60 @@ namespace AVMTradeReporterTests.Services
             {
                 MakeAsset(1, "GROW", tvl: 2000),
                 MakeAsset(2, "SHRINK", tvl: 400),
-                MakeAsset(3, "NEW", tvl: 300), // no snapshot entry -> excluded from value lists
+                // No snapshot entry -> newly funded, counts as a gain from a zero baseline and
+                // ranks above every finite percent change.
+                MakeAsset(3, "NEW", tvl: 300),
             };
             var snapshot = new Dictionary<ulong, decimal> { { 1, 1000m }, { 2, 900m } };
 
             var result = TopAssetsService.Build(assets, snapshot, null, 3, DateTimeOffset.UtcNow);
 
-            Assert.That(result.TopValueGainers.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 1 }));
+            Assert.That(result.TopValueGainers.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 3, 1 }));
             Assert.That(result.TopValueLosers.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 2 }));
-            Assert.That(result.TopValueGainers[0].TVLChange24HUSD, Is.EqualTo(1000m));
-            Assert.That(result.TopValueGainers[0].TVLChange24HPercent, Is.EqualTo(100m).Within(0.0001m));
+            var newItem = result.TopValueGainers[0];
+            Assert.That(newItem.TVLChange24HUSD, Is.EqualTo(300m));
+            Assert.That(newItem.TVLChange24HPercent, Is.Null);
+            Assert.That(newItem.RealTVLUSD24H, Is.EqualTo(0m));
+            var growItem = result.TopValueGainers[1];
+            Assert.That(growItem.TVLChange24HUSD, Is.EqualTo(1000m));
+            Assert.That(growItem.TVLChange24HPercent, Is.EqualTo(100m).Within(0.0001m));
+            Assert.That(growItem.RealTVLUSD24H, Is.EqualTo(1000m));
             Assert.That(result.TopValueLosers[0].TVLChange24HUSD, Is.EqualTo(-500m));
-            Assert.That(result.TopValueGainers[0].RealTVLUSD24H, Is.EqualTo(1000m));
+        }
+
+        [Test]
+        public void Build_NewlyFundedAssetsRankFirstByUsdAmongThemselves()
+        {
+            // The reported bug: pools funded a couple of hours ago (absent from the 24h-ago
+            // snapshot) never appeared in "Top liquidity gainers". They must appear, ranked
+            // above finite-percent gainers, ordered by absolute USD gain among themselves.
+            var assets = new[]
+            {
+                MakeAsset(1, "NEWSMALL", tvl: 100),
+                MakeAsset(2, "NEWBIG", tvl: 5000),
+                MakeAsset(3, "TRIPLED", tvl: 3000), // +200% — big, but finite
+                MakeAsset(4, "EMPTYNEW", tvl: 0),   // new but never funded -> not a gainer
+            };
+            var snapshot = new Dictionary<ulong, decimal> { { 3, 1000m } };
+
+            var result = TopAssetsService.Build(assets, snapshot, null, 3, DateTimeOffset.UtcNow);
+
+            Assert.That(result.TopValueGainers.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 2, 1, 3 }));
+            Assert.That(result.TopValueLosers, Is.Empty);
+        }
+
+        [Test]
+        public void Build_AssetWithZeroTvlInSnapshot_TreatedLikeNewlyFunded()
+        {
+            // A zero value recorded in the snapshot is the same zero baseline as a missing entry.
+            var assets = new[] { MakeAsset(1, "REFUNDED", tvl: 700) };
+            var snapshot = new Dictionary<ulong, decimal> { { 1, 0m } };
+
+            var result = TopAssetsService.Build(assets, snapshot, null, 3, DateTimeOffset.UtcNow);
+
+            Assert.That(result.TopValueGainers.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 1 }));
+            Assert.That(result.TopValueGainers[0].TVLChange24HUSD, Is.EqualTo(700m));
+            Assert.That(result.TopValueGainers[0].TVLChange24HPercent, Is.Null);
         }
 
         [Test]
