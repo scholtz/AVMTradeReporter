@@ -128,6 +128,34 @@ namespace AVMTradeReporterTests.Controllers
         }
 
         [Test]
+        public async Task GetLiquidity_WithPoolAddress_CallsServiceCorrectly()
+        {
+            // Arrange
+            const string poolAddress = "POOLADDRESS";
+
+            // Act
+            await _controller.GetLiquidity(poolAddress: poolAddress);
+
+            // Assert
+            Assert.That(_mockLiquidityQueryService.LastCalledPoolAddress, Is.EqualTo(poolAddress));
+            Assert.That(_mockLiquidityQueryService.LastCalledPoolAppId, Is.Null);
+        }
+
+        [Test]
+        public async Task GetLiquidity_WithPoolAppId_CallsServiceCorrectly()
+        {
+            // Arrange
+            const ulong poolAppId = 1001;
+
+            // Act
+            await _controller.GetLiquidity(poolAppId: poolAppId);
+
+            // Assert
+            Assert.That(_mockLiquidityQueryService.LastCalledPoolAppId, Is.EqualTo(poolAppId));
+            Assert.That(_mockLiquidityQueryService.LastCalledPoolAddress, Is.Null);
+        }
+
+        [Test]
         public async Task GetLiquidity_WithBothAssets_CallsServiceCorrectly()
         {
             // Arrange
@@ -149,6 +177,8 @@ namespace AVMTradeReporterTests.Controllers
         public ulong? LastCalledAssetIdA { get; private set; }
         public ulong? LastCalledAssetIdB { get; private set; }
         public string? LastCalledTxId { get; private set; }
+        public string? LastCalledPoolAddress { get; private set; }
+        public ulong? LastCalledPoolAppId { get; private set; }
         public int LastCalledOffset { get; private set; }
         public int LastCalledSize { get; private set; }
 
@@ -156,6 +186,8 @@ namespace AVMTradeReporterTests.Controllers
             ulong? assetIdA = null,
             ulong? assetIdB = null,
             string? txId = null,
+            string? poolAddress = null,
+            ulong? poolAppId = null,
             int offset = 0,
             int size = 100,
             CancellationToken cancellationToken = default)
@@ -163,6 +195,8 @@ namespace AVMTradeReporterTests.Controllers
             LastCalledAssetIdA = assetIdA;
             LastCalledAssetIdB = assetIdB;
             LastCalledTxId = txId;
+            LastCalledPoolAddress = poolAddress;
+            LastCalledPoolAppId = poolAppId;
             LastCalledOffset = offset;
             LastCalledSize = size;
 

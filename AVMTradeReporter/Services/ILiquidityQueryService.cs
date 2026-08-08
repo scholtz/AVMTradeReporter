@@ -9,6 +9,8 @@ namespace AVMTradeReporter.Services
             ulong? assetIdA = null,
             ulong? assetIdB = null,
             string? txId = null,
+            string? poolAddress = null,
+            ulong? poolAppId = null,
             int offset = 0,
             int size = 100,
             CancellationToken cancellationToken = default);

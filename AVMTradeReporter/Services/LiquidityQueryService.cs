@@ -19,6 +19,8 @@ namespace AVMTradeReporter.Services
             ulong? assetIdA = null,
             ulong? assetIdB = null,
             string? txId = null,
+            string? poolAddress = null,
+            ulong? poolAppId = null,
             int offset = 0,
             int size = 100,
             CancellationToken cancellationToken = default)
@@ -38,7 +40,7 @@ namespace AVMTradeReporter.Services
                     .From(offset)
                     .Size(size)
                     .Sort(ss => ss.Field(f => f.Field(l => l.BlockId).Order(SortOrder.Desc)))
-                    .Query(q => BuildQuery(q, assetIdA, assetIdB, txId)),
+                    .Query(q => BuildQuery(q, assetIdA, assetIdB, txId, poolAddress, poolAppId)),
                     cancellationToken);
 
                 if (searchResponse.IsValidResponse)
@@ -62,7 +64,9 @@ namespace AVMTradeReporter.Services
             Elastic.Clients.Elasticsearch.QueryDsl.QueryDescriptor<Liquidity> q,
             ulong? assetIdA,
             ulong? assetIdB,
-            string? txId)
+            string? txId,
+            string? poolAddress,
+            ulong? poolAppId)
         {
             if (!string.IsNullOrWhiteSpace(txId))
             {
@@ -70,26 +74,49 @@ namespace AVMTradeReporter.Services
                 return q.Term(t => t.Field(f => f.TxId).Value(txId));
             }
 
+            var must = new List<Action<Elastic.Clients.Elasticsearch.QueryDsl.QueryDescriptor<Liquidity>>>();
+
+            if (!string.IsNullOrWhiteSpace(poolAddress))
+            {
+                // The "liquidity" index is mapped as dynamic text + .keyword subfield on
+                // production but pure keyword on fresh clusters (stage) - OR both variants
+                // so the term filter works against either mapping.
+                must.Add(m => m.Bool(b => b
+                    .Should(
+                        s => s.Term(t => t.Field("poolAddress").Value(FieldValue.String(poolAddress))),
+                        s => s.Term(t => t.Field("poolAddress.keyword").Value(FieldValue.String(poolAddress)))
+                    )
+                    .MinimumShouldMatch(1)));
+            }
+
+            if (poolAppId.HasValue)
+            {
+                must.Add(m => m.Term(t => t.Field(f => f.PoolAppId).Value(poolAppId.Value)));
+            }
+
             if (assetIdA.HasValue && assetIdB.HasValue)
             {
                 // Both assets specified - require both conditions (AND logic)
-                return q.Bool(b => b.Must(
-                    m => m.Term(t => t.Field(f => f.AssetIdA).Value(assetIdA.Value)),
-                    m => m.Term(t => t.Field(f => f.AssetIdB).Value(assetIdB.Value))
-                ));
+                must.Add(m => m.Term(t => t.Field(f => f.AssetIdA).Value(assetIdA.Value)));
+                must.Add(m => m.Term(t => t.Field(f => f.AssetIdB).Value(assetIdB.Value)));
             }
             else if (assetIdA.HasValue || assetIdB.HasValue)
             {
                 // Single asset specified - match either AssetIdA OR AssetIdB
                 var assetId = assetIdA ?? assetIdB!.Value;
-                return q.Bool(b => b.Should(
+                must.Add(m => m.Bool(b => b.Should(
                     s => s.Term(t => t.Field(f => f.AssetIdA).Value(assetId)),
                     s => s.Term(t => t.Field(f => f.AssetIdB).Value(assetId))
-                ));
+                )));
             }
 
-            // No filters provided, return all liquidity updates
-            return q.MatchAll();
+            if (must.Count == 0)
+            {
+                // No filters provided, return all liquidity updates
+                return q.MatchAll();
+            }
+
+            return q.Bool(b => b.Must(must.ToArray()));
         }
     }
 }

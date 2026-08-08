@@ -24,6 +24,8 @@ namespace AVMTradeReporter.Controllers
         /// <param name="assetIdA">Filter by asset A ID. When used alone, matches liquidity where this asset is either A or B.</param>
         /// <param name="assetIdB">Filter by asset B ID. When used with assetIdA, requires exact asset pair match.</param>
         /// <param name="txId">Filter by transaction ID. Takes precedence over asset filters.</param>
+        /// <param name="poolAddress">Filter by pool escrow address.</param>
+        /// <param name="poolAppId">Filter by pool application ID.</param>
         /// <param name="offset">Number of records to skip for pagination (default: 0).</param>
         /// <param name="size">Maximum number of records to return (default: 100, max: 500).</param>
         /// <returns>List of liquidity updates matching the specified criteria.</returns>
@@ -33,6 +35,8 @@ namespace AVMTradeReporter.Controllers
             [FromQuery] ulong? assetIdA = null,
             [FromQuery] ulong? assetIdB = null,
             [FromQuery] string? txId = null,
+            [FromQuery] string? poolAddress = null,
+            [FromQuery] ulong? poolAppId = null,
             [FromQuery] int offset = 0,
             [FromQuery] int size = 100)
         {
@@ -45,6 +49,8 @@ namespace AVMTradeReporter.Controllers
                     assetIdA,
                     assetIdB,
                     txId,
+                    poolAddress,
+                    poolAppId,
                     offset,
                     size,
                     HttpContext.RequestAborted);
