@@ -31,6 +31,7 @@ namespace AVMTradeReporter.Services
         private readonly ILogger<TopAssetsService> _logger;
         private readonly IDatabase? _redisDatabase;
         private readonly AppConfiguration _appConfig;
+        private readonly ITradeQueryService? _tradeQueryService;
 
         // Fallback served when Redis is unavailable/empty and a fresh computation fails or is redundant.
         private TopAssetsResponse? _lastComputed;
@@ -39,12 +40,14 @@ namespace AVMTradeReporter.Services
             IAssetRepository assetRepository,
             ILogger<TopAssetsService> logger,
             IOptions<AppConfiguration> appConfig,
-            IDatabase? redisDatabase = null)
+            IDatabase? redisDatabase = null,
+            ITradeQueryService? tradeQueryService = null)
         {
             _assetRepository = assetRepository;
             _logger = logger;
             _appConfig = appConfig.Value;
             _redisDatabase = redisDatabase;
+            _tradeQueryService = tradeQueryService;
         }
 
         public async Task<TopAssetsResponse> GetTopAssetsAsync(CancellationToken cancellationToken = default)
@@ -88,7 +91,17 @@ namespace AVMTradeReporter.Services
             await StoreTvlSnapshotAsync(universe, now, cancellationToken);
             var tvl24hAgo = await LoadTvlSnapshotAsync(now, cancellationToken);
 
-            var response = Build(universe, tvl24hAgo, listSize, now);
+            // Windowed volumes straight from confirmed trades. The Volume1H/Volume24H counters on
+            // BiatecAsset only re-window during pool refresh and go stale in between (they never
+            // decay without new trades), which made "trending" list assets with no trades in the
+            // past hour. Null (ES unavailable) falls back to the asset counters inside Build.
+            IReadOnlyDictionary<ulong, AssetVolumeWindows>? assetVolumes = null;
+            if (_tradeQueryService != null)
+            {
+                assetVolumes = await _tradeQueryService.GetAssetVolumeWindowsAsync(now, cancellationToken);
+            }
+
+            var response = Build(universe, tvl24hAgo, assetVolumes, listSize, now);
             _lastComputed = response;
 
             if (_redisDatabase != null)
@@ -115,12 +128,13 @@ namespace AVMTradeReporter.Services
         public static TopAssetsResponse Build(
             IEnumerable<BiatecAsset> universeOrderedByTvl,
             IReadOnlyDictionary<ulong, decimal>? tvl24hAgo,
+            IReadOnlyDictionary<ulong, AssetVolumeWindows>? assetVolumes,
             int listSize,
             DateTimeOffset now)
         {
             var candidates = universeOrderedByTvl
                 .Where(a => a.StabilityIndex == 0)
-                .Select(a => ToItem(a, tvl24hAgo))
+                .Select(a => ToItem(a, tvl24hAgo, assetVolumes))
                 .ToList();
 
             return new TopAssetsResponse
@@ -153,7 +167,10 @@ namespace AVMTradeReporter.Services
             };
         }
 
-        private static TopAssetItem ToItem(BiatecAsset asset, IReadOnlyDictionary<ulong, decimal>? tvl24hAgo)
+        private static TopAssetItem ToItem(
+            BiatecAsset asset,
+            IReadOnlyDictionary<ulong, decimal>? tvl24hAgo,
+            IReadOnlyDictionary<ulong, AssetVolumeWindows>? assetVolumes)
         {
             var item = new TopAssetItem
             {
@@ -163,10 +180,29 @@ namespace AVMTradeReporter.Services
                 Decimals = asset.Params?.Decimals,
                 PriceUSD = asset.PriceUSD,
                 PriceUSD24H = asset.PriceUSD24H,
+                // Fallback to the (possibly stale) asset counters only when trade history is unavailable.
                 Volume1HUSD = asset.Volume1H ?? 0,
                 Volume24HUSD = asset.Volume24H ?? 0,
                 RealTVLUSD = asset.TVL_USD
             };
+
+            if (assetVolumes != null)
+            {
+                // Assets absent from the dictionary simply had no trades in the past 48h.
+                assetVolumes.TryGetValue(asset.Index, out var windows);
+                item.Volume1HUSD = windows?.Volume1H ?? 0;
+                item.Volume1HUSDPrev = windows?.Volume1HPrev ?? 0;
+                item.Volume24HUSD = windows?.Volume24H ?? 0;
+                item.Volume24HUSDPrev = windows?.Volume24HPrev ?? 0;
+                if (item.Volume1HUSDPrev > 0)
+                {
+                    item.Volume1HChangePercent = (item.Volume1HUSD - item.Volume1HUSDPrev.Value) / item.Volume1HUSDPrev.Value * 100m;
+                }
+                if (item.Volume24HUSDPrev > 0)
+                {
+                    item.Volume24HChangePercent = (item.Volume24HUSD - item.Volume24HUSDPrev.Value) / item.Volume24HUSDPrev.Value * 100m;
+                }
+            }
 
             if (asset.PriceUSD24H > 0 && asset.PriceUSD > 0)
             {

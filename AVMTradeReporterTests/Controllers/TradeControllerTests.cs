@@ -224,6 +224,11 @@ namespace AVMTradeReporterTests.Controllers
         {
             return Task.FromResult(new Dictionary<string, (decimal, decimal, decimal)>());
         }
+
+        public Task<IReadOnlyDictionary<ulong, AssetVolumeWindows>?> GetAssetVolumeWindowsAsync(DateTimeOffset now, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<IReadOnlyDictionary<ulong, AssetVolumeWindows>?>(null);
+        }
     }
 
     // Mock logger implementation

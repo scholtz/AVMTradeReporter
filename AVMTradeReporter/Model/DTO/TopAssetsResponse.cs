@@ -29,8 +29,20 @@ namespace AVMTradeReporter.Model.DTO
         /// <summary>Trading volume in USD over the past hour.</summary>
         public decimal Volume1HUSD { get; set; }
 
+        /// <summary>Trading volume in USD over the previous hour window (2h ago .. 1h ago). Null when trade history was unavailable during computation.</summary>
+        public decimal? Volume1HUSDPrev { get; set; }
+
+        /// <summary>Volume change of the past-hour window vs the previous-hour window in percent (null when the previous window had no volume).</summary>
+        public decimal? Volume1HChangePercent { get; set; }
+
         /// <summary>Trading volume in USD over the past 24 hours.</summary>
         public decimal Volume24HUSD { get; set; }
+
+        /// <summary>Trading volume in USD over the previous 24h window (48h ago .. 24h ago). Null when trade history was unavailable during computation.</summary>
+        public decimal? Volume24HUSDPrev { get; set; }
+
+        /// <summary>Volume change of the past-24h window vs the previous-24h window in percent (null when the previous window had no volume).</summary>
+        public decimal? Volume24HChangePercent { get; set; }
 
         /// <summary>Current real TVL in USD (trusted-token side only, see BiatecAsset.TVL_USD).</summary>
         public decimal RealTVLUSD { get; set; }

@@ -1,4 +1,5 @@
 using AVMTradeReporter.Model.Data;
+using AVMTradeReporter.Model.DTO;
 using AVMTradeReporter.Services;
 using NUnit.Framework;
 
@@ -43,7 +44,7 @@ namespace AVMTradeReporterTests.Services
                 MakeAsset(2, "VOTE", tvl: 500, volume1h: 100, volume24h: 200, price: 2m, price24h: 1m),
             };
 
-            var result = TopAssetsService.Build(assets, null, 3, DateTimeOffset.UtcNow);
+            var result = TopAssetsService.Build(assets, null, null, 3, DateTimeOffset.UtcNow);
 
             Assert.That(result.Popular.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 2 }));
             Assert.That(result.Trending.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 2 }));
@@ -61,7 +62,7 @@ namespace AVMTradeReporterTests.Services
                 MakeAsset(4, "D", tvl: 600, volume1h: 4, volume24h: 200),
             };
 
-            var result = TopAssetsService.Build(assets, null, 3, DateTimeOffset.UtcNow);
+            var result = TopAssetsService.Build(assets, null, null, 3, DateTimeOffset.UtcNow);
 
             Assert.That(result.Popular.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 2, 3, 4 }));
             Assert.That(result.Trending.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 4, 3, 2 }));
@@ -79,7 +80,7 @@ namespace AVMTradeReporterTests.Services
                 MakeAsset(5, "NOHIST", tvl: 500, price: 1m, price24h: null),
             };
 
-            var result = TopAssetsService.Build(assets, null, 3, DateTimeOffset.UtcNow);
+            var result = TopAssetsService.Build(assets, null, null, 3, DateTimeOffset.UtcNow);
 
             Assert.That(result.TopGainers.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 1, 2 }));
             Assert.That(result.TopLosers.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 3 }));
@@ -98,7 +99,7 @@ namespace AVMTradeReporterTests.Services
             };
             var snapshot = new Dictionary<ulong, decimal> { { 1, 1000m }, { 2, 900m } };
 
-            var result = TopAssetsService.Build(assets, snapshot, 3, DateTimeOffset.UtcNow);
+            var result = TopAssetsService.Build(assets, snapshot, null, 3, DateTimeOffset.UtcNow);
 
             Assert.That(result.TopValueGainers.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 1 }));
             Assert.That(result.TopValueLosers.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 2 }));
@@ -125,7 +126,7 @@ namespace AVMTradeReporterTests.Services
                 { 1, 100000m }, { 2, 1000m }, { 3, 100000m }, { 4, 1000m }
             };
 
-            var result = TopAssetsService.Build(assets, snapshot, 3, DateTimeOffset.UtcNow);
+            var result = TopAssetsService.Build(assets, snapshot, null, 3, DateTimeOffset.UtcNow);
 
             Assert.That(result.TopValueGainers.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 2, 1 }));
             Assert.That(result.TopValueLosers.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 4, 3 }));
@@ -136,11 +137,54 @@ namespace AVMTradeReporterTests.Services
         {
             var assets = new[] { MakeAsset(1, "A", tvl: 1000, volume24h: 10) };
 
-            var result = TopAssetsService.Build(assets, null, 3, DateTimeOffset.UtcNow);
+            var result = TopAssetsService.Build(assets, null, null, 3, DateTimeOffset.UtcNow);
 
             Assert.That(result.TopValueGainers, Is.Empty);
             Assert.That(result.TopValueLosers, Is.Empty);
             Assert.That(result.Popular, Has.Count.EqualTo(1));
+        }
+
+        [Test]
+        public void Build_WindowedVolumesOverrideStaleAssetCounters()
+        {
+            // Asset 1 carries a stale non-zero Volume1H counter but had no trades in the past
+            // 48h (absent from the windows dictionary) -> must not appear in trending/popular.
+            var assets = new[]
+            {
+                MakeAsset(1, "STALE", tvl: 900, volume1h: 500, volume24h: 500),
+                MakeAsset(2, "LIVE", tvl: 800, volume1h: 0, volume24h: 0),
+            };
+            var volumes = new Dictionary<ulong, AssetVolumeWindows>
+            {
+                { 2, new AssetVolumeWindows(Volume1H: 50m, Volume1HPrev: 25m, Volume24H: 300m, Volume24HPrev: 600m) },
+            };
+
+            var result = TopAssetsService.Build(assets, null, volumes, 3, DateTimeOffset.UtcNow);
+
+            Assert.That(result.Trending.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 2 }));
+            Assert.That(result.Popular.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 2 }));
+            var item = result.Trending[0];
+            Assert.That(item.Volume1HUSD, Is.EqualTo(50m));
+            Assert.That(item.Volume1HUSDPrev, Is.EqualTo(25m));
+            Assert.That(item.Volume1HChangePercent, Is.EqualTo(100m).Within(0.0001m));
+            Assert.That(item.Volume24HUSD, Is.EqualTo(300m));
+            Assert.That(item.Volume24HUSDPrev, Is.EqualTo(600m));
+            Assert.That(item.Volume24HChangePercent, Is.EqualTo(-50m).Within(0.0001m));
+        }
+
+        [Test]
+        public void Build_WindowedVolumes_NoPreviousVolume_PercentIsNull()
+        {
+            var assets = new[] { MakeAsset(1, "A", tvl: 900) };
+            var volumes = new Dictionary<ulong, AssetVolumeWindows>
+            {
+                { 1, new AssetVolumeWindows(Volume1H: 10m, Volume1HPrev: 0m, Volume24H: 10m, Volume24HPrev: 0m) },
+            };
+
+            var result = TopAssetsService.Build(assets, null, volumes, 3, DateTimeOffset.UtcNow);
+
+            Assert.That(result.Trending[0].Volume1HChangePercent, Is.Null);
+            Assert.That(result.Popular[0].Volume24HChangePercent, Is.Null);
         }
     }
 }

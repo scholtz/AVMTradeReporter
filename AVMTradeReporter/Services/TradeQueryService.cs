@@ -169,6 +169,90 @@ namespace AVMTradeReporter.Services
             return volumes;
         }
 
+        /// <summary>
+        /// Computes per-asset trading volumes for the current and previous 1h/24h windows directly
+        /// from confirmed trades, so callers (e.g. the top-assets highlights) see honest windowed
+        /// volumes instead of the stale running counters stored on assets/pools. Returns null when
+        /// Elasticsearch is unavailable or the query fails, so callers can fall back.
+        /// </summary>
+        public async Task<IReadOnlyDictionary<ulong, AssetVolumeWindows>?> GetAssetVolumeWindowsAsync(DateTimeOffset now, CancellationToken cancellationToken = default)
+        {
+            if (_elastic == null)
+            {
+                _logger.LogWarning("Elasticsearch client not available for asset volume calculation");
+                return null;
+            }
+
+            try
+            {
+                var startTime = now.AddHours(-48);
+                var searchResponse = await _elastic.SearchAsync<Trade>(s => s
+                    .Indices("trades")
+                    .Size(200000)
+                    .Query(q => q
+                        .Bool(b => b
+                            .Must(
+                                m => m.Range(r => r.Date(dr => dr.Field(f => f.Timestamp).Gte(startTime.ToString("o")).Lt(now.ToString("o")))),
+                                m => m.Term(t => t.Field("tradeState.keyword").Value(FieldValue.String("Confirmed")))
+                            )
+                        )
+                    ),
+                    cancellationToken);
+
+                if (!searchResponse.IsValidResponse)
+                {
+                    _logger.LogError("Elasticsearch asset volume query failed: {Error}", searchResponse.DebugInformation);
+                    return null;
+                }
+
+                return BucketAssetVolumes(searchResponse.Documents, now);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to calculate asset volume windows");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Pure bucketing logic behind <see cref="GetAssetVolumeWindowsAsync"/>: assigns each trade's
+        /// USD value to the 1h/24h current/previous windows of both traded assets. Each asset is
+        /// credited half of the trade value, matching the asset-volume convention used elsewhere
+        /// (an asset's volume = sum of its pools' volumes / 2).
+        /// </summary>
+        internal static IReadOnlyDictionary<ulong, AssetVolumeWindows> BucketAssetVolumes(IEnumerable<Trade> trades, DateTimeOffset now)
+        {
+            var acc = new Dictionary<ulong, (decimal V1H, decimal V1HPrev, decimal V24H, decimal V24HPrev)>();
+
+            foreach (var trade in trades)
+            {
+                if (!trade.ValueUSD.HasValue || !trade.Timestamp.HasValue) continue;
+                var age = now - trade.Timestamp.Value;
+                if (age < TimeSpan.Zero || age >= TimeSpan.FromHours(48)) continue;
+
+                var half = trade.ValueUSD.Value / 2;
+                var in1H = age < TimeSpan.FromHours(1);
+                var in1HPrev = !in1H && age < TimeSpan.FromHours(2);
+                var in24H = age < TimeSpan.FromHours(24);
+
+                foreach (var assetId in trade.AssetIdIn == trade.AssetIdOut
+                    ? new[] { trade.AssetIdIn }
+                    : new[] { trade.AssetIdIn, trade.AssetIdOut })
+                {
+                    acc.TryGetValue(assetId, out var v);
+                    if (in1H) v.V1H += half;
+                    if (in1HPrev) v.V1HPrev += half;
+                    if (in24H) v.V24H += half;
+                    else v.V24HPrev += half;
+                    acc[assetId] = v;
+                }
+            }
+
+            return acc.ToDictionary(
+                kv => kv.Key,
+                kv => new AssetVolumeWindows(kv.Value.V1H, kv.Value.V1HPrev, kv.Value.V24H, kv.Value.V24HPrev));
+        }
+
         private static TradeFilter NormalizeFilter(TradeFilter filter)
         {
             return new TradeFilter
