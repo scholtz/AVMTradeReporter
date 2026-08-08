@@ -109,10 +109,12 @@ namespace AVMTradeReporter.Services
 
                 try
                 {
-                    // Fetch trades in the period
+                    // Size-0 terms+sum aggregation instead of fetching documents: the previous
+                    // Size(200000) document fetch exceeded Elasticsearch's max_result_window
+                    // (default 10000), failing the whole query and leaving pool volumes stale.
                     var searchResponse = await _elastic.SearchAsync<Trade>(s => s
                         .Indices("trades")
-                        .Size(200000) // Increased size to handle more trades per period
+                        .Size(0)
                         .Query(q => q
                             .Bool(b => b
                                 .Must(
@@ -121,19 +123,28 @@ namespace AVMTradeReporter.Services
                                     m => m.Term(t => t.Field("tradeState.keyword").Value(FieldValue.String("Confirmed")))
                                 )
                             )
+                        )
+                        .Aggregations(a => a
+                            .Add("byPool", agg => agg
+                                .Terms(t => t.Field("poolAddress.keyword").Size(10000))
+                                .Aggregations(sub => sub.Add("volume", v => v.Sum(su => su.Field(f => f.ValueUSD)))))
                         ),
                         cancellationToken);
 
                     if (searchResponse.IsValidResponse)
                     {
-                        _logger.LogDebug("Fetched {Count} trades for period {Period} for {poolAddressSetCount} pools", searchResponse.Documents.Count, period.Key, poolAddressSet.Count);
-                        if (poolAddressSet.Count < 10)
+                        var grouped = new Dictionary<string, decimal>();
+                        var byPool = searchResponse.Aggregations?.GetStringTerms("byPool");
+                        if (byPool?.Buckets != null)
                         {
-                            _logger.LogDebug("poolAddressSet: {Trades}", string.Join(", ", poolAddressSet));
+                            foreach (var bucket in byPool.Buckets)
+                            {
+                                var address = bucket.Key.ToString();
+                                if (string.IsNullOrEmpty(address)) continue;
+                                grouped[address] = (decimal)(bucket.Aggregations?.GetSum("volume")?.Value ?? 0);
+                            }
                         }
-                        var tradesInPeriod = searchResponse.Documents.Where(t => t.ValueUSD.HasValue);
-                        var grouped = tradesInPeriod.GroupBy(t => t.PoolAddress)
-                            .ToDictionary(g => g.Key, g => g.Sum(t => t.ValueUSD!.Value));
+                        _logger.LogDebug("Aggregated volumes of {Count} pools for period {Period} ({poolAddressSetCount} pools requested)", grouped.Count, period.Key, poolAddressSet.Count);
 
                         foreach (var kv in grouped)
                         {
@@ -172,8 +183,10 @@ namespace AVMTradeReporter.Services
         /// <summary>
         /// Computes per-asset trading volumes for the current and previous 1h/24h windows directly
         /// from confirmed trades, so callers (e.g. the top-assets highlights) see honest windowed
-        /// volumes instead of the stale running counters stored on assets/pools. Returns null when
-        /// Elasticsearch is unavailable or the query fails, so callers can fall back.
+        /// volumes instead of the stale running counters stored on assets/pools. Uses size-0
+        /// terms+sum aggregations (never fetches documents, so it cannot hit max_result_window).
+        /// Returns null when Elasticsearch is unavailable or any window's query fails, so callers
+        /// can fall back.
         /// </summary>
         public async Task<IReadOnlyDictionary<ulong, AssetVolumeWindows>?> GetAssetVolumeWindowsAsync(DateTimeOffset now, CancellationToken cancellationToken = default)
         {
@@ -183,74 +196,94 @@ namespace AVMTradeReporter.Services
                 return null;
             }
 
-            try
-            {
-                var startTime = now.AddHours(-48);
-                var searchResponse = await _elastic.SearchAsync<Trade>(s => s
-                    .Indices("trades")
-                    .Size(200000)
-                    .Query(q => q
-                        .Bool(b => b
-                            .Must(
-                                m => m.Range(r => r.Date(dr => dr.Field(f => f.Timestamp).Gte(startTime.ToString("o")).Lt(now.ToString("o")))),
-                                m => m.Term(t => t.Field("tradeState.keyword").Value(FieldValue.String("Confirmed")))
-                            )
-                        )
-                    ),
-                    cancellationToken);
-
-                if (!searchResponse.IsValidResponse)
-                {
-                    _logger.LogError("Elasticsearch asset volume query failed: {Error}", searchResponse.DebugInformation);
-                    return null;
-                }
-
-                return BucketAssetVolumes(searchResponse.Documents, now);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to calculate asset volume windows");
-                return null;
-            }
-        }
-
-        /// <summary>
-        /// Pure bucketing logic behind <see cref="GetAssetVolumeWindowsAsync"/>: assigns each trade's
-        /// USD value to the 1h/24h current/previous windows of both traded assets. Each asset is
-        /// credited half of the trade value, matching the asset-volume convention used elsewhere
-        /// (an asset's volume = sum of its pools' volumes / 2).
-        /// </summary>
-        internal static IReadOnlyDictionary<ulong, AssetVolumeWindows> BucketAssetVolumes(IEnumerable<Trade> trades, DateTimeOffset now)
-        {
             var acc = new Dictionary<ulong, (decimal V1H, decimal V1HPrev, decimal V24H, decimal V24HPrev)>();
-
-            foreach (var trade in trades)
+            var windows = new (int Index, DateTimeOffset From, DateTimeOffset To)[]
             {
-                if (!trade.ValueUSD.HasValue || !trade.Timestamp.HasValue) continue;
-                var age = now - trade.Timestamp.Value;
-                if (age < TimeSpan.Zero || age >= TimeSpan.FromHours(48)) continue;
+                (0, now.AddHours(-1), now),
+                (1, now.AddHours(-2), now.AddHours(-1)),
+                (2, now.AddHours(-24), now),
+                (3, now.AddHours(-48), now.AddHours(-24)),
+            };
 
-                var half = trade.ValueUSD.Value / 2;
-                var in1H = age < TimeSpan.FromHours(1);
-                var in1HPrev = !in1H && age < TimeSpan.FromHours(2);
-                var in24H = age < TimeSpan.FromHours(24);
-
-                foreach (var assetId in trade.AssetIdIn == trade.AssetIdOut
-                    ? new[] { trade.AssetIdIn }
-                    : new[] { trade.AssetIdIn, trade.AssetIdOut })
+            foreach (var window in windows)
+            {
+                var sums = await GetAssetVolumeSumsAsync(window.From, window.To, cancellationToken);
+                if (sums == null) return null;
+                foreach (var kv in sums)
                 {
-                    acc.TryGetValue(assetId, out var v);
-                    if (in1H) v.V1H += half;
-                    if (in1HPrev) v.V1HPrev += half;
-                    if (in24H) v.V24H += half;
-                    else v.V24HPrev += half;
-                    acc[assetId] = v;
+                    acc.TryGetValue(kv.Key, out var v);
+                    switch (window.Index)
+                    {
+                        case 0: v.V1H += kv.Value; break;
+                        case 1: v.V1HPrev += kv.Value; break;
+                        case 2: v.V24H += kv.Value; break;
+                        case 3: v.V24HPrev += kv.Value; break;
+                    }
+                    acc[kv.Key] = v;
                 }
             }
 
             return acc.ToDictionary(
                 kv => kv.Key,
                 kv => new AssetVolumeWindows(kv.Value.V1H, kv.Value.V1HPrev, kv.Value.V24H, kv.Value.V24HPrev));
+        }
+
+        /// <summary>
+        /// Sums confirmed trade value in USD per asset over [from, to). Each asset is credited half
+        /// of every trade's value, matching the asset-volume convention used elsewhere (an asset's
+        /// volume = sum of its pools' volumes / 2).
+        /// </summary>
+        private async Task<Dictionary<ulong, decimal>?> GetAssetVolumeSumsAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var searchResponse = await _elastic!.SearchAsync<Trade>(s => s
+                    .Indices("trades")
+                    .Size(0)
+                    .Query(q => q
+                        .Bool(b => b
+                            .Must(
+                                m => m.Range(r => r.Date(dr => dr.Field(f => f.Timestamp).Gte(from.ToString("o")).Lt(to.ToString("o")))),
+                                m => m.Term(t => t.Field("tradeState.keyword").Value(FieldValue.String("Confirmed")))
+                            )
+                        )
+                    )
+                    .Aggregations(a => a
+                        .Add("byAssetIn", agg => agg
+                            .Terms(t => t.Field(f => f.AssetIdIn).Size(10000))
+                            .Aggregations(sub => sub.Add("volume", v => v.Sum(su => su.Field(f => f.ValueUSD)))))
+                        .Add("byAssetOut", agg => agg
+                            .Terms(t => t.Field(f => f.AssetIdOut).Size(10000))
+                            .Aggregations(sub => sub.Add("volume", v => v.Sum(su => su.Field(f => f.ValueUSD)))))
+                    ),
+                    cancellationToken);
+
+                if (!searchResponse.IsValidResponse)
+                {
+                    _logger.LogError("Elasticsearch asset volume aggregation failed [{From} – {To}]: {Error}", from, to, searchResponse.DebugInformation);
+                    return null;
+                }
+
+                var result = new Dictionary<ulong, decimal>();
+                foreach (var name in new[] { "byAssetIn", "byAssetOut" })
+                {
+                    var terms = searchResponse.Aggregations?.GetLongTerms(name);
+                    if (terms?.Buckets == null) continue;
+                    foreach (var bucket in terms.Buckets)
+                    {
+                        var assetId = (ulong)bucket.Key;
+                        var volume = (decimal)(bucket.Aggregations?.GetSum("volume")?.Value ?? 0);
+                        result.TryGetValue(assetId, out var current);
+                        result[assetId] = current + volume / 2;
+                    }
+                }
+                return result;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to calculate asset volume sums [{From} – {To}]", from, to);
+                return null;
+            }
         }
 
         private static TradeFilter NormalizeFilter(TradeFilter filter)
