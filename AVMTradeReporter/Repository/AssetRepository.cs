@@ -23,8 +23,9 @@ namespace AVMTradeReporter.Repository
         private readonly IHubContext<BiatecScanHub>? _hubContext;
         private static bool _initialized = false;
         private static readonly SemaphoreSlim _initLock = new(1, 1);
-        private const string RedisKeyPrefix = "asset:";
+        private const string RedisKeyBase = "asset:";
         private readonly AppConfiguration? _appConfig;
+        private string RedisKeyPrefix => (_appConfig?.Redis?.EnvironmentKeyPrefix ?? string.Empty) + RedisKeyBase;
 
         public AssetRepository(
             IDefaultApi algod,
@@ -73,8 +74,16 @@ namespace AVMTradeReporter.Repository
                         if (server != null)
                         {
                             int loaded = 0;
-                            foreach (var key in server.Keys(pattern: RedisKeyPrefix + "*"))
+                            var prefix = RedisKeyPrefix;
+                            foreach (var key in server.Keys(pattern: prefix + "*"))
                             {
+                                // Only "{prefix}{numeric asset id}" keys hold asset records. Other
+                                // feature keys share the "asset:" namespace (asset:top:summary,
+                                // asset:tvl:hourly:{h}, asset:timeseries:7d:{id}) and deserializing
+                                // them as BiatecAsset yields a bogus Index=0 record that would
+                                // overwrite the native token entry in the cache.
+                                var suffix = key.ToString().Substring(prefix.Length);
+                                if (!ulong.TryParse(suffix, out _)) continue;
                                 var value = await _redisDatabase.StringGetAsync(key);
                                 if (value.HasValue)
                                 {

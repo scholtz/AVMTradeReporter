@@ -60,8 +60,7 @@ namespace AVMTradeReporter.Model.DTO
     /// <summary>
     /// Backend-computed "top assets" highlight lists shown at the top of the Biatec Scan UI.
     /// The candidate universe for every list is the top 150 assets ordered by real TVL (BiatecAsset.TVL_USD).
-    /// Stable/base reference assets (StabilityIndex &gt; 0, e.g. ALGO and USDC) are excluded from the
-    /// "mover" lists (Popular, Trending, gainers/losers) and instead populate <see cref="TopStable"/>.
+    /// Every asset competes in every list, including stable/base reference assets (ALGO, USDC, ...).
     /// Each list contains up to 3 entries. The response is recomputed and cached in Redis every 5 minutes
     /// (see TopAssetsBackgroundService), so it is served mostly from cache.
     /// </summary>
@@ -85,12 +84,6 @@ namespace AVMTradeReporter.Model.DTO
 
         /// <summary>Top assets by relative real TVL loss in percent over 24h ("Top liquidity losers"). Only negative changes qualify.</summary>
         public List<TopAssetItem> TopValueLosers { get; set; } = new();
-
-        /// <summary>Stable/base reference assets (StabilityIndex &gt; 0, e.g. the native ALGO token and
-        /// USD-pegged stablecoins), ordered by 24h trading volume. Unlike every other list here, these
-        /// are intentionally the assets excluded elsewhere as "movers" - shown so users can still see
-        /// price/volume/TVL for ALGO and the stablecoins that anchor the rest of the market.</summary>
-        public List<TopAssetItem> TopStable { get; set; } = new();
 
         /// <summary>Timestamp this response was computed.</summary>
         public DateTimeOffset GeneratedAt { get; set; }

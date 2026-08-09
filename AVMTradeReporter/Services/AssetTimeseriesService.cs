@@ -19,7 +19,9 @@ namespace AVMTradeReporter.Services
     /// </summary>
     public class AssetTimeseriesService : IAssetTimeseriesService
     {
-        public const string CacheKeyPrefix = "asset:timeseries:7d:";
+        public const string CacheKeyBase = "asset:timeseries:7d:";
+        private string CacheKeyPrefix => _appConfig.Redis.EnvironmentKeyPrefix + CacheKeyBase;
+        private string TvlSnapshotKeyPrefix => _appConfig.Redis.EnvironmentKeyPrefix + TopAssetsService.TvlSnapshotKeyBase;
         private const int HoursBack = 7 * 24;
         // Slightly over an hour so the hourly background refresh normally replaces an entry before it
         // ever expires; on-demand computed entries for long-tail assets just expire and are recomputed
@@ -144,7 +146,7 @@ namespace AVMTradeReporter.Services
             try
             {
                 var hours = Enumerable.Range(0, HoursBack + 1).Select(offset => currentHour - offset).ToArray();
-                var reads = hours.Select(h => _redisDatabase.HashGetAllAsync(TopAssetsService.TvlSnapshotKeyPrefix + h)).ToArray();
+                var reads = hours.Select(h => _redisDatabase.HashGetAllAsync(TvlSnapshotKeyPrefix + h)).ToArray();
                 await Task.WhenAll(reads);
                 for (var i = 0; i < hours.Length; i++)
                 {

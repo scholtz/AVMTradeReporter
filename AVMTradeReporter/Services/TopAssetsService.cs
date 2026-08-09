@@ -21,8 +21,10 @@ namespace AVMTradeReporter.Services
     /// </summary>
     public class TopAssetsService : ITopAssetsService
     {
-        private const string CacheKey = "asset:top:summary";
-        public const string TvlSnapshotKeyPrefix = "asset:tvl:hourly:";
+        private const string CacheKeyBase = "asset:top:summary";
+        public const string TvlSnapshotKeyBase = "asset:tvl:hourly:";
+        private string CacheKey => _appConfig.Redis.EnvironmentKeyPrefix + CacheKeyBase;
+        private string TvlSnapshotKeyPrefix => _appConfig.Redis.EnvironmentKeyPrefix + TvlSnapshotKeyBase;
         // 8 days so the 7d asset timeseries endpoint (AssetTimeseriesService) can always build a
         // full week of hourly TVL candles from these snapshots.
         private static readonly TimeSpan TvlSnapshotTtl = TimeSpan.FromDays(8);
@@ -101,6 +103,8 @@ namespace AVMTradeReporter.Services
                 assetVolumes = await _tradeQueryService.GetAssetVolumeWindowsAsync(now, cancellationToken);
             }
 
+            await SyncAssetVolumeCountersAsync(universe, assetVolumes, cancellationToken);
+
             var response = Build(universe, tvl24hAgo, assetVolumes, listSize, now);
             _lastComputed = response;
 
@@ -123,9 +127,9 @@ namespace AVMTradeReporter.Services
 
         /// <summary>
         /// Pure selection logic: builds the highlight lists from the TVL-ordered candidate universe.
-        /// Stable/base reference assets (StabilityIndex &gt; 0, e.g. ALGO and USDC) are excluded from the
-        /// "mover" lists (Popular, Trending, gainers/losers) and instead surfaced in their own
-        /// <see cref="TopAssetsResponse.TopStable"/> list.
+        /// Every asset competes in every list — stable/base reference assets (StabilityIndex &gt; 0,
+        /// e.g. ALGO and USDC) are ranked alongside everything else rather than being split into a
+        /// separate list.
         /// </summary>
         public static TopAssetsResponse Build(
             IEnumerable<BiatecAsset> universeOrderedByTvl,
@@ -135,18 +139,7 @@ namespace AVMTradeReporter.Services
             DateTimeOffset now)
         {
             var candidates = universeOrderedByTvl
-                .Where(a => a.StabilityIndex == 0)
                 .Select(a => ToItem(a, tvl24hAgo, assetVolumes))
-                .ToList();
-
-            // Stable/base reference assets (ALGO, USDC, ...) - the inverse of the `candidates` filter
-            // above. Ranked by real TVL rather than volume, since these are shown for their role as
-            // liquidity anchors rather than as trading "movers".
-            var stableCandidates = universeOrderedByTvl
-                .Where(a => a.StabilityIndex > 0)
-                .Select(a => ToItem(a, tvl24hAgo, assetVolumes))
-                .OrderByDescending(i => i.RealTVLUSD)
-                .Take(listSize)
                 .ToList();
 
             return new TopAssetsResponse
@@ -181,9 +174,48 @@ namespace AVMTradeReporter.Services
                     .OrderBy(i => i.TVLChange24HPercent)
                     .ThenBy(i => i.TVLChange24HUSD)
                     .Take(listSize).ToList(),
-                TopStable = stableCandidates,
                 GeneratedAt = now
             };
+        }
+
+        /// <summary>
+        /// Writes the honest windowed 1h/24h volumes back onto the asset records so the assets
+        /// table (served from BiatecAsset.Volume1H/Volume24H) shows the same numbers as the
+        /// Popular/Trending highlight cards. Without this the two sources drift: the asset counters
+        /// are only re-summed from pool volumes when a pool has recent trades, so they never decay
+        /// to zero for assets that stopped trading. Assets absent from <paramref name="assetVolumes"/>
+        /// had no trades in the past 48h and get their counters zeroed.
+        /// </summary>
+        private async Task SyncAssetVolumeCountersAsync(
+            IReadOnlyCollection<BiatecAsset> universe,
+            IReadOnlyDictionary<ulong, AssetVolumeWindows>? assetVolumes,
+            CancellationToken cancellationToken)
+        {
+            if (assetVolumes == null) return; // trade history unavailable — keep existing counters
+            foreach (var asset in universe)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                assetVolumes.TryGetValue(asset.Index, out var windows);
+                var volume1H = windows?.Volume1H ?? 0m;
+                var volume24H = windows?.Volume24H ?? 0m;
+                // Cent-level tolerance: skip write-back churn (Redis writes + SignalR broadcasts)
+                // when the counters are already in sync.
+                if (Math.Abs((asset.Volume1H ?? 0m) - volume1H) < 0.01m
+                    && Math.Abs((asset.Volume24H ?? 0m) - volume24H) < 0.01m)
+                {
+                    continue;
+                }
+                asset.Volume1H = volume1H;
+                asset.Volume24H = volume24H;
+                try
+                {
+                    await _assetRepository.SetAssetAsync(asset, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to sync windowed volumes onto asset {AssetId}", asset.Index);
+                }
+            }
         }
 
         private static TopAssetItem ToItem(

@@ -123,6 +123,18 @@ namespace AVMTradeReporter.Model.Configuration
     public class RedisConfiguration
     {
         public string ConnectionString { get; set; } = "localhost:6379";
+        /// <summary>
+        /// Environment namespace prepended to every Redis key/hash that is otherwise hardcoded in
+        /// code (asset records "asset:{id}", top-assets summary "asset:top:summary", hourly TVL
+        /// snapshots "asset:tvl:hourly:{hour}", 7d timeseries cache "asset:timeseries:7d:{id}").
+        /// Defaults to "" so existing production deployments keep reading their current keys.
+        /// Every non-production environment (stage/testnet, Voi, ...) MUST set its own value
+        /// (e.g. "stage:") — without it, two deployments pointing at the same Redis server
+        /// silently overwrite each other's data (mainnet charts showing testnet TVL/prices).
+        /// Pool/aggregated-pool prefixes and pub/sub channels are configured separately below and
+        /// are NOT affected by this value.
+        /// </summary>
+        public string EnvironmentKeyPrefix { get; set; } = "";
         public string KeyPrefix { get; set; } = "avmtrade:pools:";
         public string AggregatedPoolKeyPrefix { get; set; } = "avmtrade:aggregatedpools:"; // new prefix for persisted aggregated pools
         public bool Enabled { get; set; } = true;
