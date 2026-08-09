@@ -105,7 +105,8 @@ namespace AVMTradeReporter.Services
 
             await SyncAssetVolumeCountersAsync(universe, assetVolumes, cancellationToken);
 
-            var response = Build(universe, tvl24hAgo, assetVolumes, listSize, now);
+            var minRealTvlUsd = _appConfig.TopAssets?.MinRealTvlUsd ?? 1000m;
+            var response = Build(universe, tvl24hAgo, assetVolumes, listSize, now, minRealTvlUsd);
             _lastComputed = response;
 
             if (_redisDatabase != null)
@@ -130,31 +131,40 @@ namespace AVMTradeReporter.Services
         /// Stable/base reference assets (StabilityIndex &gt; 0, e.g. ALGO and USDC) are excluded from
         /// the volume-ranked lists (Popular, Trending) — as pricing anchors they'd permanently occupy
         /// those — but compete normally in the price and liquidity gainers/losers lists.
+        /// The "positive" lists (Popular, Trending, Top gainers, Top liquidity gainers) additionally
+        /// require a real TVL above <paramref name="minRealTvlUsd"/> so dust-liquidity tokens cannot
+        /// occupy them; the loser lists deliberately have no such floor — an asset draining to (or
+        /// trading at) near-zero is exactly what they should surface.
         /// </summary>
         public static TopAssetsResponse Build(
             IEnumerable<BiatecAsset> universeOrderedByTvl,
             IReadOnlyDictionary<ulong, decimal>? tvl24hAgo,
             IReadOnlyDictionary<ulong, AssetVolumeWindows>? assetVolumes,
             int listSize,
-            DateTimeOffset now)
+            DateTimeOffset now,
+            decimal minRealTvlUsd = 0m)
         {
             var universe = universeOrderedByTvl
                 .Select(a => (a.StabilityIndex, Item: ToItem(a, tvl24hAgo, assetVolumes)))
                 .ToList();
             var candidates = universe.Select(x => x.Item).ToList();
-            var nonStable = universe.Where(x => x.StabilityIndex == 0).Select(x => x.Item).ToList();
+            var liquid = candidates.Where(i => i.RealTVLUSD > minRealTvlUsd).ToList();
+            var liquidNonStable = universe
+                .Where(x => x.StabilityIndex == 0 && x.Item.RealTVLUSD > minRealTvlUsd)
+                .Select(x => x.Item)
+                .ToList();
 
             return new TopAssetsResponse
             {
-                Popular = nonStable
+                Popular = liquidNonStable
                     .Where(i => i.Volume24HUSD > 0)
                     .OrderByDescending(i => i.Volume24HUSD)
                     .Take(listSize).ToList(),
-                Trending = nonStable
+                Trending = liquidNonStable
                     .Where(i => i.Volume1HUSD > 0)
                     .OrderByDescending(i => i.Volume1HUSD)
                     .Take(listSize).ToList(),
-                TopGainers = candidates
+                TopGainers = liquid
                     .Where(i => i.PriceChange24HPercent > 0)
                     .OrderByDescending(i => i.PriceChange24HPercent)
                     .Take(listSize).ToList(),
@@ -166,7 +176,7 @@ namespace AVMTradeReporter.Services
                 // whole TVL is the gain). Their percent change from a zero baseline is undefined
                 // (null) and conceptually infinite, so they rank above every finite percent change,
                 // ordered by absolute USD gain among themselves.
-                TopValueGainers = candidates
+                TopValueGainers = liquid
                     .Where(i => i.TVLChange24HUSD > 0)
                     .OrderByDescending(i => i.TVLChange24HPercent ?? decimal.MaxValue)
                     .ThenByDescending(i => i.TVLChange24HUSD)

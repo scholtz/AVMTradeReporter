@@ -36,6 +36,31 @@ namespace AVMTradeReporterTests.Services
         }
 
         [Test]
+        public void Build_MinRealTvlFiltersGainerLists_ButNotLoserLists()
+        {
+            var assets = new[]
+            {
+                // Below the $1000 threshold on every metric that would otherwise qualify it.
+                MakeAsset(1, "DUST", tvl: 999, volume1h: 50, volume24h: 500, price: 2m, price24h: 1m),
+                // Above the threshold and qualifying everywhere.
+                MakeAsset(2, "BIG", tvl: 5000, volume1h: 10, volume24h: 100, price: 1.1m, price24h: 1m),
+                // Below the threshold and losing on price and TVL — loser lists must keep it.
+                MakeAsset(3, "DOWN", tvl: 500, volume1h: 0, volume24h: 0, price: 0.5m, price24h: 1m),
+            };
+            var snapshot = new Dictionary<ulong, decimal> { { 1, 100m }, { 2, 1000m }, { 3, 900m } };
+
+            var result = TopAssetsService.Build(assets, snapshot, null, 3, DateTimeOffset.UtcNow, minRealTvlUsd: 1000m);
+
+            Assert.That(result.Popular.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 2 }));
+            Assert.That(result.Trending.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 2 }));
+            Assert.That(result.TopGainers.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 2 }));
+            Assert.That(result.TopValueGainers.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 2 }));
+            // Losers keep low-TVL assets: the threshold only guards the gainer/volume lists.
+            Assert.That(result.TopLosers.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 3 }));
+            Assert.That(result.TopValueLosers.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 3 }));
+        }
+
+        [Test]
         public void Build_ExcludesStablesFromVolumeLists_ButIncludesThemInGainers()
         {
             var assets = new[]

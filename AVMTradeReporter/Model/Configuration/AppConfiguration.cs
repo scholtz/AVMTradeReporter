@@ -214,6 +214,13 @@ namespace AVMTradeReporter.Model.Configuration
         /// How many assets each highlight list contains. Default is 3.
         /// </summary>
         public int ListSize { get; set; } = 3;
+
+        /// <summary>
+        /// Minimum real TVL in USD an asset must exceed to qualify for the "positive" highlight
+        /// lists (Popular, Trending, Top gainers, Top liquidity gainers), keeping dust-liquidity
+        /// tokens out of them. The loser lists intentionally have no floor. Default is $1000.
+        /// </summary>
+        public decimal MinRealTvlUsd { get; set; } = 1000m;
     }
 
     public class AssetTimeseriesConfiguration
