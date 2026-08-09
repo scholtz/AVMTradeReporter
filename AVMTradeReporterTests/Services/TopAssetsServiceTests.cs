@@ -36,20 +36,23 @@ namespace AVMTradeReporterTests.Services
         }
 
         [Test]
-        public void Build_IncludesStableAssetsInEveryList()
+        public void Build_ExcludesStablesFromVolumeLists_ButIncludesThemInGainers()
         {
             var assets = new[]
             {
                 MakeAsset(1, "USDC", tvl: 1000000, volume1h: 500, volume24h: 9000, price: 1m, price24h: 0.9m, stabilityIndex: 100),
                 MakeAsset(2, "VOTE", tvl: 500, volume1h: 100, volume24h: 200, price: 2m, price24h: 1m),
             };
+            var snapshot = new Dictionary<ulong, decimal> { { 1, 500000m }, { 2, 100m } };
 
-            var result = TopAssetsService.Build(assets, null, null, 3, DateTimeOffset.UtcNow);
+            var result = TopAssetsService.Build(assets, snapshot, null, 3, DateTimeOffset.UtcNow);
 
-            Assert.That(result.Popular.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 1, 2 }));
-            Assert.That(result.Trending.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 1, 2 }));
-            // VOTE gained +100%, USDC +11.1% — both rank, stables no longer excluded.
+            // Stables never occupy the volume-ranked lists despite USDC's dominant volume...
+            Assert.That(result.Popular.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 2 }));
+            Assert.That(result.Trending.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 2 }));
+            // ...but compete in the price and liquidity lists (VOTE +100%, USDC +11.1%).
             Assert.That(result.TopGainers.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 2, 1 }));
+            Assert.That(result.TopValueGainers.Select(i => i.AssetId), Is.EquivalentTo(new ulong[] { 1, 2 }));
         }
 
         [Test]

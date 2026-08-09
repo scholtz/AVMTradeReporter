@@ -127,9 +127,9 @@ namespace AVMTradeReporter.Services
 
         /// <summary>
         /// Pure selection logic: builds the highlight lists from the TVL-ordered candidate universe.
-        /// Every asset competes in every list — stable/base reference assets (StabilityIndex &gt; 0,
-        /// e.g. ALGO and USDC) are ranked alongside everything else rather than being split into a
-        /// separate list.
+        /// Stable/base reference assets (StabilityIndex &gt; 0, e.g. ALGO and USDC) are excluded from
+        /// the volume-ranked lists (Popular, Trending) — as pricing anchors they'd permanently occupy
+        /// those — but compete normally in the price and liquidity gainers/losers lists.
         /// </summary>
         public static TopAssetsResponse Build(
             IEnumerable<BiatecAsset> universeOrderedByTvl,
@@ -138,17 +138,19 @@ namespace AVMTradeReporter.Services
             int listSize,
             DateTimeOffset now)
         {
-            var candidates = universeOrderedByTvl
-                .Select(a => ToItem(a, tvl24hAgo, assetVolumes))
+            var universe = universeOrderedByTvl
+                .Select(a => (a.StabilityIndex, Item: ToItem(a, tvl24hAgo, assetVolumes)))
                 .ToList();
+            var candidates = universe.Select(x => x.Item).ToList();
+            var nonStable = universe.Where(x => x.StabilityIndex == 0).Select(x => x.Item).ToList();
 
             return new TopAssetsResponse
             {
-                Popular = candidates
+                Popular = nonStable
                     .Where(i => i.Volume24HUSD > 0)
                     .OrderByDescending(i => i.Volume24HUSD)
                     .Take(listSize).ToList(),
-                Trending = candidates
+                Trending = nonStable
                     .Where(i => i.Volume1HUSD > 0)
                     .OrderByDescending(i => i.Volume1HUSD)
                     .Take(listSize).ToList(),

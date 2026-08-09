@@ -60,8 +60,9 @@ namespace AVMTradeReporter.Model.DTO
     /// <summary>
     /// Backend-computed "top assets" highlight lists shown at the top of the Biatec Scan UI.
     /// The candidate universe for every list is the top 150 assets ordered by real TVL (BiatecAsset.TVL_USD).
-    /// Every asset competes in every list, including stable/base reference assets (ALGO, USDC, ...).
-    /// Each list contains up to 3 entries. The response is recomputed and cached in Redis every 5 minutes
+    /// Stable/base reference assets (StabilityIndex &gt; 0, e.g. ALGO and USDC) are excluded from the
+    /// volume-ranked lists (Popular, Trending) but compete normally in the price and liquidity
+    /// gainers/losers lists. Each list contains up to 3 entries. The response is recomputed and cached in Redis every 5 minutes
     /// (see TopAssetsBackgroundService), so it is served mostly from cache.
     /// </summary>
     public class TopAssetsResponse
