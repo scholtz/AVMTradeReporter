@@ -149,7 +149,7 @@ namespace AVMTradeReporter.Repository
                             Decimals = 6,
                             DefaultFrozen = false,
                             UnitName = "ALGO",
-                            Name = "Algorand",
+                            Name = string.IsNullOrWhiteSpace(_appConfig?.NativeTokenName) ? "Algorand" : _appConfig.NativeTokenName,
                             Url = "https://www.algorand.com",
                             MetadataHash = null,
                             Manager = null,

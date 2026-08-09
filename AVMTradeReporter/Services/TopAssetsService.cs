@@ -122,8 +122,10 @@ namespace AVMTradeReporter.Services
         }
 
         /// <summary>
-        /// Pure selection logic: builds the six highlight lists from the TVL-ordered candidate universe.
-        /// Stable assets (StabilityIndex &gt; 0) are excluded from every list.
+        /// Pure selection logic: builds the highlight lists from the TVL-ordered candidate universe.
+        /// Stable/base reference assets (StabilityIndex &gt; 0, e.g. ALGO and USDC) are excluded from the
+        /// "mover" lists (Popular, Trending, gainers/losers) and instead surfaced in their own
+        /// <see cref="TopAssetsResponse.TopStable"/> list.
         /// </summary>
         public static TopAssetsResponse Build(
             IEnumerable<BiatecAsset> universeOrderedByTvl,
@@ -135,6 +137,16 @@ namespace AVMTradeReporter.Services
             var candidates = universeOrderedByTvl
                 .Where(a => a.StabilityIndex == 0)
                 .Select(a => ToItem(a, tvl24hAgo, assetVolumes))
+                .ToList();
+
+            // Stable/base reference assets (ALGO, USDC, ...) - the inverse of the `candidates` filter
+            // above. Ranked by real TVL rather than volume, since these are shown for their role as
+            // liquidity anchors rather than as trading "movers".
+            var stableCandidates = universeOrderedByTvl
+                .Where(a => a.StabilityIndex > 0)
+                .Select(a => ToItem(a, tvl24hAgo, assetVolumes))
+                .OrderByDescending(i => i.RealTVLUSD)
+                .Take(listSize)
                 .ToList();
 
             return new TopAssetsResponse
@@ -169,6 +181,7 @@ namespace AVMTradeReporter.Services
                     .OrderBy(i => i.TVLChange24HPercent)
                     .ThenBy(i => i.TVLChange24HUSD)
                     .Take(listSize).ToList(),
+                TopStable = stableCandidates,
                 GeneratedAt = now
             };
         }

@@ -109,6 +109,15 @@ namespace AVMTradeReporter.Model.Configuration
             246516580UL, 246519683UL, 227855942UL, 2320775407UL, 887406851UL, 887648583UL,
             1241945177UL, 1241944285UL, 2320804780UL
         };
+
+        /// <summary>
+        /// Display name of this deployment's native token (asset index 0), used for the synthesized
+        /// native-token asset record. Each network/environment this service indexes has its own native
+        /// token and its own name for it - e.g. "Algorand" on Algorand MainNet, "Testnet Algorand" on
+        /// Algorand TestNet, "Voi" on the Voi network, "Aramid" on Aramid - so this MUST be overridden
+        /// per deployment in appsettings.json/ConfigMap rather than left at the default.
+        /// </summary>
+        public string NativeTokenName { get; set; } = "Algorand";
     }
 
     public class RedisConfiguration

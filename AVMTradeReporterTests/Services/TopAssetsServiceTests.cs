@@ -49,6 +49,24 @@ namespace AVMTradeReporterTests.Services
             Assert.That(result.Popular.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 2 }));
             Assert.That(result.Trending.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 2 }));
             Assert.That(result.TopGainers.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 2 }));
+            Assert.That(result.TopStable.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 1 }));
+        }
+
+        [Test]
+        public void Build_TopStableRankedByRealTvlDescending_LimitedToListSize()
+        {
+            var assets = new[]
+            {
+                MakeAsset(0, "Algorand", tvl: 5000, stabilityIndex: 1100),
+                MakeAsset(1, "USDC", tvl: 9000, stabilityIndex: 1000000),
+                MakeAsset(2, "goBTC", tvl: 2000, stabilityIndex: 100),
+                MakeAsset(3, "NOTSTABLE", tvl: 100000),
+            };
+
+            var result = TopAssetsService.Build(assets, null, null, 2, DateTimeOffset.UtcNow);
+
+            Assert.That(result.TopStable.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 1, 0 }));
+            Assert.That(result.TopStable, Has.All.Matches<TopAssetItem>(i => i.AssetId != 3));
         }
 
         [Test]
