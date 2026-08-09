@@ -25,16 +25,33 @@ Two subdirectories:
 ## Resolution order (`MainnetImageProcessor.LoadImageAsync`)
 
 1. Check this deployment's own `images/{network}/{assetId}.png`. Return it if present.
-2. Look up the requested asset's `UnitName` via `IAssetRepository` (each deployment only knows
-   about assets on its own network). If found, check the shared
-   `images/by-unitname/{unitname}.png`. If present (and not the placeholder), serve it and also
-   write it into this deployment's own id-keyed cache for a fast path next time.
+2. **Non-mainnet deployments only.** Look up the requested asset's `UnitName` via
+   `IAssetRepository` (each deployment only knows about assets on its own network). If found,
+   check the shared `images/by-unitname/{unitname}.png`. If present (and not the placeholder),
+   serve it and also write it into this deployment's own id-keyed cache for a fast path next time.
+   **Mainnet deployments skip this step entirely and never read `by-unitname`** - see "Why mainnet
+   never reads the shared cache" below.
 3. **Mainnet deployments only** - Tinyman's ASA list and Pera's asset API only index mainnet, so
    non-mainnet deployments skip straight past this step. Try Tinyman, then Pera. Whichever
-   succeeds is written to both the id-keyed cache *and* the by-unitname cache, so any other
-   network's deployment can reuse it via step 2 without ever calling Tinyman/Pera itself.
+   succeeds is written to this deployment's id-keyed cache, and *also*, first-writer-wins, into
+   `images/by-unitname/{unitname}.png` if no entry exists there yet - so any non-mainnet
+   deployment can reuse it via step 2 without ever calling Tinyman/Pera itself.
 4. Fall back to a 1x1 transparent placeholder PNG, cached only under the id-keyed path (never
    written to `by-unitname`, so it doesn't block a future real resolution for that ticker).
+
+## Why mainnet never reads the shared cache
+
+Distinct real mainnet assets can share a `UnitName`. This actually happened: "Meld Gold" and
+"ASA.Gold" are two unrelated projects that both use a `GOLD`-style ticker, and the first version
+of this feature let mainnet consult `by-unitname` for its own lookups - so whichever of the two
+resolved its icon first via Tinyman/Pera got cached under the shared ticker key, and the *other*
+project's requests then hit that same cached file and silently served the wrong project's icon.
+
+Mainnet identity must stay strictly asset-id-keyed: step 2 above is gated on `!IsMainnet`, so a
+mainnet deployment only ever *writes* to `by-unitname` (to help other networks), never *reads*
+from it. Ticker collisions are an accepted, documented heuristic risk for the *non-mainnet*
+fallback only (see "Caveats" below) - never for mainnet, where every asset must resolve to its own
+distinct icon regardless of what other assets share its ticker.
 
 ## Why UnitName, not asset id or full Name
 
