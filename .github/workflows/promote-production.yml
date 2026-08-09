@@ -9,8 +9,10 @@ on:
       version:
         description: >-
           Version string to promote, exactly as produced by the "build" job in deploy.yml
-          (e.g. 1.2026.08.07-main). Find it in that workflow run's logs/summary.
-        required: true
+          (e.g. 1.2026.08.07-main). Find it in that workflow run's logs/summary. Leave empty to
+          promote the newest stage build (looked up in Docker Hub).
+        required: false
+        default: ""
         type: string
 
 permissions:
@@ -23,11 +25,41 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------
+  # Stage 0: resolve-version - uses the supplied version as-is, or, when
+  # none was given, finds the newest versioned stage build in Docker Hub.
+  # deploy.yml tags every stage build as 1.<year>.<month>.<day>-main, so
+  # the most recently pushed *-main tag is exactly what's on stage now.
+  # ---------------------------------------------------------------------
+  resolve-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: Resolve version to promote
+        id: resolve
+        run: |
+          version="${{ inputs.version }}"
+          if [ -z "$version" ]; then
+            echo "No version supplied - looking up the newest stage build in Docker Hub"
+            version=$(curl -fsSL "https://hub.docker.com/v2/repositories/${IMAGE_API}/tags?page_size=100&ordering=last_updated" \
+              | jq -r '.results[].name' \
+              | grep -E '^1\..+-main$' \
+              | head -n 1)
+          fi
+          if [ -z "$version" ]; then
+            echo "::error::Could not resolve a version to promote (no versioned *-main tag found in Docker Hub)"
+            exit 1
+          fi
+          echo "Promoting version: $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------
   # Stage 1: promote-tag - re-tags the already-built & pushed
   # <image>:<version> images as :latest. Doesn't rebuild anything - just
   # moves the "latest" pointer.
   # ---------------------------------------------------------------------
   promote-tag:
+    needs: resolve-version
     runs-on: ubuntu-latest
     steps:
       - name: Set up Docker Buildx
@@ -41,17 +73,17 @@ jobs:
 
       - name: Pull versioned images
         run: |
-          docker pull ${{ env.IMAGE_API }}:${{ inputs.version }}
-          docker pull ${{ env.IMAGE_SUBSCRIBER }}:${{ inputs.version }}
+          docker pull ${{ env.IMAGE_API }}:${{ needs.resolve-version.outputs.version }}
+          docker pull ${{ env.IMAGE_SUBSCRIBER }}:${{ needs.resolve-version.outputs.version }}
 
       - name: Tag & push API latest
         run: |
-          docker tag ${{ env.IMAGE_API }}:${{ inputs.version }} ${{ env.IMAGE_API }}:latest
+          docker tag ${{ env.IMAGE_API }}:${{ needs.resolve-version.outputs.version }} ${{ env.IMAGE_API }}:latest
           docker push ${{ env.IMAGE_API }}:latest
 
       - name: Tag & push Subscriber latest
         run: |
-          docker tag ${{ env.IMAGE_SUBSCRIBER }}:${{ inputs.version }} ${{ env.IMAGE_SUBSCRIBER }}:latest
+          docker tag ${{ env.IMAGE_SUBSCRIBER }}:${{ needs.resolve-version.outputs.version }} ${{ env.IMAGE_SUBSCRIBER }}:latest
           docker push ${{ env.IMAGE_SUBSCRIBER }}:latest
 
   # ---------------------------------------------------------------------
@@ -62,7 +94,7 @@ jobs:
   # ---------------------------------------------------------------------
   deploy-production:
     name: Deploy to production (mainnet)
-    needs: promote-tag
+    needs: [resolve-version, promote-tag]
     runs-on: ubuntu-latest
     environment:
       name: production
@@ -75,7 +107,7 @@ jobs:
 
       - name: Update production manifests with new image tags
         run: |
-          version="${{ inputs.version }}"
+          version="${{ needs.resolve-version.outputs.version }}"
           sed -i "s~${IMAGE_API}.*~${IMAGE_API}:${version}~g" k8s/main/deployment-api.yaml
           sed -i "s~${IMAGE_API}.*~${IMAGE_API}:${version}~g" k8s/main/deployment2-api.yaml
           sed -i "s~${IMAGE_SUBSCRIBER}.*~${IMAGE_SUBSCRIBER}:${version}~g" k8s/main/subscriber-deployment.yaml
@@ -86,7 +118,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           if ! git diff --quiet -- k8s/main/deployment-api.yaml k8s/main/deployment2-api.yaml k8s/main/subscriber-deployment.yaml; then
             git add k8s/main/deployment-api.yaml k8s/main/deployment2-api.yaml k8s/main/subscriber-deployment.yaml
-            git commit -m "cicd promote ${{ inputs.version }} to production [skip ci]"
+            git commit -m "cicd promote ${{ needs.resolve-version.outputs.version }} to production [skip ci]"
             for i in 1 2 3 4 5; do
               git pull --rebase origin master && git push && break
               echo "Push attempt $i failed, retrying..."
