@@ -260,6 +260,12 @@ namespace AVMTradeReporter.Repository
                 }
                 query = _assetCache.Where(kvp => ids.Contains(kvp.Key)).Select(kvp => kvp.Value);
             }
+            else
+            {
+                // Without an explicit id list this is the general browse/search listing (Assets page),
+                // so hide assets that aren't actually traded in any pool (e.g. an LP token's own ASA).
+                query = query.Where(a => a.PoolsCount > 0);
+            }
 
 
             if (!string.IsNullOrWhiteSpace(search))

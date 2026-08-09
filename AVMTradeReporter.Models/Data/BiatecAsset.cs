@@ -53,5 +53,11 @@ namespace AVMTradeReporter.Model.Data
         /// USD price 7 days ago.
         /// </summary>
         public decimal? PriceUSD7D { get; set; }
+
+        /// <summary>
+        /// Number of distinct aggregated pools (asset pairs) this asset is currently traded in.
+        /// Zero for assets that have never appeared in a pool (e.g. an LP token ASA that isn't itself traded).
+        /// </summary>
+        public int PoolsCount { get; set; } = 0;
     }
 }

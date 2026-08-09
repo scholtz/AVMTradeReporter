@@ -531,6 +531,19 @@ namespace AVMTradeReporter.Repository
                         changed = true;
                     }
 
+                    // Calculate number of distinct pools (asset pairs) involving this asset.
+                    // _cache stores each pair keyed both (A,B) and (B,A), so dedupe by pair.
+                    int poolsCount = _cache.Values
+                        .Where(p => p.AssetIdA == assetId || p.AssetIdB == assetId)
+                        .Select(p => p.AssetIdA < p.AssetIdB ? $"{p.AssetIdA}-{p.AssetIdB}" : $"{p.AssetIdB}-{p.AssetIdA}")
+                        .Distinct()
+                        .Count();
+                    if (poolsCount != asset.PoolsCount)
+                    {
+                        asset.PoolsCount = poolsCount;
+                        changed = true;
+                    }
+
                     // Calculate volumes from all aggregated pools involving this asset
                     decimal volume1H = _cache.Values
                         .Where(p => p.AssetIdA == assetId || p.AssetIdB == assetId)
