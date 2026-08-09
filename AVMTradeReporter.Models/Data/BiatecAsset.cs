@@ -59,5 +59,12 @@ namespace AVMTradeReporter.Model.Data
         /// Zero for assets that have never appeared in a pool (e.g. an LP token ASA that isn't itself traded).
         /// </summary>
         public int PoolsCount { get; set; } = 0;
+
+        /// <summary>
+        /// True when the ASA has been destroyed on chain (algod returns 404 for it).
+        /// Asset ids are never reused on Algorand, so this is a permanent tombstone that
+        /// prevents repeated algod lookups for assets that no longer exist.
+        /// </summary>
+        public bool Deleted { get; set; } = false;
     }
 }

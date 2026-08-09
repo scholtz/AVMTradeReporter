@@ -166,20 +166,34 @@ namespace AVMTradeReporter.Repository
 
                 if (_assetCache.TryGetValue(assetId, out var cached))
                 {
+                    if (cached.Deleted) return null;
                     EnsureStabilityIndexInitialized(cached);
                     return cached;
                 }
 
                 // Not in memory, load from algod
                 var asset = await _algod.GetAssetByIDAsync(cancellationToken, assetId);
-                if (asset != null)
+                if (asset == null) return null;
+                var assetToStore = Newtonsoft.Json.JsonConvert.DeserializeObject<BiatecAsset>(Newtonsoft.Json.JsonConvert.SerializeObject(asset) ?? throw new Exception($"Unable to serialize asset {asset.Index}")) ?? throw new Exception($"Unable to deserialize asset to biatec asset {asset.Index}");
+                EnsureStabilityIndexInitialized(assetToStore);
+                await SetAssetAsync(assetToStore, cancellationToken);
+                return assetToStore;
+            }
+            catch (Algorand.ApiException apiEx) when (apiEx.StatusCode == 404)
+            {
+                // The ASA was destroyed on chain (asset ids are never reused on Algorand).
+                // Cache a permanent tombstone so we don't hammer algod and spam the error
+                // log on every subsequent lookup of the same id.
+                _logger.LogWarning("Asset {AssetId} does not exist on chain (destroyed or invalid id); caching tombstone", assetId);
+                var tombstone = new BiatecAsset
                 {
-                    var assetToStore = Newtonsoft.Json.JsonConvert.DeserializeObject<BiatecAsset>(Newtonsoft.Json.JsonConvert.SerializeObject(asset) ?? throw new Exception($"Unable to serialize asset {asset.Index}")) ?? throw new Exception($"Unable to deserialize asset to biatec asset {asset.Index}");
-                    EnsureStabilityIndexInitialized(assetToStore);
-                    await SetAssetAsync(assetToStore, cancellationToken); // fire and forget
-                }
-                EnsureStabilityIndexInitialized(_assetCache[assetId]);
-                return _assetCache[assetId];
+                    Index = assetId,
+                    Deleted = true,
+                    Timestamp = DateTimeOffset.UtcNow,
+                };
+                _assetCache[assetId] = tombstone;
+                await PersistToRedisAsync(tombstone, cancellationToken);
+                return null;
             }
             catch (Exception ex)
             {
@@ -258,7 +272,7 @@ namespace AVMTradeReporter.Repository
                 {
                     await GetAssetAsync(id, cancellationToken);
                 }
-                query = _assetCache.Where(kvp => ids.Contains(kvp.Key)).Select(kvp => kvp.Value);
+                query = _assetCache.Where(kvp => ids.Contains(kvp.Key)).Select(kvp => kvp.Value).Where(a => !a.Deleted);
             }
             else
             {
