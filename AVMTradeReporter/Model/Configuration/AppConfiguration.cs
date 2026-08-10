@@ -118,6 +118,14 @@ namespace AVMTradeReporter.Model.Configuration
         /// per deployment in appsettings.json/ConfigMap rather than left at the default.
         /// </summary>
         public string NativeTokenName { get; set; } = "Algorand";
+
+        /// <summary>
+        /// Genesis id of the network this deployment indexes, stored on the Indexer record in
+        /// Elasticsearch (e.g. "mainnet-v1.0", "testnet-v1.0", "voimain-v1.0"). Defaults to
+        /// Algorand mainnet - every other network MUST override this in its own
+        /// appsettings.json/ConfigMap.
+        /// </summary>
+        public string GenesisId { get; set; } = "mainnet-v1.0";
     }
 
     public class RedisConfiguration

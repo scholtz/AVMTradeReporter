@@ -1,8 +1,10 @@
 name: Promote to Production
 
 # Manual-only pipeline. Run this once a version has been built by "Build and Deploy" (deploy.yml) and
-# verified on stage. It re-tags that version's already-pushed API and Subscriber images as "latest" in
-# Docker Hub and deploys them to production (k8s/main/*, mainnet) - it never builds a new image itself.
+# verified on stage. The backend image is network-agnostic (all network specifics come from the
+# per-environment ConfigMap/Secret), so the same image is promoted to whichever production network
+# is selected: "algorand" (k8s/main/*, api.algorand.scan.biatec.io - also re-tags the images as
+# :latest) or "voi" (k8s/voi/*, api.voi.scan.biatec.io, Voi mainnet). It never builds a new image.
 on:
   workflow_dispatch:
     inputs:
@@ -14,6 +16,14 @@ on:
         required: false
         default: ""
         type: string
+      network:
+        description: Production network to deploy to.
+        required: true
+        default: algorand
+        type: choice
+        options:
+          - algorand
+          - voi
 
 permissions:
   contents: write
@@ -56,10 +66,13 @@ jobs:
   # ---------------------------------------------------------------------
   # Stage 1: promote-tag - re-tags the already-built & pushed
   # <image>:<version> images as :latest. Doesn't rebuild anything - just
-  # moves the "latest" pointer.
+  # moves the "latest" pointer. The ":latest" moving tag means "what runs
+  # on Algorand production", so this only runs for network=algorand; the
+  # voi deployment always pins the exact versioned tag in its manifests.
   # ---------------------------------------------------------------------
   promote-tag:
     needs: resolve-version
+    if: inputs.network == 'algorand'
     runs-on: ubuntu-latest
     steps:
       - name: Set up Docker Buildx
@@ -93,8 +106,9 @@ jobs:
   # committed manifest always records exactly which build is running.
   # ---------------------------------------------------------------------
   deploy-production:
-    name: Deploy to production (mainnet)
+    name: Deploy to production (Algorand mainnet)
     needs: [resolve-version, promote-tag]
+    if: inputs.network == 'algorand'
     runs-on: ubuntu-latest
     environment:
       name: production
@@ -169,6 +183,109 @@ jobs:
           kubectl rollout status deployment/avm-trade-reporter2-app-deployment -n "$NAMESPACE"
           kubectl rollout restart deployment/avmtradereporter-subscriber -n "$NAMESPACE"
           kubectl rollout status deployment/avmtradereporter-subscriber -n "$NAMESPACE"
+
+      - name: Remove kubeconfig
+        if: always()
+        run: rm -f "$HOME/.kube/config"
+
+  # ---------------------------------------------------------------------
+  # Stage 2 (voi): deploy-production-voi - Voi mainnet production
+  # (api.voi.scan.biatec.io, k8s/voi/*). Gated by the "production-voi"
+  # GitHub Environment, whose secrets must provide the Voi environment's
+  # own Elasticsearch cluster (ELASTIC_HOST/ELASTIC_API_KEY - index names
+  # are not namespaced per environment, so voi cannot share production's
+  # cluster) and REDIS_CONNECTION_STRING (may be the shared Redis - keys
+  # are namespaced avmtrade:voi:* / voi:*). Deploys the pinned versioned
+  # tag; the :latest moving tag is not touched for voi.
+  # ---------------------------------------------------------------------
+  deploy-production-voi:
+    name: Deploy to production (Voi mainnet)
+    needs: resolve-version
+    if: inputs.network == 'voi'
+    runs-on: ubuntu-latest
+    environment:
+      name: production-voi
+      url: https://api.voi.scan.biatec.io
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Update voi manifests with new image tags
+        run: |
+          version="${{ needs.resolve-version.outputs.version }}"
+          sed -i "s~${IMAGE_API}.*~${IMAGE_API}:${version}~g" k8s/voi/deployment-api-voi.yaml
+          sed -i "s~${IMAGE_SUBSCRIBER}.*~${IMAGE_SUBSCRIBER}:${version}~g" k8s/voi/subscriber-deployment-voi.yaml
+
+      - name: Commit updated voi manifests
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet -- k8s/voi/deployment-api-voi.yaml k8s/voi/subscriber-deployment-voi.yaml; then
+            git add k8s/voi/deployment-api-voi.yaml k8s/voi/subscriber-deployment-voi.yaml
+            git commit -m "cicd promote ${{ needs.resolve-version.outputs.version }} to production-voi [skip ci]"
+            for i in 1 2 3 4 5; do
+              git pull --rebase origin master && git push && break
+              echo "Push attempt $i failed, retrying..."
+              sleep $((i * 3))
+            done
+          else
+            echo "No manifest changes to commit"
+          fi
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p "$HOME/.kube"
+          echo "$KUBE_CONFIG" | base64 -d > "$HOME/.kube/config"
+          chmod 600 "$HOME/.kube/config"
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+
+      # Voi's Elastic/Redis credentials live only as GitHub Environment secrets ("production-voi"),
+      # never committed to the repo. Re-created on every promote so rotating a GitHub secret and
+      # re-running the workflow is enough to rotate the deployed value (same pattern as stage).
+      - name: Update voi secrets from GitHub secrets
+        run: |
+          kubectl create secret generic avm-trade-reporter-voi-secret \
+            --namespace="$NAMESPACE" \
+            --from-literal=AppConfiguration__Elastic__Host="$ELASTIC_HOST" \
+            --from-literal=AppConfiguration__Elastic__ApiKey="$ELASTIC_API_KEY" \
+            --from-literal=AppConfiguration__Redis__ConnectionString="$REDIS_CONNECTION_STRING" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create secret generic avm-trade-reporter-subscriber-voi-secret \
+            --namespace="$NAMESPACE" \
+            --from-literal=REDIS_CONNECTION="$REDIS_CONNECTION_STRING" \
+            --dry-run=client -o yaml | kubectl apply -f -
+        env:
+          ELASTIC_HOST: ${{ secrets.ELASTIC_HOST }}
+          ELASTIC_API_KEY: ${{ secrets.ELASTIC_API_KEY }}
+          REDIS_CONNECTION_STRING: ${{ secrets.REDIS_CONNECTION_STRING }}
+
+      # Must run BEFORE the manifests are applied - see the equivalent comment in the Algorand
+      # production job above.
+      - name: Update voi config map
+        run: |
+          kubectl create configmap avm-trade-reporter-voi-main-conf --from-file=k8s/voi/conf-api-voi -n "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Apply shared images PV/PVC
+        run: |
+          kubectl apply -f k8s/main/pv-images.yaml -n "$NAMESPACE"
+
+      - name: Apply Kubernetes manifests (voi)
+        run: |
+          kubectl apply -f k8s/voi/deployment-api-voi.yaml -n "$NAMESPACE"
+          kubectl apply -f k8s/voi/subscriber-deployment-voi.yaml -n "$NAMESPACE"
+
+      - name: Roll out voi deployments
+        run: |
+          kubectl rollout restart deployment/avm-trade-reporter-voi-app-deployment -n "$NAMESPACE"
+          kubectl rollout status deployment/avm-trade-reporter-voi-app-deployment -n "$NAMESPACE"
+          kubectl rollout restart deployment/avmtradereporter-subscriber-voi -n "$NAMESPACE"
+          kubectl rollout status deployment/avmtradereporter-subscriber-voi -n "$NAMESPACE"
 
       - name: Remove kubeconfig
         if: always()

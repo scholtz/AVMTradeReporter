@@ -87,7 +87,7 @@ namespace AVMTradeReporter.Services
                 Id = _appConfig.Value.IndexerId,
                 Updated = DateTimeOffset.Now,
                 Round = _appConfig.Value.StartRound ?? 52337928,
-                GenesisId = "mainnet-v1.0"
+                GenesisId = _appConfig.Value.GenesisId
             };
 #else
             var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -100,7 +100,7 @@ namespace AVMTradeReporter.Services
                     Id = _appConfig.Value.IndexerId,
                     Updated = DateTimeOffset.Now,
                     Round = _appConfig.Value.StartRound ?? 52337928,
-                    GenesisId = "mainnet-v1.0"
+                    GenesisId = _appConfig.Value.GenesisId
                 };
                 var success = indexerRepository.StoreIndexerAsync(Indexer, cancellationTokenSource.Token).Result;
                 if (success)

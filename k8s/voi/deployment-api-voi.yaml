@@ -1,0 +1,118 @@
+# Voi mainnet production environment for AVMTradeReporter - deployed by the manual
+# .github/workflows/promote-production.yml workflow with network=voi (never automatically).
+# Lives in the same "biatec-scan" namespace as the Algorand production and stage deployments but
+# under entirely distinct resource names/hosts/ConfigMap/Secret. Indexes the Voi mainnet network
+# (genesis voimain-v1.0) and serves https://api.voi.scan.biatec.io for the frontend at
+# https://voi.scan.biatec.io. Requires its own Elasticsearch cluster (index names are not
+# namespaced per environment) - see docs/STAGE_ENVIRONMENT.md.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: avm-trade-reporter-voi-app-deployment
+  namespace: biatec-scan
+spec:
+  selector:
+    matchLabels:
+      app: avm-trade-reporter-voi-app
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: avm-trade-reporter-voi-app
+    spec:
+      containers:
+        - name: avm-trade-reporter-voi-app
+          image: scholtz2/avm-trade-reporter:1.2026.08.09-main
+          imagePullPolicy: Always
+          resources:
+            requests:
+              cpu: 100m
+              memory: "150Mi"
+            limits:
+              cpu: 2000m
+              memory: "1500Mi"
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          envFrom:
+            # Dedicated voi secret, deliberately separate from production's avm-trade-reporter-secret.
+            # Re-created on every promote from the "production-voi" GitHub environment secrets - see
+            # .github/workflows/promote-production.yml.
+            - secretRef:
+                name: avm-trade-reporter-voi-secret
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 2
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 2
+            terminationGracePeriodSeconds: 1
+          volumeMounts:
+            - name: avm-trade-reporter-voi-main-conf
+              mountPath: /app/appsettings.json
+              subPath: appsettings.json
+            # Same PVC (and thus the same on-disk icon cache) as the other environments -
+            # see k8s/main/pv-images.yaml for why this is intentionally shared. The Voi
+            # deployment writes under its own network subfolder (MainnetImageProcessor).
+            - name: avm-trade-reporter-images
+              mountPath: /app/images
+      volumes:
+        - name: avm-trade-reporter-voi-main-conf
+          configMap:
+            name: avm-trade-reporter-voi-main-conf
+        - name: avm-trade-reporter-images
+          persistentVolumeClaim:
+            claimName: avm-trade-reporter-images-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: avm-trade-reporter-voi-service
+  namespace: biatec-scan
+spec:
+  type: ClusterIP
+  selector:
+    app: avm-trade-reporter-voi-app
+  ports:
+    - name: http
+      protocol: TCP
+      appProtocol: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: avm-trade-reporter-voi-ingress-main
+  namespace: biatec-scan
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/session-cookie-name: "route"
+    nginx.ingress.kubernetes.io/session-cookie-hash: "sha1"
+    cert-manager.io/cluster-issuer: letsencrypt
+spec:
+  ingressClassName: "nginx"
+  tls:
+    - hosts:
+        - api.voi.scan.biatec.io
+      secretName: tls-api.voi.scan.biatec.io
+  rules:
+    - host: api.voi.scan.biatec.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: avm-trade-reporter-voi-service
+                port:
+                  number: 8080
