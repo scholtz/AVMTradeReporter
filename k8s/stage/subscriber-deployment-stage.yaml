@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
         - name: subscriber
-          image: scholtz2/avm-trade-reporter-subscriber:1.2026.08.10-main
+          image: scholtz2/avm-trade-reporter-subscriber:1.2026.08.11-main
           env:
             - name: POOL_CHANNEL
               value: "avmtrade:stage:pool:updates"
