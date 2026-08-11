@@ -22,6 +22,7 @@ namespace AVMTradeReporter.Repository
         private readonly ILogger<OHLCRepository> _logger;
         private readonly IAssetRepository? _assetRepository;
         private readonly ulong _usdReferenceAssetId;
+        private readonly HashSet<ulong> _trustedAssetIds;
         private readonly IHubContext<BiatecScanHub>? _hubContext;
 
         internal static readonly (string code, TimeSpan span)[] Intervals = new[]
@@ -41,7 +42,11 @@ namespace AVMTradeReporter.Repository
             _elasticClient = client;
             _logger = logger;
             _assetRepository = assetRepository;
-            _usdReferenceAssetId = appConfig?.Value.UsdReferenceAssetId ?? 31566704UL;
+            var config = appConfig?.Value ?? new AppConfiguration();
+            _usdReferenceAssetId = config.UsdReferenceAssetId;
+            // ALGO and the USD reference asset are always trusted anchors, same as in
+            // AggregatedPoolRepository's Real TVL calculation.
+            _trustedAssetIds = new HashSet<ulong>(config.TrustedReferenceAssetIds) { 0UL, config.UsdReferenceAssetId };
             _hubContext = hubContext;
             CreateTemplateAsync().Wait();
         }
@@ -139,23 +144,39 @@ namespace AVMTradeReporter.Repository
             else return result;
             if (volBase <= 0) return result;
 
-            int decimalsA = 0;
-            int decimalsB = 0;
+            BiatecAsset? assetA = null;
+            BiatecAsset? assetB = null;
             if (_assetRepository != null)
             {
-                var assetA = await _assetRepository.GetAssetAsync(aId);
-                var assetB = await _assetRepository.GetAssetAsync(bId);
-                decimalsA = (int)(assetA?.Params?.Decimals ?? 0);
-                decimalsB = (int)(assetB?.Params?.Decimals ?? 0);
+                assetA = await _assetRepository.GetAssetAsync(aId);
+                assetB = await _assetRepository.GetAssetAsync(bId);
             }
+            int decimalsA = (int)(assetA?.Params?.Decimals ?? 0);
+            int decimalsB = (int)(assetB?.Params?.Decimals ?? 0);
             decimal powA = (decimal)Math.Pow(10, decimalsA);
             decimal powB = (decimal)Math.Pow(10, decimalsB);
             decimal adjustedVolBase = volBase / powA;
             decimal adjustedVolQuote = volQuote / powB;
             decimal price = adjustedVolQuote / adjustedVolBase;
             var usdcAssetId = _usdReferenceAssetId;
-            // Asset valuation: quote-per-base using raw on-chain volumes.
-            // var price = volQuote / volBase;
+
+            // USD valuation: each leg is priced from the COUNTER leg, and only when that counter
+            // is a trusted reference asset with a known USD price:
+            //   priceUSD(X) = (volY / volX) * priceUSD(Y)   — exact on-chain rate, reliable anchor.
+            //
+            // Never derive these prices from Trade.ValueUSD: it averages both legs' cached USD
+            // values, so one mispriced illiquid counter-token wrote absurd highs/lows into major
+            // assets' USD candles (ALGO ~$0.09 charted ~$9 highs, goBTC ~$63k charted ~$118k),
+            // turning the 7d sparklines into stripes. Trades whose counter leg is untrusted add
+            // no reliable USD information and write no USD candle for that side.
+            decimal? anchorPriceA = GetTrustedAnchorPrice(aId, assetA);
+            decimal? anchorPriceB = GetTrustedAnchorPrice(bId, assetB);
+            decimal? usdPriceBase = anchorPriceB.HasValue && adjustedVolBase > 0 && adjustedVolQuote > 0
+                ? adjustedVolQuote * anchorPriceB.Value / adjustedVolBase
+                : null;
+            decimal? usdPriceQuote = anchorPriceA.HasValue && adjustedVolBase > 0 && adjustedVolQuote > 0
+                ? adjustedVolBase * anchorPriceA.Value / adjustedVolQuote
+                : null;
 
             var ts = trade.Timestamp.Value.ToUniversalTime();
             foreach (var (code, span) in Intervals)
@@ -163,13 +184,6 @@ namespace AVMTradeReporter.Repository
                 var bucketStart = GetBucketStart(ts, span);
                 var docIdAsset = $"{aId}-{bId}-{code}-asset-{bucketStart:yyyyMMddHHmmss}";
                 result.Add(new BucketSpec(code, bucketStart, docIdAsset, false, price, adjustedVolBase, adjustedVolQuote, aId, bId));
-
-                // USD valuation: if trade has USD value, compute USD-per-base-unit.
-                decimal? usdPriceBase = null;
-                if (trade.ValueUSD.HasValue && adjustedVolBase > 0)
-                {
-                    usdPriceBase = trade.ValueUSD.Value / adjustedVolBase;
-                }
 
                 // The USD reference asset itself is included (docId "{usd}-{usd}-...-usd-...")
                 // so its own USD price chart (e.g. USDC/USD) has data.
@@ -181,13 +195,6 @@ namespace AVMTradeReporter.Repository
                     result.Add(new BucketSpec(code, bucketStart, docIdUsd, true, usdPriceBase.Value, adjustedVolBase, volumeUsd, aId, usdcAssetId));
                 }
 
-                // USD valuation: if trade has USD value, compute USD-per-base-unit.
-                decimal? usdPriceQuote = null;
-                if (trade.ValueUSD.HasValue && adjustedVolQuote > 0)
-                {
-                    usdPriceQuote = trade.ValueUSD.Value / adjustedVolQuote;
-                }
-
                 if (usdPriceQuote.HasValue)
                 {
                     // For USD-valued series, keep volumeBase in base asset units, but express quote volume in USD.
@@ -197,6 +204,19 @@ namespace AVMTradeReporter.Repository
                 }
             }
             return result;
+        }
+
+        /// <summary>
+        /// Returns the USD price usable as a valuation anchor when <paramref name="assetId"/> is the
+        /// counter leg of a trade: $1 for the USD reference asset (pegged), the cached PriceUSD for
+        /// the other trusted reference assets, and null for everything else — untrusted assets must
+        /// never anchor another asset's USD candles, no matter what their cached price claims.
+        /// </summary>
+        private decimal? GetTrustedAnchorPrice(ulong assetId, BiatecAsset? asset)
+        {
+            if (assetId == _usdReferenceAssetId) return 1m;
+            if (!_trustedAssetIds.Contains(assetId)) return null;
+            return asset?.PriceUSD > 0 ? asset.PriceUSD : null;
         }
 
         /// <summary>
