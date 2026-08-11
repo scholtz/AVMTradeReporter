@@ -74,6 +74,11 @@ namespace AVMTradeReporter.Model.Configuration
         public AssetTimeseriesConfiguration AssetTimeseries { get; set; } = new AssetTimeseriesConfiguration();
 
         /// <summary>
+        /// One-shot historical USD OHLC / TVL snapshot repair configuration
+        /// </summary>
+        public OhlcRepairConfiguration OhlcRepair { get; set; } = new OhlcRepairConfiguration();
+
+        /// <summary>
         /// Block processing configuration
         /// </summary>
         public BlockProcessingConfiguration BlockProcessing { get; set; } = new BlockProcessingConfiguration();
@@ -243,6 +248,26 @@ namespace AVMTradeReporter.Model.Configuration
         /// How many top-TVL assets get their 7d series precomputed every hour. Default is 200.
         /// </summary>
         public int UniverseSize { get; set; } = 200;
+    }
+
+    public class OhlcRepairConfiguration
+    {
+        /// <summary>
+        /// Enables the one-shot startup repair of historical USD OHLC candles and TVL snapshots
+        /// (see OhlcUsdRepairService). The repair is idempotent and marks completion per version
+        /// in Redis, so leaving this enabled is safe — it becomes a no-op after the first
+        /// successful run in each environment.
+        /// </summary>
+        public bool Enabled { get; set; } = true;
+
+        /// <summary>
+        /// Hourly TVL snapshots (asset:tvl:hourly:*) older than this moment are deleted during
+        /// the repair: before the Redis EnvironmentKeyPrefix fix reached production
+        /// (2026-08-09 ~14:00 UTC on Algorand mainnet), mainnet and testnet wrote the same
+        /// unprefixed keys, so snapshot fields for asset ids that exist on both networks (ALGO=0)
+        /// hold the wrong network's TVL. Set to null to skip the TVL snapshot cleanup.
+        /// </summary>
+        public DateTimeOffset? TvlSnapshotCutoff { get; set; } = DateTimeOffset.Parse("2026-08-09T15:00:00Z");
     }
 
     public class GossipDiscoveryConfiguration

@@ -121,6 +121,7 @@ namespace AVMTradeReporter
             builder.Services.AddSingleton<IAssetStatsService, AssetStatsService>();
             builder.Services.AddSingleton<ITopAssetsService, TopAssetsService>();
             builder.Services.AddSingleton<IAssetTimeseriesService, AssetTimeseriesService>();
+            builder.Services.AddSingleton<IOhlcUsdRepairService, OhlcUsdRepairService>();
 
             // Add Pool Processors
             builder.Services.AddSingleton<PactPoolProcessor>();
@@ -162,6 +163,12 @@ namespace AVMTradeReporter
             if (appConfig?.AssetTimeseries?.Enabled != false) // default enabled
             {
                 builder.Services.AddHostedService<AssetTimeseriesBackgroundService>();
+            }
+
+            // One-shot historical USD OHLC / TVL snapshot repair (idempotent, Redis-marker guarded)
+            if (appConfig?.OhlcRepair?.Enabled != false) // default enabled
+            {
+                builder.Services.AddHostedService<OhlcUsdRepairBackgroundService>();
             }
 
             builder.Services.AddSingleton<ElasticsearchClient>(sp =>
