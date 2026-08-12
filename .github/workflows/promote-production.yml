@@ -4,7 +4,9 @@ name: Promote to Production
 # verified on stage. The backend image is network-agnostic (all network specifics come from the
 # per-environment ConfigMap/Secret), so the same image is promoted to whichever production network
 # is selected: "algorand" (k8s/main/*, api.algorand.scan.biatec.io - also re-tags the images as
-# :latest) or "voi" (k8s/voi/*, api.voi.scan.biatec.io, Voi mainnet). It never builds a new image.
+# :latest) or "voi" (k8s/voi/*, api.voi.scan.biatec.io, Voi mainnet). Selecting "all" promotes the
+# same version to every production network (algorand + voi) in one run, each deploy still gated by
+# its own GitHub Environment. It never builds a new image.
 on:
   workflow_dispatch:
     inputs:
@@ -17,13 +19,16 @@ on:
         default: ""
         type: string
       network:
-        description: Production network to deploy to.
+        description: >-
+          Production network to deploy to. "all" deploys the same version to
+          every production network (algorand + voi).
         required: true
         default: algorand
         type: choice
         options:
           - algorand
           - voi
+          - all
 
 permissions:
   contents: write
@@ -67,12 +72,13 @@ jobs:
   # Stage 1: promote-tag - re-tags the already-built & pushed
   # <image>:<version> images as :latest. Doesn't rebuild anything - just
   # moves the "latest" pointer. The ":latest" moving tag means "what runs
-  # on Algorand production", so this only runs for network=algorand; the
-  # voi deployment always pins the exact versioned tag in its manifests.
+  # on Algorand production", so this only runs when Algorand is being
+  # promoted (network=algorand or all); the voi deployment always pins
+  # the exact versioned tag in its manifests.
   # ---------------------------------------------------------------------
   promote-tag:
     needs: resolve-version
-    if: inputs.network == 'algorand'
+    if: inputs.network == 'algorand' || inputs.network == 'all'
     runs-on: ubuntu-latest
     steps:
       - name: Set up Docker Buildx
@@ -108,7 +114,7 @@ jobs:
   deploy-production:
     name: Deploy to production (Algorand mainnet)
     needs: [resolve-version, promote-tag]
-    if: inputs.network == 'algorand'
+    if: inputs.network == 'algorand' || inputs.network == 'all'
     runs-on: ubuntu-latest
     environment:
       name: production
@@ -201,7 +207,7 @@ jobs:
   deploy-production-voi:
     name: Deploy to production (Voi mainnet)
     needs: resolve-version
-    if: inputs.network == 'voi'
+    if: inputs.network == 'voi' || inputs.network == 'all'
     runs-on: ubuntu-latest
     environment:
       name: production-voi
