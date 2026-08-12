@@ -324,7 +324,12 @@ namespace AVMTradeReporter.Services
                     {
                         new TermQuery { Field = Infer.Field<OHLC>(f => f.AssetIdA), Value = assetId },
                         new TermQuery { Field = Infer.Field<OHLC>(f => f.AssetIdB), Value = usdcAssetId },
-                        new TermQuery { Field = Infer.Field<OHLC>(f => f.Interval), Value = "1m" },
+                        // 1h, not 1m: these baselines feed PriceUSD1H/24H/7D and the Top
+                        // gainers/losers percentages. The 1h USD series is the one covered by the
+                        // one-shot historical repair (OhlcUsdRepairService) and is far less noisy
+                        // than a single 1m trade print; polluted legacy 1m candles (pre
+                        // trusted-anchor fix) are never rebuilt and must not anchor any metric.
+                        new TermQuery { Field = Infer.Field<OHLC>(f => f.Interval), Value = "1h" },
                         new TermQuery { Field = Infer.Field<OHLC>(f => f.InUSDValuation), Value = true },
                         new DateRangeQuery { Field = Infer.Field<OHLC>(f => f.StartTime), Lte = fromDt }
                     }

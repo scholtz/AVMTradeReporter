@@ -228,6 +228,49 @@ namespace AVMTradeReporter.Repository
             }
             return null; // Not found
         }
+        /// <summary>
+        /// Picks an asset's USD price from the deeper of its two price routes: the direct
+        /// asset↔<paramref name="usdRef"/> pair, or the asset↔ALGO pair scaled by ALGO's USD
+        /// price. Depth is the real USD value of the anchor-side liquidity (the usdRef side of
+        /// the direct pair; the ALGO side × <paramref name="algoPriceUsd"/> for the ALGO route),
+        /// so a near-empty direct USDC pool can never override a liquid ALGO market — the
+        /// unconditional direct-pair preference this replaces let a $0.0001 USDC pool misprice
+        /// an asset by 214x. Returns null when neither route can produce a price.
+        /// </summary>
+        internal static decimal? SelectAssetUsdPrice(ulong assetId, ulong usdRef, AggregatedPool? directUsdPair, AggregatedPool? algoPair, decimal? algoPriceUsd)
+        {
+            decimal? directPrice = null;
+            decimal directDepthUsd = 0m;
+            if (directUsdPair != null)
+            {
+                var orient = directUsdPair.AssetIdB == usdRef ? directUsdPair : directUsdPair.Reverse();
+                if (orient.AssetIdA == assetId && orient.VirtualSumALevel1ForPrice > 0 && orient.VirtualSumBLevel1ForPrice > 0)
+                {
+                    directPrice = orient.VirtualSumBLevel1ForPrice.Value / orient.VirtualSumALevel1ForPrice.Value; // usdRef per asset
+                    directDepthUsd = orient.TVL_B; // real usdRef units ≈ USD
+                }
+            }
+
+            decimal? algoRoutePrice = null;
+            decimal algoDepthUsd = 0m;
+            if (algoPair != null && algoPriceUsd > 0)
+            {
+                var orient = algoPair.AssetIdA == assetId ? algoPair : algoPair.Reverse();
+                if (orient.AssetIdB == 0UL && orient.VirtualSumALevel1ForPrice > 0 && orient.VirtualSumBLevel1ForPrice > 0)
+                {
+                    var algoPerAsset = orient.VirtualSumBLevel1ForPrice.Value / orient.VirtualSumALevel1ForPrice.Value;
+                    algoRoutePrice = algoPerAsset * algoPriceUsd.Value; // USD per asset
+                    algoDepthUsd = orient.TVL_B * algoPriceUsd.Value; // real ALGO units × ALGO price
+                }
+            }
+
+            if (directPrice.HasValue && algoRoutePrice.HasValue)
+            {
+                return directDepthUsd >= algoDepthUsd ? directPrice : algoRoutePrice;
+            }
+            return directPrice ?? algoRoutePrice;
+        }
+
         public async Task PublishToHubAsync(AggregatedPool send, CancellationToken cancellationToken = default)
         {
             try
@@ -391,30 +434,17 @@ namespace AVMTradeReporter.Repository
                     }
                     else
                     {
-                        // 1. Try direct asset-usdRef pair
+                        // Price from the deeper of the two routes (direct usdRef pair vs via
+                        // ALGO) — never from a fixed route preference. A dust direct-USDC pool
+                        // must not override a liquid ALGO market (a $0.0001 USDC pool once priced
+                        // MEEP 214x above its real ALGO-pair market, faking +99% "gains").
                         var pairUsdc = GetAggregatedPool(assetId, usdRef);
-                        if (pairUsdc != null)
+                        var pairAlgo = GetAggregatedPool(assetId, 0);
+                        var algoAsset = await _assetRepository.GetAssetAsync(0, cancellationToken);
+                        var selected = SelectAssetUsdPrice(assetId, usdRef, pairUsdc, pairAlgo, algoAsset?.PriceUSD);
+                        if (selected > 0)
                         {
-                            var orient = pairUsdc.AssetIdB == usdRef ? pairUsdc : pairUsdc.Reverse();
-                            if (orient.VirtualSumALevel1ForPrice > 0)
-                            {
-                                newPrice = (orient.VirtualSumBLevel1ForPrice ?? 0) / (orient.VirtualSumALevel1ForPrice ?? 0); // usdRef per asset
-                            }
-                        }
-                        else
-                        {
-                            // 2. Derive via ALGO if available (asset-ALGO)
-                            var algoAsset = await _assetRepository.GetAssetAsync(0, cancellationToken);
-                            var pairAlgo = GetAggregatedPool(assetId, 0);
-                            if (algoAsset?.PriceUSD > 0 && pairAlgo != null)
-                            {
-                                var orient = pairAlgo.AssetIdA == assetId ? pairAlgo : pairAlgo.Reverse();
-                                if (orient.VirtualSumALevel1ForPrice > 0)
-                                {
-                                    var algoPerAsset = (orient.VirtualSumBLevel1ForPrice ?? 0) / (orient.VirtualSumALevel1ForPrice ?? 0); // ALGO per asset
-                                    newPrice = algoPerAsset * algoAsset.PriceUSD; // USD per asset
-                                }
-                            }
+                            newPrice = selected.Value;
                         }
                     }
 
@@ -468,25 +498,10 @@ namespace AVMTradeReporter.Repository
                         priceCache.TryGetValue(assetId, out var priceAssetCurrent);
                         if (priceAssetCurrent <= 0) priceAssetCurrent = asset.PriceUSD;
 
-                        // Set PriceUSD if paired with this network's usdRef
-                        if (otherAssetId == usdRef && ap.VirtualSumALevel1ForPrice > 0 && ap.VirtualSumBLevel1ForPrice > 0)
-                        {
-                            decimal calculatedPrice;
-                            if (ap.AssetIdA == assetId)
-                            {
-                                calculatedPrice = ap.VirtualSumBLevel1ForPrice.Value / ap.VirtualSumALevel1ForPrice.Value;
-                            }
-                            else
-                            {
-                                calculatedPrice = ap.VirtualSumALevel1ForPrice.Value / ap.VirtualSumBLevel1ForPrice.Value;
-                            }
-                            if (calculatedPrice != asset.PriceUSD)
-                            {
-                                asset.PriceUSD = calculatedPrice;
-                                changed = true;
-                                priceCache[assetId] = calculatedPrice; // update cache
-                            }
-                        }
+                        // NOTE: PriceUSD is intentionally NOT re-derived from the usdRef pair
+                        // here — route selection above (SelectAssetUsdPrice) already chose the
+                        // deeper market, and re-deriving from any direct usdRef pair would let a
+                        // dust USDC pool override that choice again.
 
                         if (priceAssetCurrent <= 0 || otherPrice <= 0) continue; // skip TVL calculation until both prices known
 
