@@ -2,13 +2,18 @@
 using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Processors.Image;
 using AVMTradeReporter.Repository;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Net;
 
 namespace AVMTradeReporter.Controllers
 {
+    /// <summary>
+    /// Asset metadata lookup and asset image retrieval.
+    /// </summary>
     [ApiController]
     [Route("api/asset")]
+    [Authorize]
     public class AssetController : ControllerBase
     {
         private readonly ILogger<AssetController> _logger;
@@ -27,6 +32,7 @@ namespace AVMTradeReporter.Controllers
         /// </summary>
         /// <param name="ids">Comma separated list of asset IDs to include. Missing IDs will be fetched on-demand.</param>
         /// <param name="search">Case-insensitive substring filter applied to asset name or unit name. Special case: utility returns utility tokens. Special case: stable returns the assets with stabilityIndex > 0.</param>
+        /// <param name="offset">Number of records to skip for pagination (default: 0).</param>
         /// <param name="size">Maximum number of results to return (default 100, max 500).</param>
         /// <returns>List of matching assets with basic metadata.</returns>
         [HttpGet]
@@ -62,8 +68,16 @@ namespace AVMTradeReporter.Controllers
             }
         }
 
-        /// Returns image for asset by id
+        /// <summary>
+        /// Returns the cached PNG image for the given asset id. Intentionally public (no authentication
+        /// required) so it can be embedded directly as an &lt;img&gt; src in browsers/clients without an
+        /// ARC-14 signed transaction.
+        /// </summary>
+        /// <param name="assetId">Algorand asset id to fetch the image for.</param>
+        /// <returns>PNG image bytes, cached for 1 week on success.</returns>
         [HttpGet("image/{assetId}")]
+        [AllowAnonymous]
+        [ProducesResponseType(typeof(FileResult), 200)]
         public async Task<IActionResult> GetAssetImage(ulong assetId)
         {
             try

@@ -6,6 +6,9 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace AVMTradeReporter.Controllers
 {
+    /// <summary>
+    /// Free-text search across assets and pools. Requires ARC-14 authentication.
+    /// </summary>
     [Authorize]
     [ApiController]
     [Route("api/search")] // GET api/search?q=algo
@@ -20,6 +23,11 @@ namespace AVMTradeReporter.Controllers
             _logger = logger;
         }
 
+        /// <summary>
+        /// Searches assets and pools matching the given query term.
+        /// </summary>
+        /// <param name="q">Free-text search term (asset name, unit name, or pool address).</param>
+        /// <returns>200 with matching assets/pools.</returns>
         [HttpGet]
         [ProducesResponseType(typeof(SearchResponse), 200)]
         public async Task<ActionResult<SearchResponse>> Search([FromQuery] string q)

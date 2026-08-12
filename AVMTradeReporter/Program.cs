@@ -58,15 +58,26 @@ namespace AVMTradeReporter
                     Version = "v1",
                     Description = File.ReadAllText("doc/description.md"),
                 });
-                c.AddSecurityDefinition("oauth2", new OpenApiSecurityScheme
+                c.AddSecurityDefinition("arc14", new OpenApiSecurityScheme
                 {
-                    Description = "ARC-0014 Algorand authentication transaction",
+                    Description = "ARC-0014 Algorand authentication transaction, base64-encoded and sent as a " +
+                        "Bearer token in the Authorization header (\"Authorization: Bearer <token>\"). See the " +
+                        "top-level API description for how to generate this token.",
                     In = ParameterLocation.Header,
                     Name = "Authorization",
                     Type = SecuritySchemeType.ApiKey,
                 });
                 c.OperationFilter<Swashbuckle.AspNetCore.Filters.SecurityRequirementsOperationFilter>();
                 c.ResolveConflictingActions(apiDescriptions => apiDescriptions.First()); //This line
+
+                // Surface /// XML doc comments (summary/param/returns) from this assembly in Swagger UI.
+                // Requires <GenerateDocumentationFile> in the csproj.
+                var xmlFile = $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.xml";
+                var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
+                if (File.Exists(xmlPath))
+                {
+                    c.IncludeXmlComments(xmlPath, includeControllerXmlComments: true);
+                }
             });
 
             // Configure AppConfiguration from appsettings.json
@@ -262,7 +273,8 @@ namespace AVMTradeReporter
             // CORS must be before authentication/authorization
             app.UseCors();
 
-            app.UseSwagger();
+            // Emit OpenAPI 3.1 (Microsoft.OpenApi 2.x, pulled in by Swashbuckle 10.x, supports 3.1 output).
+            app.UseSwagger(o => o.OpenApiVersion = Microsoft.OpenApi.OpenApiSpecVersion.OpenApi3_1);
             app.UseSwaggerUI();
 
             // WebSockets must be before authentication for SignalR

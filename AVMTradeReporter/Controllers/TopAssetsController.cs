@@ -1,11 +1,13 @@
 using AVMTradeReporter.Model.DTO;
 using AVMTradeReporter.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace AVMTradeReporter.Controllers
 {
     [ApiController]
     [Route("api/asset/top")]
+    [Authorize]
     public class TopAssetsController : ControllerBase
     {
         private readonly ILogger<TopAssetsController> _logger;

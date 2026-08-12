@@ -1,7 +1,49 @@
 ﻿# AVM Trade Reporter – Developer Guide
 
+## Authentication (ARC-0014)
+
+Most endpoints in this API require **[ARC-0014](https://github.com/algorandfoundation/ARCs/issues/42)**
+authentication ("Algorand transaction signature as authentication"). Instead of a username/password or
+long-lived API key, the client signs a zero-fee, unbroadcast `NoOp`/payment-shaped Algorand transaction
+whose `Note` field encodes a realm and expiry, then sends the signed transaction as the `Authorization`
+header. The server verifies the signature and transaction validity window against Algorand node
+transaction params — no signed transaction is ever submitted to the chain, it is purely a proof of key
+ownership.
+
+- Realm for this API: `BiatecScan#ARC14`
+- Header: `Authorization: SigTx <base64-encoded-signed-transaction>` (produced by the libraries below)
+- The signed transaction's validity window (`firstValid`/`lastValid`) doubles as the token's expiry —
+  there is no separate refresh step; the client just signs a new transaction with a fresh validity
+  window when the old one expires
+- Endpoints marked **"no authentication required"** below are intentionally public and accept
+  unauthenticated requests
+
+### Recommended client libraries
+
+- **JavaScript/TypeScript**: [`arc14`](https://www.npmjs.com/package/arc14) (builds and signs the
+  ARC-14 transaction, produces the `Authorization` header value) together with
+  [`arc76`](https://www.npmjs.com/package/arc76) (deterministic Algorand keypair derivation, if the
+  client needs a stable identity without a wallet) and [`algosdk`](https://www.npmjs.com/package/algosdk)
+  for transaction params/signing primitives. Example:
+  ```ts
+  import algosdk from "algosdk";
+  import { makeArc14AuthHeader, makeArc14TxWithSuggestedParams } from "arc14";
+
+  const tx = await makeArc14TxWithSuggestedParams("BiatecScan#ARC14", account.addr.toString(), suggestedParams);
+  const signed = tx.signTxn(account.sk);
+  const authorizationHeader = makeArc14AuthHeader(signed);
+  // send as: Authorization: <authorizationHeader>
+  ```
+- **.NET**: server-side verification here uses the
+  [`AlgorandAuthentication`](https://www.nuget.org/packages/AlgorandAuthentication) NuGet package
+  (see `AlgorandAuthenticationHandlerV2` in `Program.cs`); .NET clients can build the equivalent
+  ARC-14 signed transaction directly with the [`Algorand4`](https://www.nuget.org/packages/Algorand4)
+  SDK (construct a transaction with `Note` set to the realm, sign it with the account's private key,
+  base64-encode it into the `Authorization` header) — there is no separate client-only package needed
+  since the same SDK used to sign is already an `AVMTradeReporter` dependency.
+
 Short overview
-- ASP.NET Core (.NET 8) Web API + SignalR service for streaming Algorand DEX activity (trades, liquidity, pools, blocks)
+- ASP.NET Core (.NET 10) Web API + SignalR service for streaming Algorand DEX activity (trades, liquidity, pools, blocks)
 - Ingests data from Algod/Gossip, enriches via protocol-specific processors (Pact, Tiny, Biatec)
 - Indexes documents in Elasticsearch and broadcasts live updates to clients via SignalR
 - Optional Redis cache for assets and pools, plus background services for continuous operation
@@ -68,9 +110,14 @@ CORS
 - Configure allowed origins under the Cors section; the app will fail startup if not provided
 
 Authentication
-- Uses AlgorandAuthenticationV2 per Program.cs
-- Swagger defines an API key scheme named oauth2 (ARC-0014 Algorand authentication transaction transmitted in Authorization header)
+- Uses AlgorandAuthenticationV2 per Program.cs; see the "Authentication (ARC-0014)" section at the top of this document for how to generate a token as a client
+- Swagger defines an API key scheme named arc14 (ARC-0014 Algorand authentication transaction transmitted in Authorization header)
 - The SignalR pipeline moves access_token from query string to Authorization header for compatibility
+- All REST endpoints require authentication ([Authorize]) except the following, which are intentionally public:
+  - GET /api/asset/image/{assetId} (asset image, embedded directly as an <img> src)
+  - GET /api/Gossip/status (relay connectivity health check)
+  - GET /api/Stats/dex (DefiLlama DEX stats adapter integration)
+  - GET /api/OHLC/* (TradingView UDF charting datafeed: config, time, symbols, symbol_info, search, marks, timescale_marks, quotes, history)
 
 Elasticsearch
 - Client configured with ApiKey authentication and default mappings
@@ -140,7 +187,7 @@ Pool enrichment and refresh
 
 Running locally
 Prerequisites
-- .NET 8 SDK
+- .NET 10 SDK
 - Elasticsearch endpoint and API key
 - Algod endpoint(s) and API key(s)
 - Redis (optional but recommended)
@@ -151,7 +198,10 @@ Steps
 - Open /swagger to explore the API; this document appears as the description
 
 Notes
-- Program.cs includes doc/documentation.xml for Swagger XML comments; enable XML docs in project if desired
+- GenerateDocumentationFile is enabled in AVMTradeReporter.csproj and Program.cs wires the generated
+  AVMTradeReporter.xml into Swagger via IncludeXmlComments, so /// XML doc comments on controllers and
+  actions are surfaced as operation summaries/descriptions in Swagger UI
+- Swagger is served as OpenAPI 3.1 (app.UseSwagger sets OpenApiVersion = OpenApi3_1 in Program.cs)
 - DockerDefaultTargetOS is Linux; containerization supported via standard ASP.NET Core tooling
 - Tests live in AVMTradeReporterTests (NUnit)
 

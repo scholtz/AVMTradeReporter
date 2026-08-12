@@ -25,6 +25,9 @@ namespace AVMTradeReporter.Controllers
         /// <summary>
         /// Get all pools or filter by protocol
         /// </summary>
+        /// <param name="assetIdA">Filter by asset A ID. When used alone, matches pools where this asset is either A or B.</param>
+        /// <param name="assetIdB">Filter by asset B ID. When used with assetIdA, requires exact asset pair match.</param>
+        /// <param name="address">Filter by pool escrow address.</param>
         /// <param name="protocol">Optional protocol filter (Pact, Tiny, Biatec)</param>
         /// <param name="size">Number of pools to return (default: 100)</param>
         /// <param name="orderBy">Optional server-side ordering (TVL, Volume1H, Volume24H, Volume7D, LastUpdated). Defaults to LastUpdated (timestamp descending)</param>

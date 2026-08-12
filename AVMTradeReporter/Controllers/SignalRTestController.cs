@@ -10,6 +10,11 @@ using System.Security.Claims;
 
 namespace AVMTradeReporter.Controllers
 {
+    /// <summary>
+    /// Diagnostic/test utilities for verifying ARC-14 authentication and the SignalR hub broadcast
+    /// pipeline. Requires ARC-14 authentication. Intended for development/debugging, not production
+    /// client use.
+    /// </summary>
     [Authorize]
     [ApiController]
     [Route("api/signalr")]
@@ -24,6 +29,7 @@ namespace AVMTradeReporter.Controllers
             _logger = logger;
         }
 
+        /// <summary>Returns the caller's current authentication state and claims, for debugging ARC-14 auth.</summary>
         [HttpGet("auth-test")]
         public IActionResult AuthTest()
         {
@@ -40,6 +46,7 @@ namespace AVMTradeReporter.Controllers
             return Ok(authInfo);
         }
 
+        /// <summary>Same as <see cref="AuthTest"/> but forces authorization at the action level (redundant given the class-level [Authorize], kept explicit for clarity/testing).</summary>
         [HttpGet("auth-test-authorized")]
         [Authorize]
         public IActionResult AuthTestAuthorized()
@@ -57,6 +64,8 @@ namespace AVMTradeReporter.Controllers
             return Ok(authInfo);
         }
 
+        /// <summary>Broadcasts a test info message to all connected SignalR clients.</summary>
+        /// <param name="message">Free-text message to broadcast.</param>
         [HttpPost("test-broadcast")]
         [Authorize]
         public async Task<IActionResult> TestBroadcast([FromBody] string message)
@@ -74,6 +83,7 @@ namespace AVMTradeReporter.Controllers
             }
         }
 
+        /// <summary>Broadcasts a synthetic test trade to all connected SignalR clients, for verifying the trade event pipeline end to end.</summary>
         [HttpPost("test-trade")]
         [Authorize]
         public async Task<IActionResult> TestTrade()
@@ -109,6 +119,7 @@ namespace AVMTradeReporter.Controllers
             }
         }
 
+        /// <summary>Returns the current count and list of active SignalR hub subscriptions.</summary>
         [HttpGet("connections")]
         public IActionResult GetConnectionInfo()
         {

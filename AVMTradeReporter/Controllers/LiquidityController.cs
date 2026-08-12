@@ -1,12 +1,14 @@
 using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace AVMTradeReporter.Controllers
 {
     [ApiController]
     [Route("api/liquidity")]
+    [Authorize]
     public class LiquidityController : ControllerBase
     {
         private readonly ILiquidityQueryService _liquidityQueryService;

@@ -6,6 +6,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>3c09cc44-8adb-4f2e-aa9f-d4eca1ff5e7b</UserSecretsId>
     <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- CS1591 (missing XML comment) is a warning-per-undocumented-public-member; we document
+         controllers/actions deliberately but don't want it to fail the build for incidental
+         public members (DTOs, internal helper types marked public for DI, etc). -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

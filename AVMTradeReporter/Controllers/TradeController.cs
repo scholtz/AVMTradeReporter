@@ -2,12 +2,14 @@ using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Model.DTO;
 using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace AVMTradeReporter.Controllers
 {
     [ApiController]
     [Route("api/trade")]
+    [Authorize]
     public class TradeController : ControllerBase
     {
         private readonly ITradeQueryService _tradeQueryService;
