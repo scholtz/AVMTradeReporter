@@ -22,8 +22,12 @@ namespace AVMTradeReporter.Services
         /// stored quote the rate is inverted, swapping the roles of high and low.
         /// Returns null when the candle cannot anchor a sane price (missing/non-positive OHLC
         /// components, non-positive anchor, or the asset not being part of the pair).
+        /// When <paramref name="wickBandFactor"/> is &gt; 1, the rebuilt High/Low are clamped
+        /// into [min(open,close)/factor, max(open,close)×factor]: historical pair candles carry
+        /// occasional off-market dust prints in their wicks (a stale ALGO/USDC pool printed
+        /// 9.11 against a ~0.093 body), and those must not resurface in the rebuilt USD series.
         /// </summary>
-        public static OHLC? RebuildUsdCandle(ulong assetId, ulong usdReferenceAssetId, OHLC assetCandle, decimal anchorUsdPrice, DateTimeOffset lastUpdated)
+        public static OHLC? RebuildUsdCandle(ulong assetId, ulong usdReferenceAssetId, OHLC assetCandle, decimal anchorUsdPrice, DateTimeOffset lastUpdated, decimal wickBandFactor = 0m)
         {
             if (anchorUsdPrice <= 0) return null;
             if (assetCandle.Open is not > 0 || assetCandle.High is not > 0 || assetCandle.Low is not > 0 || assetCandle.Close is not > 0) return null;
@@ -48,6 +52,12 @@ namespace AVMTradeReporter.Services
             else
             {
                 return null;
+            }
+
+            if (wickBandFactor > 1m)
+            {
+                high = Math.Min(high, Math.Max(open, close) * wickBandFactor);
+                low = Math.Max(low, Math.Min(open, close) / wickBandFactor);
             }
 
             return new OHLC

@@ -140,32 +140,104 @@ namespace AVMTradeReporterTests.Services
         }
 
         [Test]
-        public void BuildForwardFilledCloses_FillsGapsWithLastKnownClose_UpToNow()
+        public void ForwardFillCloses_FillsRequestedKeysWithLastKnownClose()
         {
-            long Hour(string iso) => DateTimeOffset.Parse(iso).ToUnixTimeSeconds() / 3600;
-            var h0 = Hour("2026-08-11T10:00:00Z");
+            // Bucket keys are bucket-start unix seconds, so the fill works for ANY interval —
+            // including weeks and calendar months, where buckets are not arithmetically spaced.
+            long Key(string iso) => DateTimeOffset.Parse(iso).ToUnixTimeSeconds();
+            var k0 = Key("2026-08-11T10:00:00Z");
+            var k1 = Key("2026-08-11T11:00:00Z");
+            var k2 = Key("2026-08-11T12:00:00Z");
+            var k3 = Key("2026-08-11T13:00:00Z");
             var candles = new Dictionary<long, OHLC>
             {
-                [h0] = AssetCandle(0UL, Usdc, 0.09m, 0.09m, 0.09m, 0.09m, 1m, 1m),
-                [h0 + 3] = AssetCandle(0UL, Usdc, 0.08m, 0.08m, 0.08m, 0.08m, 1m, 1m),
+                [k0] = AssetCandle(0UL, Usdc, 0.09m, 0.09m, 0.09m, 0.09m, 1m, 1m),
+                [k3] = AssetCandle(0UL, Usdc, 0.08m, 0.08m, 0.08m, 0.08m, 1m, 1m),
             };
 
-            var closes = OhlcUsdRepairService.BuildForwardFilledCloses(candles, DateTimeOffset.Parse("2026-08-11T15:30:00Z"));
+            var closes = OhlcUsdRepairService.ForwardFillCloses(candles, new[] { k0 - 3600, k0, k1, k2, k3, k3 + 3600 });
 
-            Assert.That(closes[h0], Is.EqualTo(0.09m));
-            Assert.That(closes[h0 + 1], Is.EqualTo(0.09m), "gap hours carry the last close forward");
-            Assert.That(closes[h0 + 2], Is.EqualTo(0.09m));
-            Assert.That(closes[h0 + 3], Is.EqualTo(0.08m));
-            Assert.That(closes[h0 + 5], Is.EqualTo(0.08m), "fill extends to the current hour");
-            Assert.That(closes.ContainsKey(h0 - 1), Is.False, "no anchor exists before the first candle");
-            Assert.That(closes.ContainsKey(h0 + 6), Is.False, "fill stops at the current hour");
+            Assert.That(closes.ContainsKey(k0 - 3600), Is.False, "no anchor exists before the first candle");
+            Assert.That(closes[k0], Is.EqualTo(0.09m));
+            Assert.That(closes[k1], Is.EqualTo(0.09m), "gap buckets carry the last close forward");
+            Assert.That(closes[k2], Is.EqualTo(0.09m));
+            Assert.That(closes[k3], Is.EqualTo(0.08m));
+            Assert.That(closes[k3 + 3600], Is.EqualTo(0.08m), "fill extends past the last candle");
         }
 
         [Test]
-        public void BuildForwardFilledCloses_EmptyInput_ReturnsEmpty()
+        public void ForwardFillCloses_EmptyInput_ReturnsEmpty()
         {
-            var closes = OhlcUsdRepairService.BuildForwardFilledCloses(new Dictionary<long, OHLC>(), DateTimeOffset.UtcNow);
+            var closes = OhlcUsdRepairService.ForwardFillCloses(new Dictionary<long, OHLC>(), new[] { 1L, 2L });
             Assert.That(closes, Is.Empty);
+        }
+
+        [Test]
+        public void WickBand_ClampsOutlierHighAndLow_ToBandAroundBody()
+        {
+            // Historical pair candles can carry a handful of genuine off-market dust prints in
+            // their High/Low (a stale ALGO/USDC pool printed 9.11 while the candle body sat at
+            // ~0.093). The rebuild clamps wicks into ±band around the candle body (open/close)
+            // so those prints cannot resurface in the rebuilt USD series.
+            var candle = AssetCandle(5UL, Usdc, o: 2m, h: 30m, l: 0.1m, c: 2.5m, volBase: 100m, volQuote: 250m);
+
+            var usd = OhlcUsdRepairMath.RebuildUsdCandle(5UL, Usdc, candle, anchorUsdPrice: 1m, Updated, wickBandFactor: 1.5m);
+
+            Assert.That(usd, Is.Not.Null);
+            Assert.That(usd!.Open, Is.EqualTo(2m));
+            Assert.That(usd.Close, Is.EqualTo(2.5m));
+            Assert.That(usd.High, Is.EqualTo(2.5m * 1.5m), "high clamped to max(open, close) × band");
+            Assert.That(usd.Low, Is.EqualTo(2m / 1.5m), "low clamped to min(open, close) / band");
+        }
+
+        [Test]
+        public void WickBand_LeavesInBandWicksUntouched_OnBothPaths()
+        {
+            var direct = AssetCandle(5UL, Usdc, o: 2m, h: 2.6m, l: 1.8m, c: 2.5m, volBase: 100m, volQuote: 250m);
+            var usdDirect = OhlcUsdRepairMath.RebuildUsdCandle(5UL, Usdc, direct, 1m, Updated, wickBandFactor: 1.5m);
+            Assert.That(usdDirect!.High, Is.EqualTo(2.6m));
+            Assert.That(usdDirect.Low, Is.EqualTo(1.8m));
+
+            // Inverted path: stored (USDC, X) candle with an absurd stored high → X's low after
+            // inversion; the clamp must apply to the REBUILT orientation.
+            const ulong X = 999999999UL;
+            var inverted = AssetCandle(Usdc, X, o: 4m, h: 400m, l: 2m, c: 2.5m, volBase: 1000m, volQuote: 3000m);
+            var usdInv = OhlcUsdRepairMath.RebuildUsdCandle(X, Usdc, inverted, 1m, Updated, wickBandFactor: 1.5m);
+            // Rebuilt body: open 0.25, close 0.4 → low bound 0.25/1.5; stored high 400 inverts
+            // to low 0.0025, far below the bound.
+            Assert.That(usdInv!.High, Is.EqualTo(0.5m), "in-band high stays");
+            Assert.That(usdInv.Low, Is.EqualTo(0.25m / 1.5m), "outlier low clamped after inversion");
+        }
+
+        [Test]
+        public void WickBand_ZeroFactor_DisablesClamping()
+        {
+            var candle = AssetCandle(5UL, Usdc, o: 2m, h: 30m, l: 0.1m, c: 2.5m, volBase: 100m, volQuote: 250m);
+            var usd = OhlcUsdRepairMath.RebuildUsdCandle(5UL, Usdc, candle, 1m, Updated, wickBandFactor: 0m);
+            Assert.That(usd!.High, Is.EqualTo(30m));
+            Assert.That(usd.Low, Is.EqualTo(0.1m));
+        }
+
+        [Test]
+        public void RepairPlan_CoversEveryStoredInterval_NotJustOneHour()
+        {
+            // The 2026-08-11 repair only rebuilt 1h candles: every other interval (1m…1M) kept
+            // serving ValueUSD-polluted candles to the charts — the 4h chart stayed "stripy".
+            var config = new AVMTradeReporter.Model.Configuration.OhlcRepairConfiguration();
+
+            var plan = OhlcUsdRepairService.GetRepairPlan(config);
+
+            var expected = AVMTradeReporter.Repository.OHLCRepository.Intervals.Select(i => i.code).ToList();
+            Assert.That(plan.Select(p => p.Interval), Is.EquivalentTo(expected));
+
+            foreach (var step in plan)
+            {
+                var isFine = step.Interval is "1m" or "5m" or "15m";
+                Assert.That(step.Window, Is.EqualTo(TimeSpan.FromDays(isFine ? config.FineWindowDays : config.CoarseWindowDays)),
+                    $"interval {step.Interval} must use the {(isFine ? "fine" : "coarse")} rebuild window");
+            }
+            Assert.That(config.CoarseWindowDays, Is.GreaterThanOrEqualTo(220),
+                "USD candles have existed since 2026-01-17 — the coarse window must reach back over the whole polluted span");
         }
     }
 }

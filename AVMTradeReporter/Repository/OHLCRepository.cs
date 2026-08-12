@@ -23,6 +23,7 @@ namespace AVMTradeReporter.Repository
         private readonly IAssetRepository? _assetRepository;
         private readonly ulong _usdReferenceAssetId;
         private readonly HashSet<ulong> _trustedAssetIds;
+        private readonly decimal _trustedPriceBandFactor;
         private readonly IHubContext<BiatecScanHub>? _hubContext;
 
         internal static readonly (string code, TimeSpan span)[] Intervals = new[]
@@ -47,6 +48,7 @@ namespace AVMTradeReporter.Repository
             // ALGO and the USD reference asset are always trusted anchors, same as in
             // AggregatedPoolRepository's Real TVL calculation.
             _trustedAssetIds = new HashSet<ulong>(config.TrustedReferenceAssetIds) { 0UL, config.UsdReferenceAssetId };
+            _trustedPriceBandFactor = config.OhlcTrustedPriceBandFactor;
             _hubContext = hubContext;
             CreateTemplateAsync().Wait();
         }
@@ -178,6 +180,22 @@ namespace AVMTradeReporter.Repository
                 ? adjustedVolBase * anchorPriceA.Value / adjustedVolQuote
                 : null;
 
+            // Outlier guard for TRUSTED assets (see AppConfiguration.OhlcTrustedPriceBandFactor):
+            // trades in stale/near-empty pools execute at rates 2-100x away from the market and a
+            // single such print permanently becomes a bucket's High/Low ("stripy" charts — ALGO
+            // charted $9.15 highs from a stale pool while trading at $0.08). A trusted asset's
+            // cached PriceUSD is authoritative, so prints outside the band around it are dropped
+            // (price AND volume — the trade's USD value is equally bogus). Untrusted assets keep
+            // every print: their cached price may itself be wrong, and the trusted counter leg is
+            // the only reliable way to (re)price them.
+            decimal? cachedPriceA = TrustedCachedPrice(aId, assetA);
+            decimal? cachedPriceB = TrustedCachedPrice(bId, assetB);
+            if (usdPriceBase.HasValue && IsOutsideTrustedBand(usdPriceBase.Value, cachedPriceA)) usdPriceBase = null;
+            if (usdPriceQuote.HasValue && IsOutsideTrustedBand(usdPriceQuote.Value, cachedPriceB)) usdPriceQuote = null;
+            var pairRateOffMarket = cachedPriceA.HasValue && cachedPriceB.HasValue
+                && IsOutsideTrustedBand(price, cachedPriceA.Value / cachedPriceB.Value);
+            if (pairRateOffMarket && usdPriceBase == null && usdPriceQuote == null) return result;
+
             var ts = trade.Timestamp.Value.ToUniversalTime();
             foreach (var (code, span) in Intervals)
             {
@@ -217,6 +235,24 @@ namespace AVMTradeReporter.Repository
             if (assetId == _usdReferenceAssetId) return 1m;
             if (!_trustedAssetIds.Contains(assetId)) return null;
             return asset?.PriceUSD > 0 ? asset.PriceUSD : null;
+        }
+
+        /// <summary>
+        /// The band-guard reference price for <paramref name="assetId"/>'s own candles: only
+        /// trusted assets have one (their cached PriceUSD is authoritative); untrusted assets
+        /// return null and are never guarded by their own — possibly garbage — cached price.
+        /// </summary>
+        private decimal? TrustedCachedPrice(ulong assetId, BiatecAsset? asset) => GetTrustedAnchorPrice(assetId, asset);
+
+        /// <summary>
+        /// True when the guard is enabled, a reference exists, and <paramref name="price"/> is
+        /// outside [reference/factor, reference×factor].
+        /// </summary>
+        private bool IsOutsideTrustedBand(decimal price, decimal? referencePrice)
+        {
+            if (_trustedPriceBandFactor <= 1m || referencePrice is not > 0) return false;
+            return price > referencePrice.Value * _trustedPriceBandFactor
+                || price < referencePrice.Value / _trustedPriceBandFactor;
         }
 
         /// <summary>

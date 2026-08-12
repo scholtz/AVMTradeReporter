@@ -116,6 +116,18 @@ namespace AVMTradeReporter.Model.Configuration
         };
 
         /// <summary>
+        /// Outlier guard for OHLC candles of TRUSTED assets: a trade's print may only enter a
+        /// trusted asset's USD candle series (or the pair series of two trusted assets) when it
+        /// lies within [cached/factor, cached×factor] of the asset's cached PriceUSD. Trusted
+        /// assets' cached prices are depth-selected and continuously refreshed, so prints far
+        /// outside the band are stale-/dust-pool noise (e.g. ALGO charted at $9.15 from a stale
+        /// pool while trading at $0.08) rather than price discovery. Untrusted assets are never
+        /// guarded by their own cached price — the trusted counter leg stays their only price
+        /// authority. Values &lt;= 1 disable the guard. Default 1.5 (±50%).
+        /// </summary>
+        public decimal OhlcTrustedPriceBandFactor { get; set; } = 1.5m;
+
+        /// <summary>
         /// Display name of this deployment's native token (asset index 0), used for the synthesized
         /// native-token asset record. Each network/environment this service indexes has its own native
         /// token and its own name for it - e.g. "Algorand" on Algorand MainNet, "Testnet Algorand" on
@@ -268,6 +280,21 @@ namespace AVMTradeReporter.Model.Configuration
         /// hold the wrong network's TVL. Set to null to skip the TVL snapshot cleanup.
         /// </summary>
         public DateTimeOffset? TvlSnapshotCutoff { get; set; } = DateTimeOffset.Parse("2026-08-09T15:00:00Z");
+
+        /// <summary>
+        /// How far back the repair rebuilds the coarse USD series (1h, 4h, 1d, 1w, 1M). USD
+        /// candles have existed since 2026-01-17, so the default covers the entire span polluted
+        /// by ValueUSD-derived pricing (the 2026-08-11 repair only rebuilt 1h × 8 days — every
+        /// other interval kept serving polluted candles to the charts).
+        /// </summary>
+        public int CoarseWindowDays { get; set; } = 250;
+
+        /// <summary>
+        /// How far back the repair rebuilds the fine USD series (1m, 5m, 15m). Kept shorter than
+        /// the coarse window: rebuilding minute candles over the full history would mean tens of
+        /// millions of bulk writes, and charts only surface fine intervals for recent ranges.
+        /// </summary>
+        public int FineWindowDays { get; set; } = 40;
     }
 
     public class GossipDiscoveryConfiguration
