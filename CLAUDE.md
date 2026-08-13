@@ -1,5 +1,34 @@
 # Project notes for Claude
 
+## Adding [Authorize] to a controller: check the charting widget's dependency first
+
+`../biatec-charting-widget` is a *separate*, unauthenticated browser client
+(embedded as an iframe via `/charts` — see this frontend repo's
+`assetChartUrl()`/`chartsBaseUrl` in `../biatec-scan-web/src/config/env.ts`)
+with no ARC-14 signing capability: it can only call endpoints that stay
+`[AllowAnonymous]`. It depends on `GET /api/asset` (asset id → ticker/symbol
+resolution, `getAllSymbols()` in `biatec-charting-widget/src/datafeed.ts`)
+in addition to the already-obviously-public `GET /api/OHLC/*` datafeed
+endpoints and `GET /api/asset/image/{assetId}`.
+
+2026-08-13 incident: the 2026-08-12 "secure remaining public endpoints"
+commit added a controller-level `[Authorize]` to `AssetController` without
+noticing the charting widget's dependency on `GET /api/asset`. Every mainnet
+chart silently fell back to its hardcoded default symbol ("ALGORANDUSD")
+with all-zero OHLC values, because `getAllSymbols()`'s anonymous fetch
+started failing and `main.ts` swallows that error. Fixed by adding
+`[AllowAnonymous]` back to `AssetController.GetAssets` specifically (not the
+whole controller — future new actions there should default to authenticated
+unless they have the same public/read-only justification). Regression test:
+`AVMTradeReporterTests/Controllers/AssetControllerAuthorizationTests.cs`
+(reflection-based — asserts the `[AllowAnonymous]` attribute is present,
+rather than spinning up a full authenticated host).
+
+**Rule going forward**: before adding `[Authorize]` to any controller/action
+under `api/asset`, `api/OHLC`, or anything else the charting widget might
+touch, grep `biatec-charting-widget/src/*.ts` for calls to that path first,
+and update `doc/description.md`'s public-endpoint list either way.
+
 ## HA deploys: a new pod must be fully warm before it ever gets traffic
 
 `Program.cs` blocks Kestrel's port bind on synchronously (`.Wait()`-ed)

@@ -29,6 +29,11 @@ namespace AVMTradeReporter.Controllers
 
         /// <summary>
         /// List assets from the in-memory cache (prefilled from Redis, with Elasticsearch fallback) or filter by IDs / search term.
+        /// Intentionally public (no authentication required): the TradingView charting widget
+        /// (biatec-charting-widget, a separate unauthenticated browser client with no ARC-14 signing
+        /// capability) resolves an asset id to its ticker/symbol via this endpoint with a plain
+        /// fetch. Same public/read-only trust level as the asset image endpoint and the OHLC
+        /// controller below, which stayed public for the same reason.
         /// </summary>
         /// <param name="ids">Comma separated list of asset IDs to include. Missing IDs will be fetched on-demand.</param>
         /// <param name="search">Case-insensitive substring filter applied to asset name or unit name. Special case: utility returns utility tokens. Special case: stable returns the assets with stabilityIndex > 0.</param>
@@ -36,6 +41,7 @@ namespace AVMTradeReporter.Controllers
         /// <param name="size">Maximum number of results to return (default 100, max 500).</param>
         /// <returns>List of matching assets with basic metadata.</returns>
         [HttpGet]
+        [AllowAnonymous]
         [ProducesResponseType(typeof(IEnumerable<BiatecAsset>), 200)]
         public async Task<ActionResult<IEnumerable<BiatecAsset>>> GetAssets([FromQuery] string? ids = null, [FromQuery] string? search = null, [FromQuery] int offset = 0, [FromQuery] int size = 100)
         {
