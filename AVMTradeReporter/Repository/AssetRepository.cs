@@ -3,6 +3,7 @@ using Algorand.KMD;
 using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Processors.Pool;
+using Elastic.Clients.Elasticsearch;
 using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
 using System.Collections.Concurrent;
@@ -24,7 +25,9 @@ namespace AVMTradeReporter.Repository
         private static bool _initialized = false;
         private static readonly SemaphoreSlim _initLock = new(1, 1);
         private const string RedisKeyBase = "asset:";
+        private const string AssetsIndexName = "assets";
         private readonly AppConfiguration? _appConfig;
+        private readonly ElasticsearchClient? _elasticClient;
         private string RedisKeyPrefix => (_appConfig?.Redis?.EnvironmentKeyPrefix ?? string.Empty) + RedisKeyBase;
 
         public AssetRepository(
@@ -32,13 +35,25 @@ namespace AVMTradeReporter.Repository
             ILogger<AssetRepository> logger,
             IDatabase? redisDatabase = null,
             IHubContext<BiatecScanHub>? hubContext = null,
-            IOptions<AppConfiguration>? appConfig = null)
+            IOptions<AppConfiguration>? appConfig = null,
+            ElasticsearchClient? elasticClient = null)
         {
             _algod = algod;
             _logger = logger;
             _redisDatabase = redisDatabase;
             _hubContext = hubContext;
             _appConfig = appConfig?.Value;
+            _elasticClient = elasticClient;
+        }
+
+        /// <summary>
+        /// Clears the static in-memory asset cache and initialization flag. Test-only:
+        /// simulates a process restart so hydration-from-durable-store paths can be exercised.
+        /// </summary>
+        internal static void ResetForTests()
+        {
+            _assetCache.Clear();
+            _initialized = false;
         }
 
         private void EnsureStabilityIndexInitialized(BiatecAsset asset)
@@ -65,6 +80,7 @@ namespace AVMTradeReporter.Repository
             try
             {
                 if (_initialized) return;
+                int loadedFromRedis = 0;
                 if (_redisDatabase != null)
                 {
                     _logger.LogInformation("Loading assets from Redis into memory cache...");
@@ -73,7 +89,6 @@ namespace AVMTradeReporter.Repository
                         var server = GetServer();
                         if (server != null)
                         {
-                            int loaded = 0;
                             var prefix = RedisKeyPrefix;
                             foreach (var key in server.Keys(pattern: prefix + "*"))
                             {
@@ -98,7 +113,7 @@ namespace AVMTradeReporter.Repository
                                             }
                                             EnsureStabilityIndexInitialized(asset);
                                             _assetCache[asset.Index] = asset;
-                                            loaded++;
+                                            loadedFromRedis++;
                                         }
                                     }
                                     catch (Exception ex)
@@ -107,12 +122,56 @@ namespace AVMTradeReporter.Repository
                                     }
                                 }
                             }
-                            _logger.LogInformation("Loaded {count} assets from Redis into memory cache", loaded);
+                            _logger.LogInformation("Loaded {count} assets from Redis into memory cache", loadedFromRedis);
                         }
                     }
                     catch (Exception ex)
                     {
                         _logger.LogError(ex, "Error while loading assets from Redis");
+                    }
+                }
+
+                // HA fallback (same pattern as PoolRepository.InitializeAsync): when Redis is
+                // disabled, empty, or freshly restarted, hydrate the cache from the durable
+                // Elasticsearch "assets" index instead - otherwise every pod restart wipes the
+                // token list until live trades slowly re-populate it asset by asset.
+                if (loadedFromRedis == 0)
+                {
+                    try
+                    {
+                        var snapshots = await LoadSnapshotsFromElasticsearchAsync(cancellationToken);
+                        int loadedFromElastic = 0;
+                        foreach (var snapshot in snapshots)
+                        {
+                            try
+                            {
+                                var asset = JsonSerializer.Deserialize<BiatecAsset>(snapshot.Json);
+                                if (asset == null) continue;
+                                asset.Timestamp ??= snapshot.Updated;
+                                EnsureStabilityIndexInitialized(asset);
+                                // TryAdd, not overwrite: a live update that landed while this scan
+                                // was running is fresher than any durable snapshot.
+                                if (_assetCache.TryAdd(asset.Index, asset)) loadedFromElastic++;
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Failed to deserialize asset snapshot {id} from Elasticsearch", snapshot.Id);
+                            }
+                        }
+                        _logger.LogInformation("Loaded {count} assets from Elasticsearch into memory cache", loadedFromElastic);
+
+                        // Repopulate Redis for the next restart when it is enabled but was empty.
+                        if (loadedFromElastic > 0 && _redisDatabase != null)
+                        {
+                            foreach (var asset in _assetCache.Values)
+                            {
+                                await PersistToRedisAsync(asset, cancellationToken);
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error while hydrating assets from Elasticsearch");
                     }
                 }
                 _initialized = true;
@@ -202,6 +261,7 @@ namespace AVMTradeReporter.Repository
                 };
                 _assetCache[assetId] = tombstone;
                 await PersistToRedisAsync(tombstone, cancellationToken);
+                await PersistToElasticsearchAsync(tombstone, cancellationToken);
                 return null;
             }
             catch (Exception ex)
@@ -230,6 +290,7 @@ namespace AVMTradeReporter.Repository
             }
             await EnsureInitializedAsync(cancellationToken);
             await PersistToRedisAsync(asset, cancellationToken);
+            await PersistToElasticsearchAsync(asset, cancellationToken);
             await PublishToHubAsync(asset, cancellationToken);
         }
 
@@ -330,6 +391,72 @@ namespace AVMTradeReporter.Repository
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to persist asset {AssetId} to Redis", asset.Index);
+            }
+        }
+
+        private async Task PersistToElasticsearchAsync(BiatecAsset asset, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var snapshot = new AssetSnapshot
+                {
+                    Id = asset.Index,
+                    Json = System.Text.Json.JsonSerializer.Serialize(asset),
+                    Updated = asset.Timestamp ?? DateTimeOffset.UtcNow,
+                };
+                await SaveSnapshotToElasticsearchAsync(snapshot, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to persist asset {AssetId} to Elasticsearch", asset.Index);
+            }
+        }
+
+        /// <summary>
+        /// Writes one asset snapshot document to the "assets" Elasticsearch index. Virtual seam
+        /// so tests can substitute an in-memory store; failures are handled by the caller.
+        /// </summary>
+        internal virtual async Task SaveSnapshotToElasticsearchAsync(AssetSnapshot snapshot, CancellationToken cancellationToken)
+        {
+            if (_elasticClient == null) return;
+            var response = await _elasticClient.IndexAsync(snapshot, cancellationToken);
+            if (!response.IsValidResponse)
+            {
+                _logger.LogWarning("Failed to index asset snapshot {AssetId}: {error}", snapshot.Id, response.DebugInformation);
+            }
+        }
+
+        /// <summary>
+        /// Loads all asset snapshot documents from the "assets" Elasticsearch index. Virtual seam
+        /// so tests can substitute an in-memory store. Returns an empty collection when
+        /// Elasticsearch is unavailable or the index does not exist yet (first boot after this
+        /// feature ships) - hydration is best-effort, never a startup hard dependency.
+        /// </summary>
+        internal virtual async Task<IReadOnlyCollection<AssetSnapshot>> LoadSnapshotsFromElasticsearchAsync(CancellationToken cancellationToken)
+        {
+            if (_elasticClient == null) return Array.Empty<AssetSnapshot>();
+            try
+            {
+                var response = await _elasticClient.SearchAsync<AssetSnapshot>(s => s
+                    .Indices(AssetsIndexName)
+                    .Size(10000), cancellationToken);
+                if (response.IsValidResponse)
+                {
+                    if (response.Documents.Count == 10000)
+                    {
+                        _logger.LogWarning("Asset snapshot hydration hit the 10000 document search window; some assets will be re-fetched on demand");
+                    }
+                    return response.Documents;
+                }
+                _logger.LogWarning("Failed to load asset snapshots from Elasticsearch: {error}", response.DebugInformation);
+                return Array.Empty<AssetSnapshot>();
+            }
+            catch (Exception ex)
+            {
+                // The client is configured with ThrowExceptions(); a missing "assets" index on the
+                // very first boot after this feature ships lands here and is expected.
+                _logger.LogWarning(ex, "Could not load asset snapshots from Elasticsearch (expected on first boot before any asset was persisted)");
+                return Array.Empty<AssetSnapshot>();
             }
         }
     }

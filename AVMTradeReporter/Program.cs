@@ -214,6 +214,9 @@ namespace AVMTradeReporter
                 .DefaultMappingFor<Models.Data.AssetStat>(m => m
                     .IndexName("assetstats")
                     .IdProperty(t => t.Id))
+                .DefaultMappingFor<Models.Data.AssetSnapshot>(m => m
+                    .IndexName("assets")
+                    .IdProperty(t => t.Id))
                 ;
 
                 return new ElasticsearchClient(settings);
