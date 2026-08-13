@@ -59,10 +59,6 @@ namespace AVMTradeReporterTests.Repository
                 CreatePool("issue18-pool-mid", BASE, ASSET_MID, 100m, 100m, 500m, now.AddMinutes(-2)),
             };
             await repository.InitializeFromExistingPoolsAsync(pools);
-            // InitializeFromExistingPoolsAsync re-stores the aggregates in a fire-and-forget background
-            // task that can change the cached orientation of a pair; wait for it to settle so that
-            // repeated queries within a test see a stable cache.
-            await Task.Delay(250);
             return repository;
         }
 

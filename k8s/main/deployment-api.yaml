@@ -8,6 +8,17 @@ spec:
     matchLabels:
       app: avm-trade-reporter-app
   replicas: 1
+  # Explicit zero-downtime rollout: surge a second pod running the new image and wait for it to
+  # pass readiness (which, with startupProbe/readinessProbe above, only happens once every static
+  # cache is fully warm) before the old pod is torn down - maxUnavailable: 0 forbids ever dropping
+  # to zero ready pods. minReadySeconds adds a short soak so a pod that flaps right after passing
+  # readiness doesn't get treated as available.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  minReadySeconds: 15
   template:
     metadata:
       labels:
@@ -30,19 +41,35 @@ spec:
           envFrom:
             - secretRef:
                 name: avm-trade-reporter-secret
+          # Startup can legitimately take minutes: Program.cs blocks Kestrel's port bind on
+          # loading/hydrating every static in-memory cache (assets, pools, aggregated pools incl.
+          # their derived PriceUSD/TVL/PoolsCount/Volume figures) so a freshly-rolled pod never
+          # looks "ready" to Kubernetes with incomplete data. While that TCP port is closed,
+          # readiness/livenessProbe below would otherwise see the same signal and, without a
+          # startupProbe, the liveness probe's short initialDelaySeconds/failureThreshold could
+          # kill the pod mid-warmup - producing an endless restart loop that never finishes
+          # preloading. startupProbe suppresses liveness/readiness checks until it passes once.
+          startupProbe:
+            tcpSocket:
+              port: 8080
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 90 # up to ~7.5 minutes to finish warmup before liveness can kill it
           readinessProbe:
             tcpSocket:
               port: 8080
-            initialDelaySeconds: 10
+            periodSeconds: 5
             timeoutSeconds: 5
             failureThreshold: 2
           livenessProbe:
             tcpSocket:
               port: 8080
-            initialDelaySeconds: 20
+            periodSeconds: 10
             timeoutSeconds: 5
-            failureThreshold: 2
-            terminationGracePeriodSeconds: 1
+            failureThreshold: 3
+            # Give in-flight requests/SignalR connections/background tasks a real chance to drain
+            # on a liveness failure instead of an instant SIGKILL (was 1s).
+            terminationGracePeriodSeconds: 30
           volumeMounts:
             - name: avm-trade-reporter-main-conf
               mountPath: /app/appsettings.json

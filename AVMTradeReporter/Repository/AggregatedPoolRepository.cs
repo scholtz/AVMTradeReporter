@@ -85,7 +85,7 @@ namespace AVMTradeReporter.Repository
             _logger.LogInformation("AggregatedPool index template created: {ok}", response.IsValidResponse);
         }
 
-        public Task InitializeFromExistingPoolsAsync(IEnumerable<Models.Data.Pool> pools, CancellationToken cancellationToken = default)
+        public async Task InitializeFromExistingPoolsAsync(IEnumerable<Models.Data.Pool> pools, CancellationToken cancellationToken = default)
         {
             try
             {
@@ -95,28 +95,31 @@ namespace AVMTradeReporter.Repository
                     _cache[(agg.AssetIdA, agg.AssetIdB)] = agg;
                 }
 
-                // Store and publish in background
-                _ = Task.Run(async () =>
+                // Store, publish and (critically) recompute derived asset PriceUSD/TVL/PoolsCount/
+                // Volume figures - this used to run as a fire-and-forget Task.Run, which let
+                // Program.cs's startup Wait() (and therefore Kestrel's port bind / the readiness
+                // probe) return before the Assets page's numbers were actually warm. That let a
+                // freshly-rolled pod pass its readiness check and receive production traffic while
+                // still serving zero/stale asset stats, breaking the "new pod looks identical to the
+                // old one" requirement for unnoticed HA deploys. Must be awaited here so the caller
+                // (PoolRepository.InitializeAsync, blocking-awaited from Program.cs before the app
+                // starts listening) cannot return until every asset stat is fully caught up.
+                foreach (var agg in aggregates)
                 {
-                    foreach (var agg in aggregates)
+                    var send = agg;
+                    if (agg.AssetIdA > agg.AssetIdB)
                     {
-                        var send = agg;
-                        if (agg.AssetIdA > agg.AssetIdB)
-                        {
-                            // Ensure consistent order for the pair
-                            send = agg.Reverse();
-                        }
-                        await StoreAggregatedPoolAsync(send, cancellationToken);
-                        await PublishToHubAsync(send, cancellationToken);
+                        // Ensure consistent order for the pair
+                        send = agg.Reverse();
                     }
-                }, cancellationToken);
+                    await StoreAggregatedPoolAsync(send, cancellationToken);
+                    await PublishToHubAsync(send, cancellationToken);
+                }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to initialize AggregatedPool cache");
             }
-
-            return Task.CompletedTask;
         }
 
         public async Task UpdateForPairAsync(ulong assetIdA, ulong assetIdB, IEnumerable<Models.Data.Pool> poolsForPair, CancellationToken cancellationToken = default)

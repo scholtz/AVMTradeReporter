@@ -8,6 +8,13 @@ spec:
     matchLabels:
       app: avm-trade-reporter2-app
   replicas: 0
+  # See k8s/main/deployment-api.yaml for why this matters (only takes effect once replicas > 0).
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  minReadySeconds: 15
   template:
     metadata:
       labels:
@@ -30,19 +37,27 @@ spec:
           envFrom:
             - secretRef:
                 name: avm-trade-reporter2-secret
+          # See k8s/main/deployment-api.yaml for why a startupProbe is required: startup blocks on
+          # full cache warmup and must not be killed mid-warmup by a short-fused liveness probe.
+          startupProbe:
+            tcpSocket:
+              port: 8080
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 90
           readinessProbe:
             tcpSocket:
               port: 8080
-            initialDelaySeconds: 10
+            periodSeconds: 5
             timeoutSeconds: 5
             failureThreshold: 2
           livenessProbe:
             tcpSocket:
               port: 8080
-            initialDelaySeconds: 20
+            periodSeconds: 10
             timeoutSeconds: 5
-            failureThreshold: 2
-            terminationGracePeriodSeconds: 1
+            failureThreshold: 3
+            terminationGracePeriodSeconds: 30
           volumeMounts:
             - name: avm-trade-reporter-main-conf
               mountPath: /app/appsettings.json

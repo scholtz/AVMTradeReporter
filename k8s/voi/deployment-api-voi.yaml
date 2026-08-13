@@ -15,6 +15,14 @@ spec:
     matchLabels:
       app: avm-trade-reporter-voi-app
   replicas: 1
+  # See k8s/main/deployment-api.yaml for why this matters: zero-downtime rollout, wait for full
+  # cache warmup via readinessProbe before killing the old pod.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  minReadySeconds: 15
   template:
     metadata:
       labels:
@@ -40,19 +48,27 @@ spec:
             # .github/workflows/promote-production.yml.
             - secretRef:
                 name: avm-trade-reporter-voi-secret
+          # See k8s/main/deployment-api.yaml for why a startupProbe is required: startup blocks on
+          # full cache warmup and must not be killed mid-warmup by a short-fused liveness probe.
+          startupProbe:
+            tcpSocket:
+              port: 8080
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 90
           readinessProbe:
             tcpSocket:
               port: 8080
-            initialDelaySeconds: 10
+            periodSeconds: 5
             timeoutSeconds: 5
             failureThreshold: 2
           livenessProbe:
             tcpSocket:
               port: 8080
-            initialDelaySeconds: 20
+            periodSeconds: 10
             timeoutSeconds: 5
-            failureThreshold: 2
-            terminationGracePeriodSeconds: 1
+            failureThreshold: 3
+            terminationGracePeriodSeconds: 30
           volumeMounts:
             - name: avm-trade-reporter-voi-main-conf
               mountPath: /app/appsettings.json
