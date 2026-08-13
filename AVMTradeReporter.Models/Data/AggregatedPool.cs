@@ -66,6 +66,20 @@ namespace AVMTradeReporter.Models.Data
         public decimal TVL_B { get; set; }
 
         /// <summary>
+        /// Sum of locked asset A across only the pools that contributed to price discovery (excludes
+        /// price walls and out-of-range/depleted CLAMM pools - see Pool.IsDepletedSingleSided). Route
+        /// selection (AggregatedPoolRepository.SelectAssetUsdPrice) must use this, not TVL_A, as its
+        /// depth measure: TVL_A/TVL_B legitimately count all real locked value including single-sided
+        /// out-of-range positions, but that value cannot be traded against the other asset at anywhere
+        /// near the current price, so it must not make a route look deeper than it really is.
+        /// </summary>
+        public decimal TVL_A_ForPrice { get; set; }
+        /// <summary>
+        /// Sum of locked asset B across only the pools that contributed to price discovery. See TVL_A_ForPrice.
+        /// </summary>
+        public decimal TVL_B_ForPrice { get; set; }
+
+        /// <summary>
         /// Number of pools aggregated into this result.
         /// </summary>
         public int PoolCount { get; set; }
@@ -189,14 +203,18 @@ namespace AVMTradeReporter.Models.Data
                 // remaining pools, then include in the price sums only pools whose [PMin, PMax] range contains
                 // that price. Out-of-range pools hold all liquidity on one side (orders waiting to be reached)
                 // and would otherwise skew the aggregated price by their depth.
-                var priceDiscoveryPools = groupPools.Where(p => !p.HasZeroWidthPriceRange).ToList();
+                var priceDiscoveryPools = groupPools.Where(p => !p.HasZeroWidthPriceRange && !p.IsDepletedSingleSided).ToList();
+                if (priceDiscoveryPools.Count == 0) priceDiscoveryPools = groupPools.Where(p => !p.IsDepletedSingleSided).ToList();
                 if (priceDiscoveryPools.Count == 0) priceDiscoveryPools = groupPools;
                 var poolsForPrice = priceDiscoveryPools;
                 var preliminarySumA = priceDiscoveryPools.Sum(p => p.VirtualAmountAForPrice);
                 if (preliminarySumA > 0)
                 {
                     var preliminaryPrice = priceDiscoveryPools.Sum(p => p.VirtualAmountBForPrice) / preliminarySumA;
-                    var inRangePools = groupPools.Where(p => p.IsPriceWithinRange(preliminaryPrice)).ToList();
+                    // Filtered from priceDiscoveryPools (not the raw group) so a wall/depleted pool that was
+                    // already excluded can never sneak back in just because the now-clean preliminary price
+                    // happens to fall inside its stale range.
+                    var inRangePools = priceDiscoveryPools.Where(p => p.IsPriceWithinRange(preliminaryPrice)).ToList();
                     if (inRangePools.Count > 0) poolsForPrice = inRangePools;
                 }
 
@@ -215,6 +233,8 @@ namespace AVMTradeReporter.Models.Data
                     Volume7D = g.Sum(p => p.Volume7D),
                     TVL_A = g.Sum(p => p.RealAmountA),
                     TVL_B = g.Sum(p => p.RealAmountB),
+                    TVL_A_ForPrice = poolsForPrice.Sum(p => p.RealAmountA),
+                    TVL_B_ForPrice = poolsForPrice.Sum(p => p.RealAmountB),
                     PoolCount = g.Count(),
                     LastUpdated = g.Max(p => p.Timestamp),
                     Level1Pools = new SortedSet<string>(g.Select(p => p.PoolAddress)),
@@ -330,6 +350,8 @@ namespace AVMTradeReporter.Models.Data
                 VirtualSumBLevel1ForPrice = VirtualSumALevel1ForPrice,
                 TVL_A = TVL_B,
                 TVL_B = TVL_A,
+                TVL_A_ForPrice = TVL_B_ForPrice,
+                TVL_B_ForPrice = TVL_A_ForPrice,
                 PoolCount = PoolCount,
                 LastUpdated = LastUpdated,
                 Level1Pools = Level1Pools,

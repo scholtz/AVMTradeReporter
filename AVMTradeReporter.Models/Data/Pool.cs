@@ -321,6 +321,33 @@ namespace AVMTradeReporter.Models.Data
         public bool HasZeroWidthPriceRange => PMin.HasValue && PMax.HasValue && PMin.Value == PMax.Value;
 
         /// <summary>
+        /// True for a concentrated-liquidity pool whose current tick sits so far outside its [PMin, PMax]
+        /// range that essentially all real liquidity has been converted to one side (the other side is
+        /// rounding dust). Unlike <see cref="HasZeroWidthPriceRange"/> walls, these pools have a genuine
+        /// two-sided range on paper, but right now they cannot fill a trade anywhere near their virtual
+        /// spot price - that price is just the range boundary they got pushed to, not a live market. Left
+        /// uncaught, such a pool both drags the aggregated price toward its stale boundary and inflates
+        /// route-selection "depth" with real balance that is not actually available to price the other
+        /// asset (GoldDAO production incident, 2026-08-13: two out-of-range Biatec CLAMM pools with ~63k
+        /// real ALGO and effectively 0 real GoldDAO made the ALGO route look deeper than the accurate
+        /// direct USDC pool, and their huge virtual liquidity pulled the ALGO-route price down to ~0.32
+        /// while every real two-sided pool agreed on ~0.90).
+        /// </summary>
+        public bool IsDepletedSingleSided
+        {
+            get
+            {
+                if (AMMType != Enums.AMMType.ConcentratedLiquidityAMM) return false;
+                if (HasZeroWidthPriceRange) return false; // handled separately as a price wall
+                var virtualA = VirtualAmountAForPrice;
+                var virtualB = VirtualAmountBForPrice;
+                if (virtualA <= 0 || virtualB <= 0) return false;
+                const decimal depletedRatio = 0.000001m; // real side < 0.0001% of that side's virtual liquidity
+                return RealAmountA / virtualA < depletedRatio || RealAmountB / virtualB < depletedRatio;
+            }
+        }
+
+        /// <summary>
         /// Returns true when the given price falls within this pool's price range [PMin, PMax].
         /// Pools without a bounded range (traditional AMMs with PMin = 0 / PMax = infinity or missing values)
         /// are considered always in range. Pools whose range does not contain the current market price hold

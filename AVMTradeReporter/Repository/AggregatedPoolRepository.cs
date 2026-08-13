@@ -247,7 +247,10 @@ namespace AVMTradeReporter.Repository
                 if (orient.AssetIdA == assetId && orient.VirtualSumALevel1ForPrice > 0 && orient.VirtualSumBLevel1ForPrice > 0)
                 {
                     directPrice = orient.VirtualSumBLevel1ForPrice.Value / orient.VirtualSumALevel1ForPrice.Value; // usdRef per asset
-                    directDepthUsd = orient.TVL_B; // real usdRef units ≈ USD
+                    // TVL_B_ForPrice (not TVL_B): depth must only count pools that actually voted on the
+                    // price above, or a wall/depleted out-of-range pool's real balance could make this route
+                    // look deeper than it tradeably is without ever influencing directPrice itself.
+                    directDepthUsd = orient.TVL_B_ForPrice; // real usdRef units ≈ USD
                 }
             }
 
@@ -260,7 +263,7 @@ namespace AVMTradeReporter.Repository
                 {
                     var algoPerAsset = orient.VirtualSumBLevel1ForPrice.Value / orient.VirtualSumALevel1ForPrice.Value;
                     algoRoutePrice = algoPerAsset * algoPriceUsd.Value; // USD per asset
-                    algoDepthUsd = orient.TVL_B * algoPriceUsd.Value; // real ALGO units × ALGO price
+                    algoDepthUsd = orient.TVL_B_ForPrice * algoPriceUsd.Value; // real ALGO units (price-voting pools only) × ALGO price
                 }
             }
 

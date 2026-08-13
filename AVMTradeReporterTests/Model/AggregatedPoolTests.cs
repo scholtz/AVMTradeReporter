@@ -105,6 +105,88 @@ namespace AVMTradeReporterTests.Model
         }
 
         [Test]
+        public void FromPools_ExcludesDepletedOutOfRangeClammPoolsFromPriceCalculation()
+        {
+            // Arrange - the real (0, GoldDAO) pool set from production, 2026-08-13. Two ordinary Pact
+            // pools agree on ~11.3 ALGO per GoldDAO. Two Biatec CLAMM pools have non-zero-width ranges
+            // (0.30-0.33 and 0.33-0.36) but sit fully out of range - virtually all their real liquidity is
+            // on the ALGO side, GoldDAO real balance is rounding dust (13 and 16926 out of a 1e9 scale).
+            // Unlike a PMin==PMax wall, these pass HasZeroWidthPriceRange, so before Pool.IsDepletedSingleSided
+            // existed they polluted the preliminary price enough to make each other look "in range" and
+            // pulled the final aggregated price down to ~0.25 (ALGO per GoldDAO) instead of ~11.3.
+            ulong algo = 0, goldDao = 1241945177;
+
+            var pactMain = new AVMTradeReporter.Models.Data.Pool // mainnet BH5HBWEB
+            {
+                AssetIdA = algo,
+                AssetADecimals = 6,
+                AssetIdB = goldDao,
+                AssetBDecimals = 6,
+                A = 32_592_052_481,
+                B = 2_879_549_864,
+                Protocol = DEXProtocol.Pact,
+                AMMType = AMMType.OldAMM,
+            };
+            var pactDust = new AVMTradeReporter.Models.Data.Pool // mainnet RPJ72TEI
+            {
+                AssetIdA = algo,
+                AssetADecimals = 6,
+                AssetIdB = goldDao,
+                AssetBDecimals = 6,
+                A = 221_239,
+                B = 19_764,
+                Protocol = DEXProtocol.Pact,
+                AMMType = AMMType.OldAMM,
+            };
+            var depletedClamm1 = new AVMTradeReporter.Models.Data.Pool // mainnet 3FXLX4X6
+            {
+                AssetIdA = algo,
+                AssetADecimals = 6,
+                AssetIdB = goldDao,
+                AssetBDecimals = 6,
+                PMin = 0.33m,
+                PMax = 0.36m,
+                A = 58_651_744_442_000,
+                B = 13_000,
+                Protocol = DEXProtocol.Biatec,
+                AMMType = AMMType.ConcentratedLiquidityAMM,
+            };
+            var depletedClamm2 = new AVMTradeReporter.Models.Data.Pool // mainnet 43KNWWESA
+            {
+                AssetIdA = algo,
+                AssetADecimals = 6,
+                AssetIdB = goldDao,
+                AssetBDecimals = 6,
+                PMin = 0.30m,
+                PMax = 0.33m,
+                A = 4_781_436_819_477,
+                B = 16_926,
+                Protocol = DEXProtocol.Biatec,
+                AMMType = AMMType.ConcentratedLiquidityAMM,
+            };
+
+            // Act
+            var result = AggregatedPool.FromPools(new[] { pactMain, pactDust, depletedClamm1, depletedClamm2 });
+            var agg = result.Single(r => r.AssetIdA == algo && r.AssetIdB == goldDao);
+
+            // Assert - price must come only from the two real Pact pools (~11.3 ALGO per GoldDAO), not be
+            // dragged down towards ~0.25-0.33 by the depleted CLAMM pools' huge virtual/near-zero-real liquidity.
+            var price = agg.VirtualSumBLevel1ForPrice!.Value / agg.VirtualSumALevel1ForPrice!.Value;
+            var expectedPrice = (pactMain.VirtualAmountBForPrice + pactDust.VirtualAmountBForPrice)
+                / (pactMain.VirtualAmountAForPrice + pactDust.VirtualAmountAForPrice);
+            Assert.That(price, Is.EqualTo(expectedPrice).Within(0.0000000001m));
+            Assert.That(price, Is.InRange(0.08m, 0.09m)); // GoldDAO per ALGO, i.e. ~11.3 ALGO per GoldDAO inverted
+
+            // TVL_A/TVL_B still count all real liquidity, including what's stuck in the depleted pools -
+            // it's real economic value locked in the protocol even though it can't currently price GoldDAO.
+            Assert.That(agg.TVL_A, Is.EqualTo(pactMain.RealAmountA + pactDust.RealAmountA + depletedClamm1.RealAmountA + depletedClamm2.RealAmountA));
+
+            // But the price-scoped depth used for route selection must exclude the depleted pools' real ALGO.
+            Assert.That(agg.TVL_A_ForPrice, Is.EqualTo(pactMain.RealAmountA + pactDust.RealAmountA));
+            Assert.That(agg.TVL_B_ForPrice, Is.EqualTo(pactMain.RealAmountB + pactDust.RealAmountB));
+        }
+
+        [Test]
         public void FromPools_WallPoolsOnly_StillProducePrice()
         {
             // When a pair has only zero-width pools, fall back to using them so the pair is not left priceless

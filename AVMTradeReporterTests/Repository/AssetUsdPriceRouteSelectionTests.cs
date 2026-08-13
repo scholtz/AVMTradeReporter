@@ -29,7 +29,11 @@ namespace AVMTradeReporterTests.Repository
             VirtualSumALevel1ForPrice = virtA,
             VirtualSumBLevel1ForPrice = virtB,
             TVL_A = tvlA,
-            TVL_B = tvlB
+            TVL_B = tvlB,
+            // Route selection reads *_ForPrice as depth; keep it equal to TVL_A/TVL_B here so pairs built by
+            // this helper behave as fully price-voting (no wall/depleted pools involved) unless a test says otherwise.
+            TVL_A_ForPrice = tvlA,
+            TVL_B_ForPrice = tvlB
         };
 
         [Test]
@@ -109,6 +113,50 @@ namespace AVMTradeReporterTests.Repository
         public void NoPairsAtAll_ReturnsNull()
         {
             Assert.That(AggregatedPoolRepository.SelectAssetUsdPrice(5UL, Usdc, null, null, 0.09m), Is.Null);
+        }
+
+        [Test]
+        public void DepletedOutOfRangeClammRealBalance_DoesNotInflateAlgoRouteDepth()
+        {
+            // Production incident, 2026-08-13: GoldDAO's aggregated (0, GoldDAO) pair included two
+            // out-of-range Biatec CLAMM pools holding ~63k real ALGO but effectively zero real GoldDAO
+            // (all liquidity converted to one side after price moved outside their [PMin,PMax] range).
+            // TVL_B on the raw group counted that ~63k ALGO as "depth" even though AggregatedPool.FromPools
+            // had already excluded those same pools from VirtualSumBLevel1ForPrice/VirtualSumALevel1ForPrice
+            // via Pool.IsDepletedSingleSided - so the route's *price* was clean but its *depth* still won
+            // the comparison against the accurate, genuinely deep-enough USDC pool, and the wrong price
+            // ($0.317 instead of the ~$0.90 every real two-sided pool agreed on) got selected anyway.
+            ulong goldDao = 1241945177UL;
+
+            // TVL_A/TVL_B (unfiltered) include the ~63k ALGO stuck in the two depleted CLAMM pools.
+            // TVL_A_ForPrice/TVL_B_ForPrice (price-voting pools only: the two real Pact pools) do not.
+            var viaAlgo = new AggregatedPool
+            {
+                AssetIdA = 0UL,
+                AssetIdB = goldDao,
+                VirtualSumALevel1ForPrice = 135_336.212m, // matches VirtualSumALevel1ForPrice from the clean price-voting pools
+                VirtualSumBLevel1ForPrice = 33_702.751m,
+                TVL_A = 96_025.454981m, // includes the two depleted CLAMM pools' real ALGO
+                TVL_B = 2_879.569628m,
+                TVL_A_ForPrice = 32_592.273720m, // only the two real Pact pools
+                TVL_B_ForPrice = 2_879.569628m,
+            };
+            var direct = new AggregatedPool
+            {
+                AssetIdA = goldDao,
+                AssetIdB = Usdc,
+                VirtualSumALevel1ForPrice = 3_093.129159m,
+                VirtualSumBLevel1ForPrice = 2_776.578908m,
+                TVL_A = 3_093.129159m,
+                TVL_B = 2_776.578908m,
+                TVL_A_ForPrice = 3_093.129159m,
+                TVL_B_ForPrice = 2_776.578908m,
+            };
+
+            var price = AggregatedPoolRepository.SelectAssetUsdPrice(goldDao, Usdc, direct, viaAlgo, algoPriceUsd: 0.079055m);
+
+            // The accurate direct USDC price (~$0.897), not the ALGO route corrupted by depleted-pool depth (~$0.317).
+            Assert.That(price, Is.EqualTo(2_776.578908m / 3_093.129159m).Within(0.0000001m));
         }
     }
 }
