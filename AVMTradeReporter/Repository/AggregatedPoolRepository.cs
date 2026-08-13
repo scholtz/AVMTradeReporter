@@ -565,33 +565,17 @@ namespace AVMTradeReporter.Repository
                         changed = true;
                     }
 
-                    // Calculate volumes from all aggregated pools involving this asset
-                    decimal volume1H = _cache.Values
-                        .Where(p => p.AssetIdA == assetId || p.AssetIdB == assetId)
-                        .Sum(p => p.Volume1H ?? 0) / 2;
-                    decimal volume24H = _cache.Values
-                        .Where(p => p.AssetIdA == assetId || p.AssetIdB == assetId)
-                        .Sum(p => p.Volume24H ?? 0) / 2;
-                    decimal volume7D = _cache.Values
-                        .Where(p => p.AssetIdA == assetId || p.AssetIdB == assetId)
-                        .Sum(p => p.Volume7D ?? 0) / 2;
-
-                    // Set volumes
-                    if (volume1H != asset.Volume1H)
-                    {
-                        asset.Volume1H = volume1H;
-                        changed = true;
-                    }
-                    if (volume24H != asset.Volume24H)
-                    {
-                        asset.Volume24H = volume24H;
-                        changed = true;
-                    }
-                    if (volume7D != asset.Volume7D)
-                    {
-                        asset.Volume7D = volume7D;
-                        changed = true;
-                    }
+                    // Deliberately NOT recomputing asset.Volume1H/24H/7D here. They used to be
+                    // resummed from every cached AggregatedPool.Volume24H touching this asset, but
+                    // those pool-level figures only refresh when VolumeUpdateBackgroundService sees
+                    // a *new* trade on that specific pool - a pool that stops trading keeps a frozen,
+                    // never-decaying volume. Resumming on every single trade anywhere in the system
+                    // meant a stale/frozen pool could periodically re-inflate the honest, properly
+                    // decaying figure that TopAssetsService.SyncAssetVolumeCountersAsync computes
+                    // straight from ITradeQueryService every ~5 minutes - which is what the Assets
+                    // table's Volume24H column and the Popular/Trending highlight cards both need to
+                    // agree on. TopAssetsService is now the single writer of these three fields; see
+                    // AggregatedPoolAssetVolumeConsistencyTests for the regression this guards.
 
                     if (changed)
                     {
