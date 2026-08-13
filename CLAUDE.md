@@ -1,5 +1,49 @@
 # Project notes for Claude
 
+## Asset-level volume must equal the sum of its pools' volumes - no /2 "just in case"
+
+Two different services independently compute USD trading volume, at two
+different granularities, both from the `trades` index's `ValueUSD` field
+(the single combined value of a trade - see `TradeReporterBackgroundService
+.CombineSides`, not a per-leg half):
+
+- `TradeQueryService.GetPoolVolumesAsync` — per **pool** (by `poolAddress`),
+  credits each trade's full `ValueUSD` to that pool. Feeds `Pool.Volume1H/
+  24H/7D`, shown on the pool details page.
+- `TradeQueryService.GetAssetVolumeSumsAsync` (→ `GetAssetVolumeWindowsAsync`
+  → `TopAssetsService.SyncAssetVolumeCountersAsync`) — per **asset** (terms
+  aggregation on `AssetIdIn`/`AssetIdOut`), should likewise credit each
+  trade's full `ValueUSD` to every asset it involves. Feeds
+  `BiatecAsset.Volume1H/24H/7D`, shown on the Assets table and the Popular/
+  Trending highlight cards.
+
+These two must agree: an asset's total is the sum of its pools' individual
+volumes, since every pool the asset trades in ultimately draws from the same
+trade documents. 2026-08-14 incident: `GetAssetVolumeSumsAsync` divided every
+asset's total by 2, on the mistaken belief it needed the same correction
+`AggregatedPoolRepository`'s old (now-removed, see
+`AggregatedPoolAssetVolumeConsistencyTests`) cache-summing code needed - that
+code doubled because the aggregated-pool cache stores each pair twice, as
+`(A,B)` and `(B,A)`. `GetAssetVolumeSumsAsync` has no such double storage:
+`AssetIdIn` and `AssetIdOut` are different fields holding different asset
+ids for any given trade, so a given asset is bucketed by exactly *one* of
+the two terms aggregations per trade. The `/2` silently halved every asset's
+displayed volume against the honest number visible per-pool (reported as:
+$VOTE showed $4k overview-wide while $VOTE/ALGO alone was $4k and $VOTE/USDC
+was $2k - true total ≥ $6k). Fixed by extracting the bucket-merge into a
+pure, unit-testable `TradeQueryService.MergeAssetVolumeBuckets` (no ES client
+needed) and dropping the division. Regression tests:
+`AVMTradeReporterTests/Services/AssetVolumeAggregationTests.cs`.
+
+**Rule going forward**: any "/2" or similar correction factor applied when
+summing pool- or trade-derived figures must be justified by *that specific
+data structure's* actual double-counting mechanism (e.g. the aggregated-pool
+cache's dual-orientation storage) - never copied over "to be consistent"
+into a different computation that sources from a different structure with
+different storage semantics. When in doubt, check whether the asset-level
+total equals the sum of the pool-level totals for a manually-picked real
+asset.
+
 ## Adding [Authorize] to a controller: check the charting widget's dependency first
 
 `../biatec-charting-widget` is a *separate*, unauthenticated browser client

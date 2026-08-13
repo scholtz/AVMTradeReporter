@@ -246,9 +246,13 @@ namespace AVMTradeReporter.Services
         }
 
         /// <summary>
-        /// Sums confirmed trade value in USD per asset over [from, to). Each asset is credited half
-        /// of every trade's value, matching the asset-volume convention used elsewhere (an asset's
-        /// volume = sum of its pools' volumes / 2).
+        /// Sums confirmed trade value in USD per asset over [from, to). Each trade credits its full
+        /// ValueUSD to both assets it involves - the same convention GetPoolVolumesAsync uses per
+        /// pool (a $100 trade is $100 of volume for that pool, not $50), so that an asset's total
+        /// here always equals the sum of its individual pools' volumes shown on the pool details
+        /// page. AssetIdIn and AssetIdOut are different fields holding different asset ids for any
+        /// given trade, so a given asset is only ever bucketed by ONE of the two aggregations below
+        /// for a given trade - there is no double-counting to correct for.
         /// </summary>
         private async Task<Dictionary<ulong, decimal>?> GetAssetVolumeSumsAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken)
         {
@@ -281,8 +285,10 @@ namespace AVMTradeReporter.Services
                     return null;
                 }
 
-                var result = new Dictionary<ulong, decimal>();
-                foreach (var name in new[] { "byAssetIn", "byAssetOut" })
+                var byAssetIn = new Dictionary<ulong, decimal>();
+                var byAssetOut = new Dictionary<ulong, decimal>();
+                var destinations = new[] { ("byAssetIn", byAssetIn), ("byAssetOut", byAssetOut) };
+                foreach (var (name, bucketDict) in destinations)
                 {
                     var terms = searchResponse.Aggregations?.GetLongTerms(name);
                     if (terms?.Buckets == null) continue;
@@ -290,17 +296,37 @@ namespace AVMTradeReporter.Services
                     {
                         var assetId = (ulong)bucket.Key;
                         var volume = (decimal)(bucket.Aggregations?.GetSum("volume")?.Value ?? 0);
-                        result.TryGetValue(assetId, out var current);
-                        result[assetId] = current + volume / 2;
+                        bucketDict[assetId] = volume;
                     }
                 }
-                return result;
+                return MergeAssetVolumeBuckets(byAssetIn, byAssetOut);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to calculate asset volume sums [{From} – {To}]", from, to);
                 return null;
             }
+        }
+
+        /// <summary>
+        /// Combines the AssetIdIn and AssetIdOut volume buckets into one per-asset total. Pulled out
+        /// of GetAssetVolumeSumsAsync as a pure function so the merge math (previously wrong - see
+        /// AssetVolumeAggregationTests) is testable without an Elasticsearch client.
+        /// </summary>
+        internal static Dictionary<ulong, decimal> MergeAssetVolumeBuckets(
+            IReadOnlyDictionary<ulong, decimal> byAssetIn,
+            IReadOnlyDictionary<ulong, decimal> byAssetOut)
+        {
+            var result = new Dictionary<ulong, decimal>();
+            foreach (var bucketDict in new[] { byAssetIn, byAssetOut })
+            {
+                foreach (var (assetId, volume) in bucketDict)
+                {
+                    result.TryGetValue(assetId, out var current);
+                    result[assetId] = current + volume;
+                }
+            }
+            return result;
         }
 
         private static TradeFilter NormalizeFilter(TradeFilter filter)
