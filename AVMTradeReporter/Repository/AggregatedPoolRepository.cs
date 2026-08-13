@@ -52,6 +52,17 @@ namespace AVMTradeReporter.Repository
             CreateIndexTemplateAsync().Wait();
         }
 
+        /// <summary>
+        /// Clears the static in-memory aggregated-pool cache. Test-only: without this, tests sharing
+        /// the same process (the cache is static, deliberately, so it survives DI scope disposal)
+        /// pollute each other - e.g. a bulk-init call-count assertion would count every pool any
+        /// other test in the run happened to add first.
+        /// </summary>
+        internal static void ResetForTests()
+        {
+            _cache.Clear();
+        }
+
         private async Task CreateIndexTemplateAsync()
         {
             var templateRequest = new PutIndexTemplateRequest
@@ -95,15 +106,21 @@ namespace AVMTradeReporter.Repository
                     _cache[(agg.AssetIdA, agg.AssetIdB)] = agg;
                 }
 
-                // Store, publish and (critically) recompute derived asset PriceUSD/TVL/PoolsCount/
-                // Volume figures - this used to run as a fire-and-forget Task.Run, which let
-                // Program.cs's startup Wait() (and therefore Kestrel's port bind / the readiness
-                // probe) return before the Assets page's numbers were actually warm. That let a
-                // freshly-rolled pod pass its readiness check and receive production traffic while
-                // still serving zero/stale asset stats, breaking the "new pod looks identical to the
-                // old one" requirement for unnoticed HA deploys. Must be awaited here so the caller
-                // (PoolRepository.InitializeAsync, blocking-awaited from Program.cs before the app
-                // starts listening) cannot return until every asset stat is fully caught up.
+                // Store + publish each pool - this used to run as a fire-and-forget Task.Run, which
+                // let Program.cs's startup Wait() (and therefore Kestrel's port bind / the readiness
+                // probe) return before the Assets page's numbers were actually warm, so a freshly
+                // rolled pod could pass readiness while still serving zero/stale asset stats. Now
+                // awaited inline so the caller (PoolRepository.InitializeAsync, blocking-awaited from
+                // Program.cs before the app starts listening) cannot return until data is warm.
+                //
+                // Deliberately does NOT call UpdateRelatedAssetsAsync per pool here (unlike the
+                // live per-trade path below) - that recomputes every affected asset by rescanning the
+                // *entire* cache, and on production's real pool count that turned an O(pools) bulk
+                // load into an O(pools²) one, blowing past both the startupProbe budget and
+                // kubectl's rollout progress deadline (2026-08-13 incident: production rollout timed
+                // out after 10 minutes stuck "waiting for old replicas to terminate", i.e. the new
+                // pod never finished starting). RefreshAllAssetStatsAsync below does the same
+                // computation exactly once per distinct asset instead of once per (pool, asset) pair.
                 foreach (var agg in aggregates)
                 {
                     var send = agg;
@@ -112,9 +129,11 @@ namespace AVMTradeReporter.Repository
                         // Ensure consistent order for the pair
                         send = agg.Reverse();
                     }
-                    await StoreAggregatedPoolAsync(send, cancellationToken);
+                    await StoreAggregatedPoolAsync(send, cancellationToken, updateRelatedAssets: false);
                     await PublishToHubAsync(send, cancellationToken);
                 }
+
+                await RefreshAllAssetStatsAsync(cancellationToken);
             }
             catch (Exception ex)
             {
@@ -311,7 +330,7 @@ namespace AVMTradeReporter.Repository
                 _logger.LogError(ex, "Failed to publish AggregatedPoolUpdated for {a}-{b}", send.AssetIdA, send.AssetIdB);
             }
         }
-        private async Task StoreAggregatedPoolAsync(AggregatedPool agg, CancellationToken cancellationToken)
+        private async Task StoreAggregatedPoolAsync(AggregatedPool agg, CancellationToken cancellationToken, bool updateRelatedAssets = true)
         {
             _cache[(agg.AssetIdA, agg.AssetIdB)] = agg;
             _cache[(agg.AssetIdB, agg.AssetIdA)] = agg;
@@ -382,8 +401,12 @@ namespace AVMTradeReporter.Repository
                     BiatecScanHub.ALGOUSD = send;
                 }
 
-                // Update related asset prices / tvl
-                await UpdateRelatedAssetsAsync(agg, cancellationToken);
+                // Update related asset prices / tvl (skipped during bulk init - see
+                // InitializeFromExistingPoolsAsync's RefreshAllAssetStatsAsync call instead)
+                if (updateRelatedAssets)
+                {
+                    await UpdateRelatedAssetsAsync(agg, cancellationToken);
+                }
             }
             catch (Exception ex)
             {
@@ -398,202 +421,254 @@ namespace AVMTradeReporter.Repository
             {
                 var usdRef = _appConfig.UsdReferenceAssetId;
 
-                // Assets potentially affected: both sides plus reference assets (ALGO=0, usdRef)
+                // Assets potentially affected: both sides plus reference assets (ALGO=0, usdRef).
+                // Deliberately a small, fixed-size set (not "every asset in the cache") - this runs
+                // once per live trade, so it must stay O(1) per call. Bulk/startup recomputation goes
+                // through RefreshAllAssetStatsAsync instead (see InitializeFromExistingPoolsAsync).
                 var affected = new HashSet<ulong> { updatedPool.AssetIdA, updatedPool.AssetIdB, 0UL, usdRef };
-                // Ensure ALGO/usdRef prices first so that derived prices can use them
-                var ordered = affected.OrderBy(a => a == 0 ? 0 : a == usdRef ? 1 : 2).ToArray();
-
-                // Cache for quick price lookup
                 var priceCache = new Dictionary<ulong, decimal>();
-
-                foreach (var assetId in ordered)
-                {
-                    var asset = await _assetRepository.GetAssetAsync(assetId, cancellationToken);
-                    if (asset == null) continue;
-                    var changed = false;
-
-                    // Peg this network's reference stable asset (e.g. USDC) to $1
-                    if (asset.Index == usdRef && asset.PriceUSD != 1m)
-                    {
-                        asset.PriceUSD = 1m;
-                        changed = true;
-                    }
-
-                    // Calculate PriceUSD
-                    decimal newPrice = asset.PriceUSD;
-                    if (assetId == usdRef)
-                    {
-                        newPrice = 1m; // reference stable asset assumed $1
-                    }
-                    else if (assetId == 0UL)
-                    {
-                        // ALGO price from ALGO/usdRef pair (orientation A=0, B=usdRef if possible)
-                        var algoUsdc = GetAggregatedPool(0, usdRef);
-                        if (algoUsdc != null)
-                        {
-                            var orient = algoUsdc.AssetIdB == usdRef ? algoUsdc : algoUsdc.Reverse();
-                            if (orient.VirtualSumALevel1ForPrice > 0)
-                            {
-                                newPrice = (orient.VirtualSumBLevel1ForPrice ?? 0) / (orient.VirtualSumALevel1ForPrice ?? 0); // usdRef per ALGO
-                            }
-                        }
-                    }
-                    else
-                    {
-                        // Price from the deeper of the two routes (direct usdRef pair vs via
-                        // ALGO) — never from a fixed route preference. A dust direct-USDC pool
-                        // must not override a liquid ALGO market (a $0.0001 USDC pool once priced
-                        // MEEP 214x above its real ALGO-pair market, faking +99% "gains").
-                        var pairUsdc = GetAggregatedPool(assetId, usdRef);
-                        var pairAlgo = GetAggregatedPool(assetId, 0);
-                        var algoAsset = await _assetRepository.GetAssetAsync(0, cancellationToken);
-                        var selected = SelectAssetUsdPrice(assetId, usdRef, pairUsdc, pairAlgo, algoAsset?.PriceUSD);
-                        if (selected > 0)
-                        {
-                            newPrice = selected.Value;
-                        }
-                    }
-
-                    if (newPrice > 0 && newPrice != asset.PriceUSD)
-                    {
-                        asset.PriceUSD = newPrice;
-                        changed = true;
-                    }
-                    priceCache[assetId] = asset.PriceUSD;
-
-                    // Set historical prices
-                    var ohlcService = _serviceProvider?.GetService<IOHLCService>();
-                    
-                    if (ohlcService != null)
-                    {
-                        asset.PriceUSD1H = await ohlcService.GetHistoricalPriceAsync(assetId, TimeSpan.FromHours(1), cancellationToken);
-                        asset.PriceUSD24H = await ohlcService.GetHistoricalPriceAsync(assetId, TimeSpan.FromHours(24), cancellationToken);
-                        asset.PriceUSD7D = await ohlcService.GetHistoricalPriceAsync(assetId, TimeSpan.FromDays(7), cancellationToken);
-                    }
-
-                    // Calculate Real TVL (TVL_USD) and Total TVL (TotalTVLAssetInUSD)
-                    // Real TVL: Only trusted tokens from pools paired with trusted references
-                    // Total TVL: All assets (both sides) from pools paired with trusted references
-                    // Trusted reference tokens: ALGO=0, this network's usdRef, and configured
-                    // other stablecoins/major tokens (AppConfiguration.TrustedReferenceAssetIds).
-                    HashSet<ulong> refs = new HashSet<ulong>(_appConfig.TrustedReferenceAssetIds) { 0UL, usdRef }; // duplicates automatically removed by HashSet
-                    decimal realTvlUsd = 0m;    // Real TVL: sum of trusted token values only
-                    decimal totalTvlUsd = 0m;   // Total TVL: sum of all asset values
-
-                    // Sum USD value of all aggregated pools where the other asset is trusted reference
-                    var processedPairs = new HashSet<string>();
-                    foreach (var ap in _cache.Values.Where(p => (p.AssetIdA == assetId && refs.Contains(p.AssetIdB)) || (p.AssetIdB == assetId && refs.Contains(p.AssetIdA))))
-                    {
-                        var key = ap.AssetIdA < ap.AssetIdB ? $"{ap.AssetIdA}-{ap.AssetIdB}" : $"{ap.AssetIdB}-{ap.AssetIdA}";
-                        if (!processedPairs.Add(key)) continue; // skip already counted (since _cache stores both directions)
-
-                        // Determine orientation
-                        ulong otherAssetId = ap.AssetIdA == assetId ? ap.AssetIdB : ap.AssetIdA;
-
-                        // Ensure we have prices for both sides
-                        if (!priceCache.TryGetValue(otherAssetId, out var otherPrice))
-                        {
-                            var otherAsset = await _assetRepository.GetAssetAsync(otherAssetId, cancellationToken);
-                            if (otherAsset != null && otherAsset.PriceUSD > 0)
-                            {
-                                otherPrice = otherAsset.PriceUSD;
-                                priceCache[otherAssetId] = otherPrice;
-                            }
-                        }
-                        // Refresh priceAsset if not present (may have been updated earlier in loop)
-                        priceCache.TryGetValue(assetId, out var priceAssetCurrent);
-                        if (priceAssetCurrent <= 0) priceAssetCurrent = asset.PriceUSD;
-
-                        // NOTE: PriceUSD is intentionally NOT re-derived from the usdRef pair
-                        // here — route selection above (SelectAssetUsdPrice) already chose the
-                        // deeper market, and re-deriving from any direct usdRef pair would let a
-                        // dust USDC pool override that choice again.
-
-                        if (priceAssetCurrent <= 0 || otherPrice <= 0) continue; // skip TVL calculation until both prices known
-
-                        // Calculate Real TVL: only the trusted token side (otherAssetId is the trusted reference)
-                        decimal trustedTokenValue;
-                        if (ap.AssetIdA == assetId)
-                        {
-                            // Asset is on side A, trusted token is on side B
-                            trustedTokenValue = ap.TVL_B * otherPrice;
-                        }
-                        else
-                        {
-                            // Asset is on side B, trusted token is on side A
-                            trustedTokenValue = ap.TVL_A * otherPrice;
-                        }
-                        if (trustedTokenValue > 0) realTvlUsd += trustedTokenValue;
-
-                        // Calculate Total TVL: both sides of the pool
-                        decimal poolTotalUsd;
-                        if (ap.AssetIdA == assetId)
-                        {
-                            poolTotalUsd = ap.TVL_A * priceAssetCurrent + ap.TVL_B * otherPrice;
-                        }
-                        else
-                        {
-                            poolTotalUsd = ap.TVL_B * priceAssetCurrent + ap.TVL_A * otherPrice;
-                        }
-                        if (poolTotalUsd > 0) totalTvlUsd += poolTotalUsd;
-                    }
-
-                    // Set Real TVL (TVL_USD) - only trusted tokens
-                    if (realTvlUsd > 0 && realTvlUsd != asset.TVL_USD)
-                    {
-                        asset.TVL_USD = realTvlUsd;
-                        changed = true;
-                    }
-
-                    // Set Total TVL (TotalTVLAssetInUSD) - all assets
-                    if (totalTvlUsd > 0 && asset.TotalTVLAssetInUSD != totalTvlUsd)
-                    {
-                        asset.TotalTVLAssetInUSD = totalTvlUsd;
-                        changed = true;
-                    }
-
-                    // Calculate number of distinct pools (asset pairs) involving this asset.
-                    // _cache stores each pair keyed both (A,B) and (B,A), so dedupe by pair.
-                    int poolsCount = _cache.Values
-                        .Where(p => p.AssetIdA == assetId || p.AssetIdB == assetId)
-                        .Select(p => p.AssetIdA < p.AssetIdB ? $"{p.AssetIdA}-{p.AssetIdB}" : $"{p.AssetIdB}-{p.AssetIdA}")
-                        .Distinct()
-                        .Count();
-                    if (poolsCount != asset.PoolsCount)
-                    {
-                        asset.PoolsCount = poolsCount;
-                        changed = true;
-                    }
-
-                    // Deliberately NOT recomputing asset.Volume1H/24H/7D here. They used to be
-                    // resummed from every cached AggregatedPool.Volume24H touching this asset, but
-                    // those pool-level figures only refresh when VolumeUpdateBackgroundService sees
-                    // a *new* trade on that specific pool - a pool that stops trading keeps a frozen,
-                    // never-decaying volume. Resumming on every single trade anywhere in the system
-                    // meant a stale/frozen pool could periodically re-inflate the honest, properly
-                    // decaying figure that TopAssetsService.SyncAssetVolumeCountersAsync computes
-                    // straight from ITradeQueryService every ~5 minutes - which is what the Assets
-                    // table's Volume24H column and the Popular/Trending highlight cards both need to
-                    // agree on. TopAssetsService is now the single writer of these three fields; see
-                    // AggregatedPoolAssetVolumeConsistencyTests for the regression this guards.
-
-                    if (changed)
-                    {
-                        asset.Timestamp = updatedPool.LastUpdated > asset.Timestamp ? updatedPool.LastUpdated : asset.Timestamp;
-                        await _assetRepository.SetAssetAsync(asset, cancellationToken);
-                    }
-                }
+                await RecomputeAssetStatsAsync(affected, priceCache, updatedPool.LastUpdated ?? DateTimeOffset.UtcNow, cancellationToken);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to update asset prices/TVL after aggregated pool update {a}-{b}", updatedPool.AssetIdA, updatedPool.AssetIdB);
             }
 
+            await RefreshPoolHistoricalPricesAsync(cancellationToken);
+        }
+
+        /// <summary>
+        /// Recomputes price/TVL/PoolsCount for every distinct asset that appears anywhere in the
+        /// current aggregated-pool cache, exactly once each, then does a single pass refreshing every
+        /// cached pool's denormalized historical price fields. Used for bulk (startup) recomputation -
+        /// see InitializeFromExistingPoolsAsync for why this must not be N per-pool calls to
+        /// UpdateRelatedAssetsAsync (each of which rescans the whole cache) but one bulk pass instead.
+        /// </summary>
+        private async Task RefreshAllAssetStatsAsync(CancellationToken cancellationToken)
+        {
+            if (_assetRepository == null) return;
+            try
+            {
+                var usdRef = _appConfig.UsdReferenceAssetId;
+                var allAssetIds = new HashSet<ulong> { 0UL, usdRef };
+                foreach (var pool in _cache.Values)
+                {
+                    allAssetIds.Add(pool.AssetIdA);
+                    allAssetIds.Add(pool.AssetIdB);
+                }
+                var priceCache = new Dictionary<ulong, decimal>();
+                await RecomputeAssetStatsAsync(allAssetIds, priceCache, DateTimeOffset.UtcNow, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to bulk-refresh asset prices/TVL/PoolsCount");
+            }
+
+            await RefreshPoolHistoricalPricesAsync(cancellationToken);
+        }
+
+        /// <summary>
+        /// Recomputes PriceUSD/PriceUSD1H/24H/7D/TVL_USD/TotalTVLAssetInUSD/PoolsCount for each asset
+        /// in <paramref name="assetIds"/>, in ALGO/usdRef-first order so derived prices can use them,
+        /// persisting via SetAssetAsync only when something actually changed.
+        /// </summary>
+        private async Task RecomputeAssetStatsAsync(
+            IEnumerable<ulong> assetIds,
+            Dictionary<ulong, decimal> priceCache,
+            DateTimeOffset asOf,
+            CancellationToken cancellationToken)
+        {
+            if (_assetRepository == null) return;
+            var usdRef = _appConfig.UsdReferenceAssetId;
+            var ordered = assetIds.OrderBy(a => a == 0 ? 0 : a == usdRef ? 1 : 2).ToArray();
+
+            foreach (var assetId in ordered)
+            {
+                var asset = await _assetRepository.GetAssetAsync(assetId, cancellationToken);
+                if (asset == null) continue;
+                var changed = false;
+
+                // Peg this network's reference stable asset (e.g. USDC) to $1
+                if (asset.Index == usdRef && asset.PriceUSD != 1m)
+                {
+                    asset.PriceUSD = 1m;
+                    changed = true;
+                }
+
+                // Calculate PriceUSD
+                decimal newPrice = asset.PriceUSD;
+                if (assetId == usdRef)
+                {
+                    newPrice = 1m; // reference stable asset assumed $1
+                }
+                else if (assetId == 0UL)
+                {
+                    // ALGO price from ALGO/usdRef pair (orientation A=0, B=usdRef if possible)
+                    var algoUsdc = GetAggregatedPool(0, usdRef);
+                    if (algoUsdc != null)
+                    {
+                        var orient = algoUsdc.AssetIdB == usdRef ? algoUsdc : algoUsdc.Reverse();
+                        if (orient.VirtualSumALevel1ForPrice > 0)
+                        {
+                            newPrice = (orient.VirtualSumBLevel1ForPrice ?? 0) / (orient.VirtualSumALevel1ForPrice ?? 0); // usdRef per ALGO
+                        }
+                    }
+                }
+                else
+                {
+                    // Price from the deeper of the two routes (direct usdRef pair vs via
+                    // ALGO) — never from a fixed route preference. A dust direct-USDC pool
+                    // must not override a liquid ALGO market (a $0.0001 USDC pool once priced
+                    // MEEP 214x above its real ALGO-pair market, faking +99% "gains").
+                    var pairUsdc = GetAggregatedPool(assetId, usdRef);
+                    var pairAlgo = GetAggregatedPool(assetId, 0);
+                    var algoAsset = await _assetRepository.GetAssetAsync(0, cancellationToken);
+                    var selected = SelectAssetUsdPrice(assetId, usdRef, pairUsdc, pairAlgo, algoAsset?.PriceUSD);
+                    if (selected > 0)
+                    {
+                        newPrice = selected.Value;
+                    }
+                }
+
+                if (newPrice > 0 && newPrice != asset.PriceUSD)
+                {
+                    asset.PriceUSD = newPrice;
+                    changed = true;
+                }
+                priceCache[assetId] = asset.PriceUSD;
+
+                // Set historical prices
+                var ohlcService = _serviceProvider?.GetService<IOHLCService>();
+
+                if (ohlcService != null)
+                {
+                    asset.PriceUSD1H = await ohlcService.GetHistoricalPriceAsync(assetId, TimeSpan.FromHours(1), cancellationToken);
+                    asset.PriceUSD24H = await ohlcService.GetHistoricalPriceAsync(assetId, TimeSpan.FromHours(24), cancellationToken);
+                    asset.PriceUSD7D = await ohlcService.GetHistoricalPriceAsync(assetId, TimeSpan.FromDays(7), cancellationToken);
+                }
+
+                // Calculate Real TVL (TVL_USD) and Total TVL (TotalTVLAssetInUSD)
+                // Real TVL: Only trusted tokens from pools paired with trusted references
+                // Total TVL: All assets (both sides) from pools paired with trusted references
+                // Trusted reference tokens: ALGO=0, this network's usdRef, and configured
+                // other stablecoins/major tokens (AppConfiguration.TrustedReferenceAssetIds).
+                HashSet<ulong> refs = new HashSet<ulong>(_appConfig.TrustedReferenceAssetIds) { 0UL, usdRef }; // duplicates automatically removed by HashSet
+                decimal realTvlUsd = 0m;    // Real TVL: sum of trusted token values only
+                decimal totalTvlUsd = 0m;   // Total TVL: sum of all asset values
+
+                // Sum USD value of all aggregated pools where the other asset is trusted reference
+                var processedPairs = new HashSet<string>();
+                foreach (var ap in _cache.Values.Where(p => (p.AssetIdA == assetId && refs.Contains(p.AssetIdB)) || (p.AssetIdB == assetId && refs.Contains(p.AssetIdA))))
+                {
+                    var key = ap.AssetIdA < ap.AssetIdB ? $"{ap.AssetIdA}-{ap.AssetIdB}" : $"{ap.AssetIdB}-{ap.AssetIdA}";
+                    if (!processedPairs.Add(key)) continue; // skip already counted (since _cache stores both directions)
+
+                    // Determine orientation
+                    ulong otherAssetId = ap.AssetIdA == assetId ? ap.AssetIdB : ap.AssetIdA;
+
+                    // Ensure we have prices for both sides
+                    if (!priceCache.TryGetValue(otherAssetId, out var otherPrice))
+                    {
+                        var otherAsset = await _assetRepository.GetAssetAsync(otherAssetId, cancellationToken);
+                        if (otherAsset != null && otherAsset.PriceUSD > 0)
+                        {
+                            otherPrice = otherAsset.PriceUSD;
+                            priceCache[otherAssetId] = otherPrice;
+                        }
+                    }
+                    // Refresh priceAsset if not present (may have been updated earlier in loop)
+                    priceCache.TryGetValue(assetId, out var priceAssetCurrent);
+                    if (priceAssetCurrent <= 0) priceAssetCurrent = asset.PriceUSD;
+
+                    // NOTE: PriceUSD is intentionally NOT re-derived from the usdRef pair
+                    // here — route selection above (SelectAssetUsdPrice) already chose the
+                    // deeper market, and re-deriving from any direct usdRef pair would let a
+                    // dust USDC pool override that choice again.
+
+                    if (priceAssetCurrent <= 0 || otherPrice <= 0) continue; // skip TVL calculation until both prices known
+
+                    // Calculate Real TVL: only the trusted token side (otherAssetId is the trusted reference)
+                    decimal trustedTokenValue;
+                    if (ap.AssetIdA == assetId)
+                    {
+                        // Asset is on side A, trusted token is on side B
+                        trustedTokenValue = ap.TVL_B * otherPrice;
+                    }
+                    else
+                    {
+                        // Asset is on side B, trusted token is on side A
+                        trustedTokenValue = ap.TVL_A * otherPrice;
+                    }
+                    if (trustedTokenValue > 0) realTvlUsd += trustedTokenValue;
+
+                    // Calculate Total TVL: both sides of the pool
+                    decimal poolTotalUsd;
+                    if (ap.AssetIdA == assetId)
+                    {
+                        poolTotalUsd = ap.TVL_A * priceAssetCurrent + ap.TVL_B * otherPrice;
+                    }
+                    else
+                    {
+                        poolTotalUsd = ap.TVL_B * priceAssetCurrent + ap.TVL_A * otherPrice;
+                    }
+                    if (poolTotalUsd > 0) totalTvlUsd += poolTotalUsd;
+                }
+
+                // Set Real TVL (TVL_USD) - only trusted tokens
+                if (realTvlUsd > 0 && realTvlUsd != asset.TVL_USD)
+                {
+                    asset.TVL_USD = realTvlUsd;
+                    changed = true;
+                }
+
+                // Set Total TVL (TotalTVLAssetInUSD) - all assets
+                if (totalTvlUsd > 0 && asset.TotalTVLAssetInUSD != totalTvlUsd)
+                {
+                    asset.TotalTVLAssetInUSD = totalTvlUsd;
+                    changed = true;
+                }
+
+                // Calculate number of distinct pools (asset pairs) involving this asset.
+                // _cache stores each pair keyed both (A,B) and (B,A), so dedupe by pair.
+                int poolsCount = _cache.Values
+                    .Where(p => p.AssetIdA == assetId || p.AssetIdB == assetId)
+                    .Select(p => p.AssetIdA < p.AssetIdB ? $"{p.AssetIdA}-{p.AssetIdB}" : $"{p.AssetIdB}-{p.AssetIdA}")
+                    .Distinct()
+                    .Count();
+                if (poolsCount != asset.PoolsCount)
+                {
+                    asset.PoolsCount = poolsCount;
+                    changed = true;
+                }
+
+                // Deliberately NOT recomputing asset.Volume1H/24H/7D here. They used to be
+                // resummed from every cached AggregatedPool.Volume24H touching this asset, but
+                // those pool-level figures only refresh when VolumeUpdateBackgroundService sees
+                // a *new* trade on that specific pool - a pool that stops trading keeps a frozen,
+                // never-decaying volume. Resumming on every single trade anywhere in the system
+                // meant a stale/frozen pool could periodically re-inflate the honest, properly
+                // decaying figure that TopAssetsService.SyncAssetVolumeCountersAsync computes
+                // straight from ITradeQueryService every ~5 minutes - which is what the Assets
+                // table's Volume24H column and the Popular/Trending highlight cards both need to
+                // agree on. TopAssetsService is now the single writer of these three fields; see
+                // AggregatedPoolAssetVolumeConsistencyTests for the regression this guards.
+
+                if (changed)
+                {
+                    asset.Timestamp = asOf > asset.Timestamp ? asOf : asset.Timestamp;
+                    await _assetRepository.SetAssetAsync(asset, cancellationToken);
+                }
+            }
+        }
+
+        private async Task RefreshPoolHistoricalPricesAsync(CancellationToken cancellationToken)
+        {
+            if (_assetRepository == null) return;
             // Update historical prices on aggregated pools
             foreach (var agg in _cache.Values)
             {
-                var assetA = await _assetRepository?.GetAssetAsync(agg.AssetIdA, cancellationToken);
-                var assetB = await _assetRepository?.GetAssetAsync(agg.AssetIdB, cancellationToken);
+                var assetA = await _assetRepository.GetAssetAsync(agg.AssetIdA, cancellationToken);
+                var assetB = await _assetRepository.GetAssetAsync(agg.AssetIdB, cancellationToken);
                 agg.PriceAUSD1H = assetA?.PriceUSD1H;
                 agg.PriceAUSD24H = assetA?.PriceUSD24H;
                 agg.PriceAUSD7D = assetA?.PriceUSD7D;

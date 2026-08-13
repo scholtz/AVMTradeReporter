@@ -68,6 +68,50 @@ Same rule applies to any future readiness signal: as long as the k8s probes
 stay TCP-only, "port open" must remain synonymous with "fully warm",
 because there's no finer-grained HTTP health check to fall back on.
 
+**Follow-up incident (2026-08-13, same day, commit `aaa7750` → broke the very
+next Algorand mainnet promote): making that warmup awaited instead of
+fire-and-forget turned a *correctness* bug into an *availability* one.**
+`AggregatedPoolRepository.InitializeFromExistingPoolsAsync` called
+`UpdateRelatedAssetsAsync` once per pool, and that method's last step
+(`RefreshPoolHistoricalPricesAsync` today) rescanned the *entire* aggregated-
+pool cache to refresh denormalized historical-price fields on every cached
+pool — an O(pools) rescan repeated once per pool, i.e. O(pools²). While this
+ran fire-and-forget in the background, nobody noticed. Once it became
+startup-blocking, production's real pool count made it take longer than both
+the `startupProbe` budget and `kubectl rollout status`'s default 10-minute
+progress deadline — the promote workflow's "Roll out production deployments"
+step failed with `deployment ... exceeded its progress deadline`, stuck at
+"N old replicas are pending termination" the whole time (translation: the new
+pod never became healthy; `maxUnavailable: 0` meant the old pod was never
+touched, so this was a failed *deploy*, not an outage — but every retry would
+fail identically until fixed). Voi's smaller pool count deployed fine in the
+same run, which is why this didn't show up as a generic "the probes are
+broken" symptom.
+
+Fixed by splitting the per-pool-call path from the bulk-init path:
+`RecomputeAssetStatsAsync` now takes an explicit list of asset ids and is
+called once with the *small, fixed-size* "affected" set (updated pool's two
+assets + ALGO + usdRef) from the live per-trade path
+(`UpdateRelatedAssetsAsync`), or once with *every distinct asset in the whole
+cache, deduplicated* from the bulk path (`RefreshAllAssetStatsAsync`, called
+once total by `InitializeFromExistingPoolsAsync`, not once per pool). Same
+for the historical-price cache rescan. Net effect: bulk startup is
+O(pools + distinct assets), not O(pools²). Regression test:
+`AVMTradeReporterTests/Repository/AggregatedPoolBulkInitPerformanceTests.cs`
+(asserts `GetAssetAsync` call count during bulk init stays linear in pool
+count using a counting `IAssetRepository`, via the new
+`AggregatedPoolRepository.ResetForTests()` test-only cache-clear hook).
+
+**Rule going forward**: any code path that runs once per pool/asset/trade
+during *live* operation and is safe there (small, fixed fan-out) must not be
+reused unmodified for *bulk* operations (startup, full resync) without first
+checking whether it internally scans the whole cache/collection - that scan
+is O(1) amortized over a stream of independent live events, but O(N) if
+repeated once per item during a bulk load of N items. When adding a new bulk
+path, prefer a dedicated method that does each expensive collection-wide scan
+exactly once, the way `RefreshAllAssetStatsAsync`/`RefreshPoolHistoricalPricesAsync`
+do.
+
 ## Kubernetes rollout config (all `k8s/*/deployment-api*.yaml`)
 
 Every API Deployment (`k8s/main/deployment-api.yaml`,
