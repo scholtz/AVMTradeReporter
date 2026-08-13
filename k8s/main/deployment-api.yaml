@@ -19,6 +19,13 @@ spec:
       maxUnavailable: 0
       maxSurge: 1
   minReadySeconds: 15
+  # kubectl rollout status (used by promote-production.yml) reports failure once this many
+  # seconds pass without progress - default is 600s (10 min). Production's real pool count
+  # (3000+) made a from-cold startup take longer than that even after parallelizing the bulk
+  # warmup (2026-08-13/14 incident: "deployment ... exceeded its progress deadline" while the
+  # new pod was still legitimately starting, not stuck). Must stay comfortably above
+  # startupProbe's own budget below.
+  progressDeadlineSeconds: 1200
   template:
     metadata:
       labels:
@@ -54,7 +61,7 @@ spec:
               port: 8080
             periodSeconds: 5
             timeoutSeconds: 5
-            failureThreshold: 90 # up to ~7.5 minutes to finish warmup before liveness can kill it
+            failureThreshold: 180 # up to ~15 minutes to finish warmup before liveness can kill it
           readinessProbe:
             tcpSocket:
               port: 8080

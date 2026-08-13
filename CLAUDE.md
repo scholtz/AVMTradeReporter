@@ -112,6 +112,39 @@ path, prefer a dedicated method that does each expensive collection-wide scan
 exactly once, the way `RefreshAllAssetStatsAsync`/`RefreshPoolHistoricalPricesAsync`
 do.
 
+**Second follow-up (2026-08-14): O(N) still wasn't fast enough on its own.**
+Production has 3000+ pools. Even after fixing the O(pools²) bug above, a
+*sequential* O(pools) loop - one ES write + two Redis calls + a hub-
+subscription scan per pool, then later one asset recompute (1-3 ES OHLC
+queries) per distinct asset - still added up to roughly ten minutes of pure
+network round-trip latency (confirmed: production logs went silent for ~10
+minutes right after "Updated volumes for 3394 pools", then the rollout timed
+out again). Fixed by running both the per-pool store/publish loop
+(`InitializeFromExistingPoolsAsync`) and the per-asset recompute loop
+(`RecomputeAssetStatsAsync`'s non-priority tier, i.e. everything except
+ALGO/usdRef) with `Parallel.ForEachAsync` at a bounded degree of parallelism
+(`BulkInitDegreeOfParallelism = 32`) instead of a sequential `foreach`+`await`.
+ALGO and usdRef are still resolved *sequentially first* (every other asset's
+price can derive from theirs) before the rest fan out. This required
+switching the shared `priceCache` from `Dictionary` to `ConcurrentDictionary`
+since multiple asset recomputations now run concurrently.
+
+Also bumped, on the same reasoning as above (production's real data volume,
+not a bug in the probe config itself): `startupProbe.failureThreshold`
+90→180 (~15 min budget) and added an explicit `progressDeadlineSeconds: 1200`
+(20 min) on every API Deployment - `kubectl rollout status` (no `--timeout`
+flag in the workflows) fails as soon as the Deployment's own
+`progressDeadlineSeconds` condition fires, which defaults to 600s and was
+the literal error message in both timeout incidents. If a future change
+increases startup cost again (more pools, slower ES), raise these three
+numbers together - `progressDeadlineSeconds` must always stay comfortably
+above `startupProbe`'s own budget, which must stay above whatever the
+bulk-warmup path actually takes end to end.
+
+If bulk startup ever needs to be faster again: `BulkInitDegreeOfParallelism`
+is the first knob to turn (raise it, watch ES/Redis load), before reaching
+for a bigger algorithmic change.
+
 ## Kubernetes rollout config (all `k8s/*/deployment-api*.yaml`)
 
 Every API Deployment (`k8s/main/deployment-api.yaml`,
@@ -126,8 +159,11 @@ dropping/serving-stale data:
   Ready for 15s. Never remove this or let it default (the bare Deployment
   default is the same numbers, but leave it explicit — it's load-bearing
   for "nobody notices a deploy").
-- `startupProbe` (tcpSocket, generous `failureThreshold` ~90 at 5s
-  intervals ≈ 7.5 minutes) must exist on every API container.
+- `startupProbe` (tcpSocket, generous `failureThreshold` ~180 at 5s
+  intervals ≈ 15 minutes) must exist on every API container, and the
+  Deployment needs an explicit `progressDeadlineSeconds` (1200 = 20 min)
+  comfortably above that budget — `kubectl rollout status` in the deploy
+  workflows has no `--timeout` of its own and just relays this condition.
   `readinessProbe`/`livenessProbe` share the pod's only real signal (the
   TCP port), so without a `startupProbe` a slow-but-legitimate warmup
   (many pools, cold ES) can get killed mid-startup by the liveness probe's

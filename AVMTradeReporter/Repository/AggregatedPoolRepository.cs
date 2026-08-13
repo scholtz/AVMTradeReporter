@@ -30,6 +30,11 @@ namespace AVMTradeReporter.Repository
 
         private static readonly ConcurrentDictionary<(ulong A, ulong B), AggregatedPool> _cache = new();
 
+        // Bounded fan-out for bulk (startup) recomputation - high enough to turn thousands of
+        // sequential ES/Redis round trips into a startup-time-friendly number of parallel rounds,
+        // low enough not to overwhelm the Elasticsearch/Redis connection pools.
+        private const int BulkInitDegreeOfParallelism = 32;
+
         public AggregatedPoolRepository(
             ElasticsearchClient elasticClient,
             ILogger<AggregatedPoolRepository> logger,
@@ -121,17 +126,23 @@ namespace AVMTradeReporter.Repository
                 // out after 10 minutes stuck "waiting for old replicas to terminate", i.e. the new
                 // pod never finished starting). RefreshAllAssetStatsAsync below does the same
                 // computation exactly once per distinct asset instead of once per (pool, asset) pair.
-                foreach (var agg in aggregates)
-                {
-                    var send = agg;
-                    if (agg.AssetIdA > agg.AssetIdB)
+                //
+                // Also run with bounded parallelism, not a sequential await-in-a-loop: even at O(N)
+                // instead of O(N²), production has 3000+ pools, and each store is an ES write + two
+                // Redis calls + a hub-subscription scan - sequentially that's still ~10 minutes of
+                // pure network round-trip latency (confirmed in prod: startup went silent for ~10
+                // minutes right after this loop began). Each pool's store is independent of every
+                // other pool's (no shared mutable state beyond the thread-safe ConcurrentDictionary
+                // cache and thread-safe ES/Redis/SignalR clients), so this is safe to fan out.
+                await Parallel.ForEachAsync(
+                    aggregates,
+                    new ParallelOptions { MaxDegreeOfParallelism = BulkInitDegreeOfParallelism, CancellationToken = cancellationToken },
+                    async (agg, ct) =>
                     {
-                        // Ensure consistent order for the pair
-                        send = agg.Reverse();
-                    }
-                    await StoreAggregatedPoolAsync(send, cancellationToken, updateRelatedAssets: false);
-                    await PublishToHubAsync(send, cancellationToken);
-                }
+                        var send = agg.AssetIdA > agg.AssetIdB ? agg.Reverse() : agg;
+                        await StoreAggregatedPoolAsync(send, ct, updateRelatedAssets: false);
+                        await PublishToHubAsync(send, ct);
+                    });
 
                 await RefreshAllAssetStatsAsync(cancellationToken);
             }
@@ -426,7 +437,7 @@ namespace AVMTradeReporter.Repository
                 // once per live trade, so it must stay O(1) per call. Bulk/startup recomputation goes
                 // through RefreshAllAssetStatsAsync instead (see InitializeFromExistingPoolsAsync).
                 var affected = new HashSet<ulong> { updatedPool.AssetIdA, updatedPool.AssetIdB, 0UL, usdRef };
-                var priceCache = new Dictionary<ulong, decimal>();
+                var priceCache = new ConcurrentDictionary<ulong, decimal>();
                 await RecomputeAssetStatsAsync(affected, priceCache, updatedPool.LastUpdated ?? DateTimeOffset.UtcNow, cancellationToken);
             }
             catch (Exception ex)
@@ -456,7 +467,7 @@ namespace AVMTradeReporter.Repository
                     allAssetIds.Add(pool.AssetIdA);
                     allAssetIds.Add(pool.AssetIdB);
                 }
-                var priceCache = new Dictionary<ulong, decimal>();
+                var priceCache = new ConcurrentDictionary<ulong, decimal>();
                 await RecomputeAssetStatsAsync(allAssetIds, priceCache, DateTimeOffset.UtcNow, cancellationToken);
             }
             catch (Exception ex)
@@ -469,24 +480,51 @@ namespace AVMTradeReporter.Repository
 
         /// <summary>
         /// Recomputes PriceUSD/PriceUSD1H/24H/7D/TVL_USD/TotalTVLAssetInUSD/PoolsCount for each asset
-        /// in <paramref name="assetIds"/>, in ALGO/usdRef-first order so derived prices can use them,
-        /// persisting via SetAssetAsync only when something actually changed.
+        /// in <paramref name="assetIds"/>, persisting via SetAssetAsync only when something actually
+        /// changed. ALGO and the network's usdRef asset are always processed first and sequentially -
+        /// every other asset's price can derive from theirs (via <paramref name="priceCache"/> or a
+        /// fresh GetAssetAsync), so they must already be settled before the rest run. The remaining
+        /// assets are independent of each other and run with bounded parallelism: sequential per-asset
+        /// processing (each doing 1-2 ES/Redis round trips for OHLC history) is fine for the live
+        /// per-trade path's ~4-asset "affected" set, but production's real asset count made a fully
+        /// sequential bulk pass (RefreshAllAssetStatsAsync) take minutes on its own, on top of the
+        /// pool-store loop - see InitializeFromExistingPoolsAsync and the 2026-08-13/14 startup-timeout
+        /// incidents.
         /// </summary>
         private async Task RecomputeAssetStatsAsync(
             IEnumerable<ulong> assetIds,
-            Dictionary<ulong, decimal> priceCache,
+            ConcurrentDictionary<ulong, decimal> priceCache,
             DateTimeOffset asOf,
             CancellationToken cancellationToken)
         {
             if (_assetRepository == null) return;
             var usdRef = _appConfig.UsdReferenceAssetId;
-            var ordered = assetIds.OrderBy(a => a == 0 ? 0 : a == usdRef ? 1 : 2).ToArray();
+            var distinct = new HashSet<ulong>(assetIds);
+            var priorityTier = new[] { 0UL, usdRef }.Where(distinct.Contains).Distinct().ToArray();
+            var restTier = distinct.Where(a => a != 0UL && a != usdRef).ToArray();
 
-            foreach (var assetId in ordered)
+            foreach (var assetId in priorityTier)
             {
-                var asset = await _assetRepository.GetAssetAsync(assetId, cancellationToken);
-                if (asset == null) continue;
-                var changed = false;
+                await RecomputeSingleAssetAsync(assetId, priceCache, asOf, cancellationToken);
+            }
+
+            await Parallel.ForEachAsync(
+                restTier,
+                new ParallelOptions { MaxDegreeOfParallelism = BulkInitDegreeOfParallelism, CancellationToken = cancellationToken },
+                async (assetId, ct) => await RecomputeSingleAssetAsync(assetId, priceCache, asOf, ct));
+        }
+
+        private async Task RecomputeSingleAssetAsync(
+            ulong assetId,
+            ConcurrentDictionary<ulong, decimal> priceCache,
+            DateTimeOffset asOf,
+            CancellationToken cancellationToken)
+        {
+            if (_assetRepository == null) return;
+            var usdRef = _appConfig.UsdReferenceAssetId;
+            var asset = await _assetRepository.GetAssetAsync(assetId, cancellationToken);
+            if (asset == null) return;
+            var changed = false;
 
                 // Peg this network's reference stable asset (e.g. USDC) to $1
                 if (asset.Index == usdRef && asset.PriceUSD != 1m)
@@ -658,7 +696,6 @@ namespace AVMTradeReporter.Repository
                     asset.Timestamp = asOf > asset.Timestamp ? asOf : asset.Timestamp;
                     await _assetRepository.SetAssetAsync(asset, cancellationToken);
                 }
-            }
         }
 
         private async Task RefreshPoolHistoricalPricesAsync(CancellationToken cancellationToken)
