@@ -21,9 +21,13 @@ on:
       network:
         description: >-
           Production network to deploy to. "all" deploys the same version to
-          every production network (algorand + voi).
+          every production network (algorand + voi) and is the default - the
+          two networks previously drifted apart (e.g. 1.2026.08.11-main went
+          to algorand only, leaving voi a version behind) whenever someone
+          promoted a single network and forgot the other. Only pick a single
+          network deliberately, e.g. to hotfix one production independently.
         required: true
-        default: algorand
+        default: all
         type: choice
         options:
           - algorand
@@ -68,8 +72,58 @@ jobs:
           echo "Promoting version: $version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
+      # Only meaningful when a single network is being promoted (network=all keeps both in
+      # lockstep by construction). Reads what's currently committed for the network NOT being
+      # promoted this run and warns - doesn't block - if it's about to fall further out of sync,
+      # so a deliberate single-network hotfix doesn't silently repeat the 2026-08-11 drift
+      # (algorand promoted to 1.2026.08.11-main, voi left on 1.2026.08.10-main until the next day).
+      - name: Checkout
+        if: inputs.network != 'all'
+        uses: actions/checkout@v4
+
+      - name: Warn if this leaves networks on different versions
+        if: inputs.network != 'all'
+        run: |
+          version="${{ steps.resolve.outputs.version }}"
+          if [ "${{ inputs.network }}" = "algorand" ]; then
+            other_name="voi"
+            other_version=$(grep -oE "${IMAGE_API}:[^\"[:space:]]+" k8s/voi/deployment-api-voi.yaml | head -n1 | cut -d: -f2)
+          else
+            other_name="algorand"
+            other_version=$(grep -oE "${IMAGE_API}:[^\"[:space:]]+" k8s/main/deployment-api.yaml | head -n1 | cut -d: -f2)
+          fi
+          if [ -n "$other_version" ] && [ "$other_version" != "$version" ]; then
+            echo "::warning::Promoting only '${{ inputs.network }}' to $version - '$other_name' stays on $other_version. Re-run with network=all to keep both in sync."
+          fi
+
   # ---------------------------------------------------------------------
-  # Stage 1: promote-tag - re-tags the already-built & pushed
+  # Stage 1: verify-images - the versioned tag was pushed by deploy.yml when
+  # this build went to stage, but that doesn't guarantee it's still there or
+  # that it finished pushing (e.g. an explicit --version input for a build
+  # that's still in flight). Both production deploys must only proceed once
+  # this is confirmed - previously only the algorand path got this check for
+  # free as a side effect of promote-tag's "docker pull"; voi had no such
+  # guard and would only fail late, via a stuck rollout, if the image was
+  # missing.
+  # ---------------------------------------------------------------------
+  verify-images:
+    needs: resolve-version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Confirm versioned images exist in the registry
+        run: |
+          version="${{ needs.resolve-version.outputs.version }}"
+          docker manifest inspect "${{ env.IMAGE_API }}:${version}" > /dev/null
+          docker manifest inspect "${{ env.IMAGE_SUBSCRIBER }}:${version}" > /dev/null
+
+  # ---------------------------------------------------------------------
+  # Stage 2: promote-tag - re-tags the already-built & pushed
   # <image>:<version> images as :latest. Doesn't rebuild anything - just
   # moves the "latest" pointer. The ":latest" moving tag means "what runs
   # on Algorand production", so this only runs when Algorand is being
@@ -77,7 +131,7 @@ jobs:
   # the exact versioned tag in its manifests.
   # ---------------------------------------------------------------------
   promote-tag:
-    needs: resolve-version
+    needs: [resolve-version, verify-images]
     if: inputs.network == 'algorand' || inputs.network == 'all'
     runs-on: ubuntu-latest
     steps:
@@ -106,14 +160,14 @@ jobs:
           docker push ${{ env.IMAGE_SUBSCRIBER }}:latest
 
   # ---------------------------------------------------------------------
-  # Stage 2: deploy-production - only runs once the "production" GitHub
+  # Stage 3: deploy-production - only runs once the "production" GitHub
   # Environment's protection rules (e.g. required reviewers) are satisfied.
   # Deploys the version pinned by the input, not the "latest" tag, so the
   # committed manifest always records exactly which build is running.
   # ---------------------------------------------------------------------
   deploy-production:
     name: Deploy to production (Algorand mainnet)
-    needs: [resolve-version, promote-tag]
+    needs: [resolve-version, verify-images, promote-tag]
     if: inputs.network == 'algorand' || inputs.network == 'all'
     runs-on: ubuntu-latest
     environment:
@@ -195,18 +249,22 @@ jobs:
         run: rm -f "$HOME/.kube/config"
 
   # ---------------------------------------------------------------------
-  # Stage 2 (voi): deploy-production-voi - Voi mainnet production
+  # Stage 3 (voi): deploy-production-voi - Voi mainnet production
   # (api.voi.scan.biatec.io, k8s/voi/*). Gated by the "production-voi"
   # GitHub Environment, whose secrets must provide the Voi environment's
   # own Elasticsearch cluster (ELASTIC_HOST/ELASTIC_API_KEY - index names
   # are not namespaced per environment, so voi cannot share production's
   # cluster) and REDIS_CONNECTION_STRING (may be the shared Redis - keys
-  # are namespaced avmtrade:voi:* / voi:*). Deploys the pinned versioned
-  # tag; the :latest moving tag is not touched for voi.
+  # are namespaced avmtrade:voi:* / voi:*). Deploys the exact same pinned
+  # versioned tag as deploy-production (both read needs.resolve-version's
+  # single output) once verify-images has confirmed it exists; the :latest
+  # moving tag is not touched for voi. Deliberately does NOT depend on
+  # promote-tag - that job only manages the algorand-specific :latest
+  # pointer and has no bearing on what voi deploys.
   # ---------------------------------------------------------------------
   deploy-production-voi:
     name: Deploy to production (Voi mainnet)
-    needs: resolve-version
+    needs: [resolve-version, verify-images]
     if: inputs.network == 'voi' || inputs.network == 'all'
     runs-on: ubuntu-latest
     environment:
