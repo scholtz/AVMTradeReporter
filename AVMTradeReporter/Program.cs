@@ -12,11 +12,14 @@ using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Security;
 using Elastic.Transport;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using Microsoft.OpenApi;
 using NLog.Web;
 using StackExchange.Redis;
 using System.Text.Json.Serialization; // added for ReferenceHandler (kept in case future customization)
+using System.Threading.RateLimiting;
 
 namespace AVMTradeReporter
 {
@@ -270,6 +273,63 @@ namespace AVMTradeReporter
 
             builder.Services.AddProblemDetails();
 
+            // Two tiers, both fixed 1-minute windows: 60 req/min for unauthenticated (anonymous or
+            // failed ARC-14) traffic partitioned by client IP, 300 req/min for callers holding a
+            // valid ARC-14 token partitioned by their Algorand address so one busy authenticated
+            // caller can't starve another. /health is excluded - it's polled every few seconds by
+            // k8s probes and the external uptime monitor and would otherwise burn through the
+            // anonymous budget by itself.
+            builder.Services.AddRateLimiter(options =>
+            {
+                options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+                options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
+                {
+                    if (httpContext.Request.Path.StartsWithSegments("/health"))
+                    {
+                        return RateLimitPartition.GetNoLimiter("health");
+                    }
+
+                    // AlgorandAuthenticationHandlerV2 only succeeds (IsAuthenticated == true) for a
+                    // validly signed ARC-14 transaction - EmptySuccessOnFailure (which would instead
+                    // return a "successful" ticket with an empty identity on a missing/bad token) is
+                    // not set in appsettings.json and defaults to false, so this is a reliable signal
+                    // here. On success ClaimTypes.Name is the caller's Algorand address (see
+                    // AlgorandAuthenticationHandlerV2.VerifyCommon in the AlgorandAuthenticationDotNet
+                    // package source).
+                    var address = httpContext.User?.Identity?.IsAuthenticated == true
+                        ? httpContext.User.Identity.Name
+                        : null;
+                    if (!string.IsNullOrWhiteSpace(address))
+                    {
+                        return RateLimitPartition.GetFixedWindowLimiter($"auth:{address}", _ => new FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = 300,
+                            Window = TimeSpan.FromMinutes(1),
+                            QueueLimit = 0,
+                            AutoReplenishment = true,
+                        });
+                    }
+
+                    var clientIp = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+                    return RateLimitPartition.GetFixedWindowLimiter($"anon:{clientIp}", _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 60,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                        AutoReplenishment = true,
+                    });
+                });
+
+                options.OnRejected = async (context, cancellationToken) =>
+                {
+                    context.HttpContext.Response.Headers.RetryAfter = "60";
+                    context.HttpContext.Response.ContentType = "application/json";
+                    await context.HttpContext.Response.WriteAsync(
+                        "{\"error\":\"Rate limit exceeded. Try again later.\"}", cancellationToken);
+                };
+            });
+
             // /health is polled frequently by k8s probes and external monitors, so its checks stay
             // cheap (in-memory cache reads + a single ES/Redis ping) rather than deep data queries.
             builder.Services.AddHealthChecks()
@@ -278,6 +338,21 @@ namespace AVMTradeReporter
                 .AddCheck<HealthChecks.PoolCacheHealthCheck>("pool-cache");
 
             var app = builder.Build();
+
+            // ingress-nginx terminates the client connection and proxies to this pod's ClusterIP,
+            // so without this every request's RemoteIpAddress would be the ingress pod's IP -
+            // collapsing the per-client rate limiter (and any future per-IP logic) into one shared
+            // bucket for all external callers. KnownNetworks/KnownProxies are cleared because the
+            // proxy is a dynamic in-cluster pod IP, not a fixed address to allowlist: this pod is
+            // only reachable via its ClusterIP Service, so anything that reaches it already went
+            // through the ingress.
+            var forwardedHeadersOptions = new ForwardedHeadersOptions
+            {
+                ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+            };
+            forwardedHeadersOptions.KnownIPNetworks.Clear();
+            forwardedHeadersOptions.KnownProxies.Clear();
+            app.UseForwardedHeaders(forwardedHeadersOptions);
 
             // Configure the HTTP request pipeline
             // Compression first so that all subsequent response-producing middleware is compressed
@@ -347,6 +422,10 @@ namespace AVMTradeReporter
 
             app.UseAuthentication();
             app.UseAuthorization();
+
+            // Must come after UseAuthentication so the "address" claim is populated for the
+            // authenticated-vs-anonymous rate limit tiers configured in AddRateLimiter above.
+            app.UseRateLimiter();
 
             app.MapControllers();
             app.MapHub<BiatecScanHub>("/biatecScanHub");
