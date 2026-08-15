@@ -42,19 +42,22 @@ spec:
           # See k8s/main/deployment-api.yaml for why a startupProbe is required: startup blocks on
           # full cache warmup and must not be killed mid-warmup by a short-fused liveness probe.
           startupProbe:
-            tcpSocket:
+            httpGet:
+              path: /health
               port: 8080
             periodSeconds: 5
             timeoutSeconds: 5
             failureThreshold: 180
           readinessProbe:
-            tcpSocket:
+            httpGet:
+              path: /health
               port: 8080
             periodSeconds: 5
             timeoutSeconds: 5
             failureThreshold: 2
           livenessProbe:
-            tcpSocket:
+            httpGet:
+              path: /health
               port: 8080
             periodSeconds: 10
             timeoutSeconds: 5

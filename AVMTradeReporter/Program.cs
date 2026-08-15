@@ -11,6 +11,7 @@ using AVMTradeReporter.Services;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Security;
 using Elastic.Transport;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using Microsoft.OpenApi;
 using NLog.Web;
@@ -99,6 +100,8 @@ namespace AVMTradeReporter
                     var connectionMultiplexer = sp.GetRequiredService<IConnectionMultiplexer>();
                     return connectionMultiplexer.GetDatabase(appConfig.Redis.DatabaseId);
                 });
+
+                builder.Services.AddHealthChecks().AddCheck<HealthChecks.RedisHealthCheck>("redis");
             }
 
             // Add Algorand API client
@@ -267,6 +270,13 @@ namespace AVMTradeReporter
 
             builder.Services.AddProblemDetails();
 
+            // /health is polled frequently by k8s probes and external monitors, so its checks stay
+            // cheap (in-memory cache reads + a single ES/Redis ping) rather than deep data queries.
+            builder.Services.AddHealthChecks()
+                .AddCheck<HealthChecks.ElasticsearchHealthCheck>("elasticsearch")
+                .AddCheck<HealthChecks.AssetCacheHealthCheck>("asset-cache")
+                .AddCheck<HealthChecks.PoolCacheHealthCheck>("pool-cache");
+
             var app = builder.Build();
 
             // Configure the HTTP request pipeline
@@ -344,6 +354,23 @@ namespace AVMTradeReporter
             // Index page: redirect to the Swagger UI. ExcludeFromDescription keeps this
             // endpoint itself out of the generated OpenAPI document.
             app.MapGet("/", () => Results.Redirect("/swagger")).ExcludeFromDescription();
+
+            // Used by k8s startup/readiness/liveness probes and the external uptime monitor.
+            // Microsoft.* logging is capped at Warn in nlog.config, so this high-frequency polling
+            // never reaches the console/log output. Degraded (e.g. an empty cache right after a
+            // cold Redis/ES outage) still returns 200 so the pod stays in rotation; only Unhealthy
+            // (a downstream dependency ping actually failing) returns 503.
+            app.MapHealthChecks("/health", new HealthCheckOptions
+            {
+                ResponseWriter = HealthChecks.HealthCheckResponseWriter.WriteResponse,
+                AllowCachingResponses = false,
+                ResultStatusCodes =
+                {
+                    [Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Healthy] = StatusCodes.Status200OK,
+                    [Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Degraded] = StatusCodes.Status200OK,
+                    [Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Unhealthy] = StatusCodes.Status503ServiceUnavailable,
+                },
+            }).ExcludeFromDescription();
 
             // initialize all singletons
 

@@ -51,25 +51,30 @@ spec:
           # Startup can legitimately take minutes: Program.cs blocks Kestrel's port bind on
           # loading/hydrating every static in-memory cache (assets, pools, aggregated pools incl.
           # their derived PriceUSD/TVL/PoolsCount/Volume figures) so a freshly-rolled pod never
-          # looks "ready" to Kubernetes with incomplete data. While that TCP port is closed,
-          # readiness/livenessProbe below would otherwise see the same signal and, without a
-          # startupProbe, the liveness probe's short initialDelaySeconds/failureThreshold could
-          # kill the pod mid-warmup - producing an endless restart loop that never finishes
-          # preloading. startupProbe suppresses liveness/readiness checks until it passes once.
+          # looks "ready" to Kubernetes with incomplete data. While that port is closed, all three
+          # probes below fail identically and, without a startupProbe, the liveness probe's short
+          # failureThreshold could kill the pod mid-warmup - producing an endless restart loop that
+          # never finishes preloading. startupProbe suppresses liveness/readiness checks until it
+          # passes once. All three probe /health (see HealthChecks/ + Program.cs MapHealthChecks),
+          # which only returns 200 once ES/Redis/asset-cache/pool-cache checks are Healthy/Degraded
+          # (503 = Unhealthy) - a real application-level signal, not just "the TCP port is open".
           startupProbe:
-            tcpSocket:
+            httpGet:
+              path: /health
               port: 8080
             periodSeconds: 5
             timeoutSeconds: 5
             failureThreshold: 180 # up to ~15 minutes to finish warmup before liveness can kill it
           readinessProbe:
-            tcpSocket:
+            httpGet:
+              path: /health
               port: 8080
             periodSeconds: 5
             timeoutSeconds: 5
             failureThreshold: 2
           livenessProbe:
-            tcpSocket:
+            httpGet:
+              path: /health
               port: 8080
             periodSeconds: 10
             timeoutSeconds: 5
