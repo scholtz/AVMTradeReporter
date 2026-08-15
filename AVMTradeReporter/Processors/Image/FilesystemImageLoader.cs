@@ -29,5 +29,18 @@
             Directory.CreateDirectory(Path.GetDirectoryName(filePath) ?? string.Empty);
             await File.WriteAllBytesAsync(filePath, imageData);
         }
+
+        public DateTime? GetLastWriteTimeUtc(string imageName)
+        {
+            try
+            {
+                var filePath = Path.Combine(_imageDirectory, imageName);
+                return File.Exists(filePath) ? File.GetLastWriteTimeUtc(filePath) : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
     }
 }

@@ -9,6 +9,25 @@ namespace AVMTradeReporter.Processors.Image
     {
         private static readonly byte[] Placeholder = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=");
 
+        /// <summary>
+        /// A cached icon older than this is re-resolved from source on the next request, so a
+        /// once-bad icon (e.g. the Meld Gold / ASA.Gold ticker-collision mixup, see
+        /// docs/ICON_SHARING.md) or a since-corrected upstream icon eventually self-heals without
+        /// manual cache-file surgery. The re-resolution result must pass <see cref="IsUsableImage"/>
+        /// before it overwrites anything - see the comment at the refresh call site.
+        /// </summary>
+        private static readonly TimeSpan RefreshInterval = TimeSpan.FromDays(7);
+
+        /// <summary>
+        /// Minimum plausible size for a real icon PNG, comfortably above the 68-byte 1x1
+        /// placeholder. Guards both the initial resolution and the staleness refresh against
+        /// writing a corrupt/truncated/near-empty download over a working cached file.
+        /// </summary>
+        private const int MinUsableImageBytes = 256;
+
+        private static bool IsUsableImage(byte[] data) =>
+            data.Length >= MinUsableImageBytes && !data.AsSpan().SequenceEqual(Placeholder);
+
         private readonly IAssetRepository _assetRepository;
         private readonly AppConfiguration _config;
 
@@ -41,7 +60,16 @@ namespace AVMTradeReporter.Processors.Image
             var imageFromSystem = await byIdLoader.LoadImageAsync(fsPath, cancellationToken);
             if (imageFromSystem.Length > 0)
             {
-                return imageFromSystem;
+                var lastWriteUtc = byIdLoader.GetLastWriteTimeUtc(fsPath);
+                var isStale = lastWriteUtc.HasValue && DateTime.UtcNow - lastWriteUtc.Value > RefreshInterval;
+                if (!isStale)
+                {
+                    return imageFromSystem;
+                }
+                // Cached icon is old enough to be worth re-resolving (falls through to the same
+                // resolution logic used for a cache miss below). imageFromSystem is kept as a
+                // fallback: if the fresh attempt fails or comes back too small/garbage, we keep
+                // serving the old-but-working icon rather than replacing it with junk.
             }
 
             // Shared cache keyed by ASA unit name (ticker), stored on the images volume shared
@@ -61,7 +89,7 @@ namespace AVMTradeReporter.Processors.Image
             if (!IsMainnet && unitNameKey != null)
             {
                 var sharedImage = await byUnitNameLoader.LoadImageAsync($"{unitNameKey}.png", cancellationToken);
-                if (sharedImage.Length > 0 && !sharedImage.AsSpan().SequenceEqual(Placeholder))
+                if (IsUsableImage(sharedImage))
                 {
                     await byIdLoader.SaveImageAsync(fsPath, sharedImage);
                     return sharedImage;
@@ -76,7 +104,7 @@ namespace AVMTradeReporter.Processors.Image
             {
                 var tinymanAsaListImageLoader = new TinymanAsaListImageLoader();
                 var imageFromTiny = await tinymanAsaListImageLoader.LoadImageAsync(assetId, cancellationToken);
-                if (imageFromTiny.Length > 0)
+                if (IsUsableImage(imageFromTiny))
                 {
                     await byIdLoader.SaveImageAsync(fsPath, imageFromTiny);
                     await SaveSharedUnitNameIfAbsentAsync(byUnitNameLoader, unitNameKey, imageFromTiny, cancellationToken);
@@ -85,12 +113,21 @@ namespace AVMTradeReporter.Processors.Image
 
                 var peraLoader = new PeraImageLoader();
                 var imageFromPera = await peraLoader.LoadImageAsync(assetId, cancellationToken);
-                if (imageFromPera.Length > 0)
+                if (IsUsableImage(imageFromPera))
                 {
                     await byIdLoader.SaveImageAsync(fsPath, imageFromPera);
                     await SaveSharedUnitNameIfAbsentAsync(byUnitNameLoader, unitNameKey, imageFromPera, cancellationToken);
                     return imageFromPera;
                 }
+            }
+
+            if (imageFromSystem.Length > 0)
+            {
+                // Staleness refresh found nothing usable (network failure, upstream still serving
+                // a placeholder, etc). Never let a failed refresh attempt destroy a working cached
+                // icon - keep serving the stale-but-valid one and try again on the next request
+                // past the TTL.
+                return imageFromSystem;
             }
 
             await byIdLoader.SaveImageAsync(fsPath, Placeholder);

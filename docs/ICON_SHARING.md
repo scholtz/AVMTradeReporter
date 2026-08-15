@@ -70,3 +70,21 @@ normalized (lowercased, alphanumeric/`-`/`_` only) UnitName.
   (`/mnt/nvme1/biatec-scan-shared-drive/avm-trade-reporter-images` on the underlying node) - see
   the caveats in `k8s/main/pv-images.yaml` about hostPath only providing real sharing when every
   consuming pod lands on that same node.
+
+## Staleness refresh (self-healing)
+
+An id-keyed cache file older than `MainnetImageProcessor.RefreshInterval` (7 days) is re-resolved
+from source (step 2/3 above) the next time it's requested, instead of being served forever as-is.
+This exists so a bad icon - like the Meld Gold / ASA.Gold mixup above, written before the mainnet
+`by-unitname` read was disabled - eventually self-heals without anyone having to manually delete
+the file from the shared volume, and so an upstream project that fixes its Tinyman/Pera icon
+eventually propagates here too.
+
+The refresh is fail-safe in both directions:
+
+- A fresh result only replaces the cached file if it passes `IsUsableImage` (at least
+  `MinUsableImageBytes` = 256 bytes and not the 1x1 placeholder) - a failed HTTP call, a 404, or a
+  truncated/corrupt download never overwrites a working cached icon.
+- If the refresh finds nothing usable, the stale-but-valid cached icon keeps being served, and the
+  next attempt happens on the following request past the TTL - not immediately, and not by falling
+  back to the placeholder.
