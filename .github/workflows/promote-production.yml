@@ -6,7 +6,9 @@ name: Promote to Production
 # is selected: "algorand" (k8s/main/*, api.algorand.scan.biatec.io - also re-tags the images as
 # :latest) or "voi" (k8s/voi/*, api.voi.scan.biatec.io, Voi mainnet). Selecting "all" promotes the
 # same version to every production network (algorand + voi) in one run, each deploy still gated by
-# its own GitHub Environment. It never builds a new image.
+# its own GitHub Environment. On network=all, voi deploys only after the algorand :latest tag has
+# been promoted (deploy-production-voi waits on promote-tag) rather than in parallel with algorand.
+# It never builds a new image.
 on:
   workflow_dispatch:
     inputs:
@@ -257,15 +259,21 @@ jobs:
   # cluster) and REDIS_CONNECTION_STRING (may be the shared Redis - keys
   # are namespaced avmtrade:voi:* / voi:*). Deploys the exact same pinned
   # versioned tag as deploy-production (both read needs.resolve-version's
-  # single output) once verify-images has confirmed it exists; the :latest
-  # moving tag is not touched for voi. Deliberately does NOT depend on
-  # promote-tag - that job only manages the algorand-specific :latest
-  # pointer and has no bearing on what voi deploys.
+  # single output) once verify-images has confirmed it exists. Also waits
+  # on promote-tag so a network=all run always finishes tagging :latest
+  # for algorand before voi starts rolling out - that ordering itself has
+  # no functional bearing on the voi deploy (it pins the exact versioned
+  # tag, not :latest), it's purely so the two production networks don't
+  # go out simultaneously. promote-tag is skipped entirely for a
+  # network=voi-only run, so the `if` below also accepts a "skipped"
+  # result - `needs:` alone would otherwise skip this job too.
   # ---------------------------------------------------------------------
   deploy-production-voi:
     name: Deploy to production (Voi mainnet)
-    needs: [resolve-version, verify-images]
-    if: inputs.network == 'voi' || inputs.network == 'all'
+    needs: [resolve-version, verify-images, promote-tag]
+    if: |
+      (inputs.network == 'voi' || inputs.network == 'all') &&
+      (needs.promote-tag.result == 'success' || needs.promote-tag.result == 'skipped')
     runs-on: ubuntu-latest
     environment:
       name: production-voi
