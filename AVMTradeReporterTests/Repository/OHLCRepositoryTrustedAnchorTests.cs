@@ -19,6 +19,11 @@ namespace AVMTradeReporterTests.Repository
     /// trusted reference asset ({ALGO, UsdReferenceAssetId} ∪ TrustedReferenceAssetIds) with a
     /// known USD price, priced as (volY / volX) × priceUSD(Y) — the exact on-chain exchange rate
     /// with a reliable USD anchor. Trades between two untrusted assets write no USD candles.
+    ///
+    /// This only covers the anchor-trust rule (WHO may price X). See
+    /// OHLCRepositoryPriceBandTests for the separate outlier-band rule (once X has an
+    /// established price, HOW FAR a new print may move it) - both trusted and, since the
+    /// 2026-08-15 FOLKS incident, untrusted assets are subject to it.
     /// </summary>
     public class OHLCRepositoryTrustedAnchorTests
     {
@@ -26,8 +31,9 @@ namespace AVMTradeReporterTests.Repository
         private const ulong Algo = 0UL;             // always trusted
         private const ulong GoBtc = 386192725UL;    // in default TrustedReferenceAssetIds
         private const ulong GoEth = 386195940UL;    // in default TrustedReferenceAssetIds
-        private const ulong ScamToken = 1294383366UL;   // NOT trusted
+        private const ulong ScamToken = 1294383366UL;   // NOT trusted, deliberately mispriced (established price)
         private const ulong OtherToken = 999999999UL;   // NOT trusted
+        private const ulong NewToken = 555555555UL;     // NOT trusted, no established price yet (bootstrap)
 
         private MockAssetRepository _assets = null!;
         private OHLCRepository _repo = null!;
@@ -81,21 +87,44 @@ namespace AVMTradeReporterTests.Repository
         }
 
         [Test]
-        public async Task TrustedVsUntrusted_PricesTheUntrustedAssetFromTheTrustedLeg()
+        public async Task TrustedVsUntrusted_PricesTheUnpricedAssetFromTheTrustedLeg()
         {
-            // 0.001 goBTC ($63 at the cached $63000) buys 63 SCAM → SCAM is worth $1, no matter
-            // how wrong SCAM's own cached price (1234) is and no matter what ValueUSD says.
+            // 0.001 goBTC ($63 at the cached $63000) buys 63 units of a token nobody has priced
+            // yet (no established cached price - see NewToken's SetUp, PriceUSD defaults to 0) →
+            // it is worth $1, no matter what ValueUSD says. This is the bootstrap case: first
+            // price discovery for a brand new/never-priced token still works via a trusted
+            // anchor, unguarded (see OHLCRepositoryPriceBandTests for what happens once a price
+            // is established).
+            var trade = MakeTrade(GoBtc, 100_000, NewToken, 63_000_000, valueUsd: 118m);
+
+            var buckets = (await _repo.GetIntervalBuckets(trade)).ToList();
+
+            var newTokenUsd = buckets.Where(b => b.InUsdValuation && b.AssetIdA == NewToken).ToList();
+            Assert.That(newTokenUsd.Count, Is.EqualTo(OHLCRepository.Intervals.Length));
+            Assert.That(newTokenUsd.All(b => b.Price == 1m), "price must be rate × priceUSD(goBTC) = 1");
+            Assert.That(newTokenUsd.All(b => b.VolumeBase == 63m));
+            Assert.That(newTokenUsd.All(b => b.VolumeQuote == 63m), "USD volume must be volume × anchored price");
+            Assert.That(newTokenUsd.All(b => b.AssetIdB == Usdc));
+            Assert.That(newTokenUsd.All(b => b.DocId.StartsWith($"{NewToken}-{Usdc}-{b.Interval}-usd-")));
+        }
+
+        [Test]
+        public async Task TrustedVsUntrustedWithEstablishedPrice_GuardsTheUntrustedAssetTooNow()
+        {
+            // Same trade as above, but SCAM already has an established (if dubious) cached price
+            // of $1234. 2026-08-15 incident: FOLKS (not a trusted reference asset, but with a
+            // perfectly good established cached price around $2) charted "stripy" candles because
+            // ANY of its ~100 pools could write an unguarded print the moment the counter leg was
+            // trusted - the guard only ever protected the TRUSTED side. Once an untrusted asset
+            // has a real price, a trusted-anchored print that contradicts it by more than the
+            // band factor is just as likely to be a stale/thin/dust pool as it would be for a
+            // trusted asset, so it's now rejected the same way (price AND volume, both bogus).
             var trade = MakeTrade(GoBtc, 100_000, ScamToken, 63_000_000, valueUsd: 118m);
 
             var buckets = (await _repo.GetIntervalBuckets(trade)).ToList();
 
-            var scamUsd = buckets.Where(b => b.InUsdValuation && b.AssetIdA == ScamToken).ToList();
-            Assert.That(scamUsd.Count, Is.EqualTo(OHLCRepository.Intervals.Length));
-            Assert.That(scamUsd.All(b => b.Price == 1m), "SCAM price must be rate × priceUSD(goBTC) = 1");
-            Assert.That(scamUsd.All(b => b.VolumeBase == 63m));
-            Assert.That(scamUsd.All(b => b.VolumeQuote == 63m), "USD volume must be volume × anchored price");
-            Assert.That(scamUsd.All(b => b.AssetIdB == Usdc));
-            Assert.That(scamUsd.All(b => b.DocId.StartsWith($"{ScamToken}-{Usdc}-{b.Interval}-usd-")));
+            Assert.That(buckets.Where(b => b.InUsdValuation && b.AssetIdA == ScamToken), Is.Empty,
+                "$1 is >99% away from SCAM's established $1234 cached price - outside the band, so rejected");
         }
 
         [Test]
@@ -103,16 +132,19 @@ namespace AVMTradeReporterTests.Repository
         {
             // The production ALGO case: dust arbs against mispriced tokens previously charted
             // ALGO (~$0.09) at hourly highs of ~$9.2.
-            var trade = MakeTrade(Algo, 10_000_000, ScamToken, 90_000_000, valueUsd: 92m);
+            var trade = MakeTrade(Algo, 10_000_000, NewToken, 90_000_000, valueUsd: 92m);
 
             var buckets = (await _repo.GetIntervalBuckets(trade)).ToList();
 
             Assert.That(buckets.Where(b => b.InUsdValuation && b.AssetIdA == Algo), Is.Empty);
 
-            var scamUsd = buckets.Where(b => b.InUsdValuation && b.AssetIdA == ScamToken).ToList();
-            Assert.That(scamUsd.Count, Is.EqualTo(OHLCRepository.Intervals.Length));
-            // 10 ALGO ($0.90) buys 90 SCAM → $0.01 per SCAM.
-            Assert.That(scamUsd.All(b => b.Price == 0.01m));
+            // NewToken has no established price yet (bootstrap case - see
+            // TrustedVsUntrusted_PricesTheUnpricedAssetFromTheTrustedLeg), so it still gets
+            // priced from the trusted ALGO leg unguarded.
+            var newTokenUsd = buckets.Where(b => b.InUsdValuation && b.AssetIdA == NewToken).ToList();
+            Assert.That(newTokenUsd.Count, Is.EqualTo(OHLCRepository.Intervals.Length));
+            // 10 ALGO ($0.90) buys 90 NewToken → $0.01 per unit.
+            Assert.That(newTokenUsd.All(b => b.Price == 0.01m));
         }
 
         [Test]

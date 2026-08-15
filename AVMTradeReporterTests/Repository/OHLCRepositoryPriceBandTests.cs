@@ -14,21 +14,28 @@ namespace AVMTradeReporterTests.Repository
     /// near-empty pools whose exchange rate was 2-100x away from the market — a single such
     /// dust print permanently became the bucket's High/Low, rendering every chart "stripy".
     ///
-    /// Contract verified here: a trade's price may only enter a TRUSTED asset's USD series (and
-    /// the pair series of two trusted assets) when it lies within a configurable band around
-    /// the asset's cached PriceUSD (AppConfiguration.OhlcTrustedPriceBandFactor, default 1.5x).
-    /// Trusted assets' cached prices are authoritative (depth-selected, continuously updated),
-    /// so a print far outside the band is stale-pool noise, not price discovery. UNTRUSTED
-    /// assets are deliberately NOT guarded by their own cached price: the trusted counter leg
-    /// is the only reliable authority for them, and their cached price may itself be garbage
-    /// (see OHLCRepositoryTrustedAnchorTests — the scam-token repricing contract must survive).
+    /// Contract verified here: a trade's price may only enter an asset's USD series (and the
+    /// pair series of two trusted assets) when it lies within a configurable band around that
+    /// asset's cached PriceUSD (AppConfiguration.OhlcTrustedPriceBandFactor, default 1.5x).
+    /// BiatecAsset.PriceUSD is depth-selected and continuously updated for every asset, trusted
+    /// or not (see AggregatedPoolRepository.SelectAssetUsdPrice), so once it's established it is
+    /// an authoritative reference regardless of trusted status - a print far outside the band is
+    /// stale/thin-pool noise, not price discovery.
+    ///
+    /// 2026-08-15 incident: FOLKS (3203964481, NOT a trusted reference asset - one of ~100 pools
+    /// with real ~$35k/24h combined volume) charted persistently "stripy" candles because the
+    /// guard originally only applied to trusted assets; ANY of FOLKS' thin pools could write an
+    /// unguarded print the moment its counter leg was trusted. Untrusted assets are now guarded
+    /// exactly like trusted ones ONCE they have an established (&gt;0) cached price - an asset
+    /// with no price yet remains unguarded (first price discovery via a trusted anchor still
+    /// works - see OHLCRepositoryTrustedAnchorTests' bootstrap-case tests).
     /// </summary>
     public class OHLCRepositoryPriceBandTests
     {
         private const ulong Usdc = 31566704UL;      // default UsdReferenceAssetId, trusted
         private const ulong Algo = 0UL;             // always trusted
         private const ulong GoBtc = 386192725UL;    // in default TrustedReferenceAssetIds
-        private const ulong Folks = 3203964481UL;   // NOT trusted
+        private const ulong Folks = 3203964481UL;   // NOT trusted, but has an established price
 
         private MockAssetRepository _assets = null!;
         private OHLCRepository _repo = null!;
@@ -111,23 +118,40 @@ namespace AVMTradeReporterTests.Repository
         }
 
         [Test]
-        public async Task UntrustedAsset_IsNotGuardedByItsOwnCachedPrice()
+        public async Task UntrustedAssetWithEstablishedPrice_IsNowGuardedToo()
         {
             // FOLKS cached at $2, but the trusted ALGO leg implies $40.50 (450 ALGO × $0.09 for
-            // 1 FOLKS). For an untrusted asset the trusted counter is the only authority — the
-            // print must be written no matter what FOLKS' own cached price claims, and the pair
-            // series is not guarded either (only one side is trusted).
+            // 1 FOLKS) - a >20x move, the exact shape of the 2026-08-15 production incident (a
+            // thin/dust FOLKS pool paired with a trusted asset, no protection at all). FOLKS'
+            // own USD print must now be rejected, same as a trusted asset's would be; the raw
+            // on-chain pair rate is still recorded (real trade data, not a USD valuation claim),
+            // and ALGO's own series is untouched either way (FOLKS was never a trusted anchor).
             var trade = MakeTrade(Folks, 1_000_000, Algo, 450_000_000);
 
             var buckets = (await _repo.GetIntervalBuckets(trade)).ToList();
 
-            var folksUsd = buckets.Where(b => b.InUsdValuation && b.AssetIdA == Folks).ToList();
-            Assert.That(folksUsd.Count, Is.EqualTo(OHLCRepository.Intervals.Length));
-            Assert.That(folksUsd.All(b => b.Price == 40.50m));
+            Assert.That(buckets.Where(b => b.InUsdValuation && b.AssetIdA == Folks), Is.Empty,
+                "$40.50 is 20x FOLKS' established $2 cached price - outside the band, so rejected");
             Assert.That(buckets.Where(b => !b.InUsdValuation).Count(), Is.EqualTo(OHLCRepository.Intervals.Length),
-                "the pair series keeps the exact on-chain rate when the pair is not fully trusted");
+                "the pair series keeps the exact on-chain rate - it is not a USD valuation claim");
             Assert.That(buckets.Where(b => b.InUsdValuation && b.AssetIdA == Algo), Is.Empty,
                 "ALGO's own series is still protected: FOLKS is not a trusted anchor");
+        }
+
+        [Test]
+        public async Task UnpricedAsset_StillGetsFirstPriceFromTrustedAnchor_Unguarded()
+        {
+            // Same trade, but for a token with no established cached price yet (bootstrap case) -
+            // must still be written unguarded, exactly like before this fix, so first price
+            // discovery via a trusted anchor keeps working for brand new assets.
+            const ulong newToken = 424242424UL;
+            var trade = MakeTrade(newToken, 1_000_000, Algo, 450_000_000);
+
+            var buckets = (await _repo.GetIntervalBuckets(trade)).ToList();
+
+            var newTokenUsd = buckets.Where(b => b.InUsdValuation && b.AssetIdA == newToken).ToList();
+            Assert.That(newTokenUsd.Count, Is.EqualTo(OHLCRepository.Intervals.Length));
+            Assert.That(newTokenUsd.All(b => b.Price == 40.50m));
         }
 
         [Test]

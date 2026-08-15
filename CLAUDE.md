@@ -1,5 +1,76 @@
 # Project notes for Claude
 
+## OHLC outlier guard must protect every asset with an established price, not just trusted ones
+
+`OHLCRepository.GetIntervalBuckets` has two independent guard concepts, easy
+to conflate - keep them separate:
+
+- **Anchor trust** (`GetTrustedAnchorPrice`, stays trusted-only): whether an
+  asset's cached price may be used to derive ANOTHER asset's USD price. Only
+  `{ALGO, UsdReferenceAssetId} ∪ TrustedReferenceAssetIds` qualify - an
+  arbitrary long-tail token must never anchor someone else's price.
+- **Outlier band** (`BandGuardReferencePrice`, applies to ANY asset with an
+  established price, since 2026-08-15): whether a NEW print is a plausible
+  continuation of THAT asset's OWN last-known price
+  (`AppConfiguration.OhlcTrustedPriceBandFactor`, default ±50%). This used
+  to be trusted-only too, on the theory that an untrusted asset's cached
+  price might itself be garbage. That's only true before the asset has any
+  established price - `BiatecAsset.PriceUSD` is depth-selected and
+  continuously refreshed for every asset (see
+  `AggregatedPoolRepository.SelectAssetUsdPrice`), trusted or not.
+
+2026-08-15 incident: FOLKS (3203964481) is not a trusted reference asset but
+trades in ~100 pools with real ~$35k/24h combined volume. Because the
+outlier band was trusted-only, ANY of those pools could write an unguarded
+print into FOLKS' own USD candles the moment its counter leg happened to be
+trusted (ALGO, USDC, or one of the other ~17 `TrustedReferenceAssetIds`) -
+producing persistently "stripy" 4h/1d candles (H/L 20-120% off the body) on
+both historical AND live (same-day) data, confirmed by pulling production
+trade/pool data via a locally-minted ARC-14 token (see "Local production API
+access" below) and reconstructing per-pool implied prices directly from raw
+trade amounts. Fixed by making the outlier band apply to every asset with an
+`PriceUSD > 0`, not just trusted ones; a brand-new/never-priced asset stays
+unguarded (first price discovery via a trusted anchor must still work).
+
+One real tension surfaced by this: if an asset's cached price is itself
+stale/wrong (not just noisy), the band now also blocks a trusted-anchored
+trade from correcting it in one step - in production this is rare because
+`PriceUSD` is continuously depth-selected, not a semi-permanent stale value,
+so a genuinely wrong price gets pulled back in line by the SAME
+depth-selection mechanism (`AggregatedPoolRepository`) independently of OHLC
+candles; the OHLC band guard only decides what gets to permanently scar a
+chart's High/Low, not what `PriceUSD` itself is.
+
+The `pairRateOffMarket` check (drops the raw on-chain "-asset-" pair series
+entirely, not just a USD derivation) deliberately stayed on the narrower
+trusted-only `anchorPriceA`/`anchorPriceB`, not the generalized
+`cachedPriceA`/`cachedPriceB` - the exact swap ratio is ground truth
+regardless of how plausible either side's USD price looks, so a wrong/stale
+cached price on an untrusted asset must never delete real on-chain trade
+data, only suppress that asset's own derived USD print.
+
+Regression tests: `OHLCRepositoryPriceBandTests.cs` (now covers
+untrusted-with-established-price + still-unpriced bootstrap cases),
+`OHLCRepositoryTrustedAnchorTests.cs` (renamed its scam-token test to use a
+never-priced asset for the bootstrap case it was actually testing, added a
+dedicated established-price-gets-guarded-too test).
+
+## Local production API access for live-data debugging
+
+`../biatec-scan-web` has `arc14`/`arc76`/`algosdk` in `package.json` (used
+by `src/services/authService.ts`). To mint a throwaway ARC-14 token from a
+shell and hit authed production endpoints (`api/asset`, `api/pool`,
+`api/trade`, ...) without a browser: write a small ESM script that imports
+`generateAlgorandAccount` (arc76, any session string), builds a tx via
+`makeArc14TxWithSuggestedParams("BiatecScan#ARC14", addr, params)` with
+`genesisID: "mainnet-v1.0"` / `genesisHash: "wGHE2Pwdvd7S12BL5FaOP20EGYesN73ktiC1qzkkit8="`
+(base64-decoded), sign it, and pass through `makeArc14AuthHeader`. Run it
+from inside `biatec-scan-web/` (or anywhere with those packages installed)
+so Node resolves the packages - it fails with `ERR_MODULE_NOT_FOUND` from
+other directories. `GET /api/OHLC/*` and `GET /api/OHLC/history` need no
+auth at all (see `AVMTradeReporterTests/Diagnostics/*LiveConsistencyTests.cs`
+for existing unauthenticated live-data acceptance checks in this style).
+
 ## Asset-level volume must equal the sum of its pools' volumes - no /2 "just in case"
 
 Two different services independently compute USD trading volume, at two

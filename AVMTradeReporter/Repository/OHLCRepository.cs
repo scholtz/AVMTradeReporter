@@ -180,20 +180,40 @@ namespace AVMTradeReporter.Repository
                 ? adjustedVolBase * anchorPriceA.Value / adjustedVolQuote
                 : null;
 
-            // Outlier guard for TRUSTED assets (see AppConfiguration.OhlcTrustedPriceBandFactor):
-            // trades in stale/near-empty pools execute at rates 2-100x away from the market and a
-            // single such print permanently becomes a bucket's High/Low ("stripy" charts — ALGO
-            // charted $9.15 highs from a stale pool while trading at $0.08). A trusted asset's
-            // cached PriceUSD is authoritative, so prints outside the band around it are dropped
-            // (price AND volume — the trade's USD value is equally bogus). Untrusted assets keep
-            // every print: their cached price may itself be wrong, and the trusted counter leg is
-            // the only reliable way to (re)price them.
-            decimal? cachedPriceA = TrustedCachedPrice(aId, assetA);
-            decimal? cachedPriceB = TrustedCachedPrice(bId, assetB);
+            // Outlier guard (see AppConfiguration.OhlcTrustedPriceBandFactor): trades in
+            // stale/near-empty pools execute at rates 2-100x away from the market and a single
+            // such print permanently becomes a bucket's High/Low ("stripy" charts — ALGO charted
+            // $9.15 highs from a stale pool while trading at $0.08; FOLKS, which is NOT a trusted
+            // reference asset, showed the identical pattern from its own long tail of ~100 thin
+            // pools, each one only needing a trusted counter leg to write an unguarded print -
+            // 2026-08-15 incident). Originally this only guarded TRUSTED assets, on the theory
+            // that an untrusted asset's cached price might itself be garbage and the trusted
+            // counter leg is its only price authority. That's only true before the asset has any
+            // established price at all: BiatecAsset.PriceUSD is itself depth-selected (see
+            // AggregatedPoolRepository.SelectAssetUsdPrice) and continuously refreshed for every
+            // asset, trusted or not, so once it's set it is just as authoritative a reference for
+            // "is this new print a plausible continuation" as a trusted asset's price is. The
+            // guard now applies to every asset with an established (>0) cached price - brand new
+            // assets with no price yet remain unguarded (IsOutsideTrustedBand no-ops on a missing
+            // reference), so first price discovery via a trusted anchor still works exactly as
+            // before. What stays trusted-only is GetTrustedAnchorPrice above: an untrusted asset's
+            // price, however well-guarded, still must never be used to anchor ANOTHER asset's
+            // price - that is a different, independent risk (manipulable long-tail tokens serving
+            // as reference prices for each other).
+            decimal? cachedPriceA = BandGuardReferencePrice(assetA);
+            decimal? cachedPriceB = BandGuardReferencePrice(assetB);
             if (usdPriceBase.HasValue && IsOutsideTrustedBand(usdPriceBase.Value, cachedPriceA)) usdPriceBase = null;
             if (usdPriceQuote.HasValue && IsOutsideTrustedBand(usdPriceQuote.Value, cachedPriceB)) usdPriceQuote = null;
-            var pairRateOffMarket = cachedPriceA.HasValue && cachedPriceB.HasValue
-                && IsOutsideTrustedBand(price, cachedPriceA.Value / cachedPriceB.Value);
+
+            // Dropping the trade's on-chain "-asset-" pair series entirely (not just a USD
+            // derivation of it) is reserved for when BOTH sides are TRUSTED and disagree with
+            // each other - anchorPriceA/B (trusted-only) rather than cachedPriceA/B above. The
+            // exact swap ratio is ground truth regardless of how plausible either side's USD
+            // price looks, so a wrong or stale cached price on an untrusted asset (which
+            // BandGuardReferencePrice now also covers) must never delete real on-chain data -
+            // only suppress that asset's own derived USD print.
+            var pairRateOffMarket = anchorPriceA.HasValue && anchorPriceB.HasValue
+                && IsOutsideTrustedBand(price, anchorPriceA.Value / anchorPriceB.Value);
             if (pairRateOffMarket && usdPriceBase == null && usdPriceQuote == null) return result;
 
             var ts = trade.Timestamp.Value.ToUniversalTime();
@@ -238,11 +258,16 @@ namespace AVMTradeReporter.Repository
         }
 
         /// <summary>
-        /// The band-guard reference price for <paramref name="assetId"/>'s own candles: only
-        /// trusted assets have one (their cached PriceUSD is authoritative); untrusted assets
-        /// return null and are never guarded by their own — possibly garbage — cached price.
+        /// The band-guard reference price for an asset's own candles: its cached PriceUSD when
+        /// established (&gt;0), for ANY asset - trusted or not. See the outlier-guard comment in
+        /// GetIntervalBuckets for why this differs from GetTrustedAnchorPrice (which stays
+        /// trusted-only). $1 for the USD reference asset itself, same as GetTrustedAnchorPrice.
         /// </summary>
-        private decimal? TrustedCachedPrice(ulong assetId, BiatecAsset? asset) => GetTrustedAnchorPrice(assetId, asset);
+        private decimal? BandGuardReferencePrice(BiatecAsset? asset)
+        {
+            if (asset?.Index == _usdReferenceAssetId) return 1m;
+            return asset?.PriceUSD > 0 ? asset.PriceUSD : null;
+        }
 
         /// <summary>
         /// True when the guard is enabled, a reference exists, and <paramref name="price"/> is
