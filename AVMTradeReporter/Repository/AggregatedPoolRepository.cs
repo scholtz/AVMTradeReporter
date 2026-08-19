@@ -580,9 +580,21 @@ namespace AVMTradeReporter.Repository
 
                 if (ohlcService != null)
                 {
-                    asset.PriceUSD1H = await ohlcService.GetHistoricalPriceAsync(assetId, TimeSpan.FromHours(1), cancellationToken);
-                    asset.PriceUSD24H = await ohlcService.GetHistoricalPriceAsync(assetId, TimeSpan.FromHours(24), cancellationToken);
-                    asset.PriceUSD7D = await ohlcService.GetHistoricalPriceAsync(assetId, TimeSpan.FromDays(7), cancellationToken);
+                    var newPriceUSD1H = await ohlcService.GetHistoricalPriceAsync(assetId, TimeSpan.FromHours(1), cancellationToken);
+                    var newPriceUSD24H = await ohlcService.GetHistoricalPriceAsync(assetId, TimeSpan.FromHours(24), cancellationToken);
+                    var newPriceUSD7D = await ohlcService.GetHistoricalPriceAsync(assetId, TimeSpan.FromDays(7), cancellationToken);
+                    // Must also flip `changed` (not just assign) - otherwise a baseline-only
+                    // move (current PriceUSD/TVL/PoolsCount unchanged this call) is applied to
+                    // the in-memory object but never persisted via SetAssetAsync below. That
+                    // left PriceUSD24H (and thus Top Losers/Gainers %) frozen at whatever was
+                    // last actually persisted until a pod restart rehydrated the stale value.
+                    if (newPriceUSD1H != asset.PriceUSD1H || newPriceUSD24H != asset.PriceUSD24H || newPriceUSD7D != asset.PriceUSD7D)
+                    {
+                        asset.PriceUSD1H = newPriceUSD1H;
+                        asset.PriceUSD24H = newPriceUSD24H;
+                        asset.PriceUSD7D = newPriceUSD7D;
+                        changed = true;
+                    }
                 }
 
                 // Calculate Real TVL (TVL_USD) and Total TVL (TotalTVLAssetInUSD)

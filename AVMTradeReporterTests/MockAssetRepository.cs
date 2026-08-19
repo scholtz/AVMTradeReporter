@@ -10,6 +10,10 @@ namespace AVMTradeReporterTests
     {
         private readonly ConcurrentDictionary<ulong, BiatecAsset> _assets = new();
 
+        /// <summary>Number of times SetAssetAsync was invoked - tests use this to detect a change
+        /// that was applied to the in-memory object but never actually persisted.</summary>
+        public int SetAssetCallCount { get; set; }
+
         public Task<BiatecAsset?> GetAssetAsync(ulong assetId, CancellationToken cancellationToken = default)
         {
             if (_assets.TryGetValue(assetId, out var a)) return Task.FromResult<BiatecAsset?>(a);
@@ -41,6 +45,7 @@ namespace AVMTradeReporterTests
         public Task SetAssetAsync(BiatecAsset asset, CancellationToken cancellationToken = default)
         {
             _assets[asset.Index] = asset;
+            SetAssetCallCount++;
             return Task.CompletedTask;
         }
 
