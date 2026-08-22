@@ -99,6 +99,32 @@ namespace AVMTradeReporterTests.Model
         }
 
         [Test]
+        public void ConstantProductTest_PlainPactPool_VirtualAmountsMatchRawReserves()
+        {
+            // Regression for the 2026-08-22 BiatecRouter incident (mainnet Pact goBTC/HOG pool, app
+            // 3188281428): confirms VirtualAmountA/VirtualAmountB for a plain constant-product ("CONST")
+            // Pact pool are exactly A/B scaled by decimals, with no distortion - so if a BiatecRouter quote
+            // for a CONST pool diverges from the real on-chain payout, the bug is not in this calculation,
+            // it's in the A/B values reaching the consumer (staleness) or in the consumer's own swap math.
+            var pool = new AVMTradeReporter.Models.Data.Pool
+            {
+                AssetIdA = 386192725, // goBTC
+                AssetADecimals = 8,
+                AssetIdB = 3178895177, // HOG
+                AssetBDecimals = 6,
+                A = 79000,
+                B = 246076023,
+                Protocol = DEXProtocol.Pact,
+                AMMType = null, // plain CONST pool - no AMMType set by PactPoolProcessor for non-[SI] pools
+            };
+
+            Assert.That(pool.VirtualAmountA, Is.EqualTo(pool.RealAmountA));
+            Assert.That(pool.VirtualAmountB, Is.EqualTo(pool.RealAmountB));
+            Assert.That(pool.VirtualAmountA, Is.EqualTo(0.00079m));
+            Assert.That(pool.VirtualAmountB, Is.EqualTo(246.076023m));
+        }
+
+        [Test]
         public void StableSwapTest_WhenRealAmountA_IsLessThan_RealAmountB()
         {
             // Arrange - StableSwap pool where A < B
