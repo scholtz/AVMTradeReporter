@@ -438,7 +438,9 @@ namespace AVMTradeReporter.Repository
                 // through RefreshAllAssetStatsAsync instead (see InitializeFromExistingPoolsAsync).
                 var affected = new HashSet<ulong> { updatedPool.AssetIdA, updatedPool.AssetIdB, 0UL, usdRef };
                 var priceCache = new ConcurrentDictionary<ulong, decimal>();
-                await RecomputeAssetStatsAsync(affected, priceCache, updatedPool.LastUpdated ?? DateTimeOffset.UtcNow, cancellationToken);
+                // emitTvlTick: true only on this live per-trade path - see RecomputeSingleAssetAsync's
+                // doc comment for why the bulk/startup path (RefreshAllAssetStatsAsync) must not emit.
+                await RecomputeAssetStatsAsync(affected, priceCache, updatedPool.LastUpdated ?? DateTimeOffset.UtcNow, cancellationToken, emitTvlTick: true);
             }
             catch (Exception ex)
             {
@@ -468,7 +470,10 @@ namespace AVMTradeReporter.Repository
                     allAssetIds.Add(pool.AssetIdB);
                 }
                 var priceCache = new ConcurrentDictionary<ulong, decimal>();
-                await RecomputeAssetStatsAsync(allAssetIds, priceCache, DateTimeOffset.UtcNow, cancellationToken);
+                // emitTvlTick: false - this bulk pass runs over every cached asset (startup / full
+                // rescans), so emitting a tick per asset here would be a broadcast storm on every pod
+                // restart/rolling deploy, not a real-time liquidity change worth showing on a chart.
+                await RecomputeAssetStatsAsync(allAssetIds, priceCache, DateTimeOffset.UtcNow, cancellationToken, emitTvlTick: false);
             }
             catch (Exception ex)
             {
@@ -495,7 +500,8 @@ namespace AVMTradeReporter.Repository
             IEnumerable<ulong> assetIds,
             ConcurrentDictionary<ulong, decimal> priceCache,
             DateTimeOffset asOf,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool emitTvlTick)
         {
             if (_assetRepository == null) return;
             var usdRef = _appConfig.UsdReferenceAssetId;
@@ -505,20 +511,28 @@ namespace AVMTradeReporter.Repository
 
             foreach (var assetId in priorityTier)
             {
-                await RecomputeSingleAssetAsync(assetId, priceCache, asOf, cancellationToken);
+                await RecomputeSingleAssetAsync(assetId, priceCache, asOf, cancellationToken, emitTvlTick);
             }
 
             await Parallel.ForEachAsync(
                 restTier,
                 new ParallelOptions { MaxDegreeOfParallelism = BulkInitDegreeOfParallelism, CancellationToken = cancellationToken },
-                async (assetId, ct) => await RecomputeSingleAssetAsync(assetId, priceCache, asOf, ct));
+                async (assetId, ct) => await RecomputeSingleAssetAsync(assetId, priceCache, asOf, ct, emitTvlTick));
         }
 
+        /// <summary>
+        /// Recomputes price/TVL/PoolsCount for one asset. <paramref name="emitTvlTick"/> gates whether
+        /// a real-time TVL SignalR tick (and durable ES TVL-OHLC bucket write) is emitted when
+        /// TVL_USD actually changes - true only from the live per-trade path
+        /// (UpdateRelatedAssetsAsync), false from the bulk/startup rescan (RefreshAllAssetStatsAsync),
+        /// which would otherwise emit a tick storm for every asset on every pod restart/rolling deploy.
+        /// </summary>
         private async Task RecomputeSingleAssetAsync(
             ulong assetId,
             ConcurrentDictionary<ulong, decimal> priceCache,
             DateTimeOffset asOf,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool emitTvlTick)
         {
             if (_assetRepository == null) return;
             var usdRef = _appConfig.UsdReferenceAssetId;
@@ -669,6 +683,15 @@ namespace AVMTradeReporter.Repository
                 {
                     asset.TVL_USD = realTvlUsd;
                     changed = true;
+
+                    if (emitTvlTick)
+                    {
+                        var tvlOhlcRepository = _serviceProvider?.GetService<TvlOhlcRepository>();
+                        if (tvlOhlcRepository != null)
+                        {
+                            await tvlOhlcRepository.UpdateFromTvlChangeAsync(assetId, realTvlUsd, asOf, cancellationToken);
+                        }
+                    }
                 }
 
                 // Set Total TVL (TotalTVLAssetInUSD) - all assets

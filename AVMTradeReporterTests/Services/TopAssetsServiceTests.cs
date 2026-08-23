@@ -124,21 +124,17 @@ namespace AVMTradeReporterTests.Services
             {
                 MakeAsset(1, "GROW", tvl: 2000),
                 MakeAsset(2, "SHRINK", tvl: 400),
-                // No snapshot entry -> newly funded, counts as a gain from a zero baseline and
-                // ranks above every finite percent change.
+                // No snapshot entry -> newly funded, percent change from a zero baseline is
+                // undefined, so it's excluded from the gainers list entirely.
                 MakeAsset(3, "NEW", tvl: 300),
             };
             var snapshot = new Dictionary<ulong, decimal> { { 1, 1000m }, { 2, 900m } };
 
             var result = TopAssetsService.Build(assets, snapshot, null, 3, DateTimeOffset.UtcNow);
 
-            Assert.That(result.TopValueGainers.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 3, 1 }));
+            Assert.That(result.TopValueGainers.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 1 }));
             Assert.That(result.TopValueLosers.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 2 }));
-            var newItem = result.TopValueGainers[0];
-            Assert.That(newItem.TVLChange24HUSD, Is.EqualTo(300m));
-            Assert.That(newItem.TVLChange24HPercent, Is.Null);
-            Assert.That(newItem.RealTVLUSD24H, Is.EqualTo(0m));
-            var growItem = result.TopValueGainers[1];
+            var growItem = result.TopValueGainers[0];
             Assert.That(growItem.TVLChange24HUSD, Is.EqualTo(1000m));
             Assert.That(growItem.TVLChange24HPercent, Is.EqualTo(100m).Within(0.0001m));
             Assert.That(growItem.RealTVLUSD24H, Is.EqualTo(1000m));
@@ -146,38 +142,37 @@ namespace AVMTradeReporterTests.Services
         }
 
         [Test]
-        public void Build_NewlyFundedAssetsRankFirstByUsdAmongThemselves()
+        public void Build_NewlyFundedAssetsExcludedFromValueGainers()
         {
-            // The reported bug: pools funded a couple of hours ago (absent from the 24h-ago
-            // snapshot) never appeared in "Top liquidity gainers". They must appear, ranked
-            // above finite-percent gainers, ordered by absolute USD gain among themselves.
+            // Pools funded within the last 24h (absent from the 24h-ago snapshot) have no
+            // baseline to compute a percentage from, so they must not appear in "Top liquidity
+            // gainers" even though their absolute USD gain can be large.
             var assets = new[]
             {
                 MakeAsset(1, "NEWSMALL", tvl: 100),
                 MakeAsset(2, "NEWBIG", tvl: 5000),
-                MakeAsset(3, "TRIPLED", tvl: 3000), // +200% — big, but finite
+                MakeAsset(3, "TRIPLED", tvl: 3000), // +200% — the only asset with a real baseline
                 MakeAsset(4, "EMPTYNEW", tvl: 0),   // new but never funded -> not a gainer
             };
             var snapshot = new Dictionary<ulong, decimal> { { 3, 1000m } };
 
             var result = TopAssetsService.Build(assets, snapshot, null, 3, DateTimeOffset.UtcNow);
 
-            Assert.That(result.TopValueGainers.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 2, 1, 3 }));
+            Assert.That(result.TopValueGainers.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 3 }));
             Assert.That(result.TopValueLosers, Is.Empty);
         }
 
         [Test]
-        public void Build_AssetWithZeroTvlInSnapshot_TreatedLikeNewlyFunded()
+        public void Build_AssetWithZeroTvlInSnapshot_ExcludedLikeNewlyFunded()
         {
-            // A zero value recorded in the snapshot is the same zero baseline as a missing entry.
+            // A zero value recorded in the snapshot is the same undefined-percent zero baseline
+            // as a missing entry, so it's excluded the same way.
             var assets = new[] { MakeAsset(1, "REFUNDED", tvl: 700) };
             var snapshot = new Dictionary<ulong, decimal> { { 1, 0m } };
 
             var result = TopAssetsService.Build(assets, snapshot, null, 3, DateTimeOffset.UtcNow);
 
-            Assert.That(result.TopValueGainers.Select(i => i.AssetId), Is.EqualTo(new ulong[] { 1 }));
-            Assert.That(result.TopValueGainers[0].TVLChange24HUSD, Is.EqualTo(700m));
-            Assert.That(result.TopValueGainers[0].TVLChange24HPercent, Is.Null);
+            Assert.That(result.TopValueGainers, Is.Empty);
         }
 
         [Test]

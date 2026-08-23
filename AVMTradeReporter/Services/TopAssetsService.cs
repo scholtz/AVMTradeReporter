@@ -4,7 +4,6 @@ using AVMTradeReporter.Model.DTO;
 using AVMTradeReporter.Repository;
 using Microsoft.Extensions.Options;
 using StackExchange.Redis;
-using System.Globalization;
 using System.Text.Json;
 
 namespace AVMTradeReporter.Services
@@ -14,26 +13,22 @@ namespace AVMTradeReporter.Services
     /// Top value gainers/losers) from the in-memory asset cache and caches the result in Redis so the
     /// endpoint is served mostly from cache under heavy traffic.
     ///
-    /// The 24h real-TVL change has no historical source anywhere else in the system, so this service
-    /// also maintains hourly snapshots of each candidate asset's real TVL in Redis
-    /// (<c>asset:tvl:hourly:{unixHour}</c>, 8 days retention) and diffs against the snapshot closest
-    /// to 24 hours ago. Assets missing from that snapshot are treated as having had zero TVL.
+    /// The 24h real-TVL change is diffed against the durable Elasticsearch "tvlohlc" index (see
+    /// <see cref="TvlOhlcRepository.GetTvlAtOrBeforeAsync"/>), batched in one query for every
+    /// candidate asset. An asset with no TVL-OHLC doc at/near 24h ago is treated as having had zero
+    /// TVL then (same semantics as the old Redis-hourly-snapshot approach this replaced).
     /// </summary>
     public class TopAssetsService : ITopAssetsService
     {
         private const string CacheKeyBase = "asset:top:summary";
-        public const string TvlSnapshotKeyBase = "asset:tvl:hourly:";
         private string CacheKey => _appConfig.Redis.EnvironmentKeyPrefix + CacheKeyBase;
-        private string TvlSnapshotKeyPrefix => _appConfig.Redis.EnvironmentKeyPrefix + TvlSnapshotKeyBase;
-        // 8 days so the 7d asset timeseries endpoint (AssetTimeseriesService) can always build a
-        // full week of hourly TVL candles from these snapshots.
-        private static readonly TimeSpan TvlSnapshotTtl = TimeSpan.FromDays(8);
 
         private readonly IAssetRepository _assetRepository;
         private readonly ILogger<TopAssetsService> _logger;
         private readonly IDatabase? _redisDatabase;
         private readonly AppConfiguration _appConfig;
         private readonly ITradeQueryService? _tradeQueryService;
+        private readonly TvlOhlcRepository? _tvlOhlcRepository;
 
         // Fallback served when Redis is unavailable/empty and a fresh computation fails or is redundant.
         private TopAssetsResponse? _lastComputed;
@@ -43,13 +38,15 @@ namespace AVMTradeReporter.Services
             ILogger<TopAssetsService> logger,
             IOptions<AppConfiguration> appConfig,
             IDatabase? redisDatabase = null,
-            ITradeQueryService? tradeQueryService = null)
+            ITradeQueryService? tradeQueryService = null,
+            TvlOhlcRepository? tvlOhlcRepository = null)
         {
             _assetRepository = assetRepository;
             _logger = logger;
             _appConfig = appConfig.Value;
             _redisDatabase = redisDatabase;
             _tradeQueryService = tradeQueryService;
+            _tvlOhlcRepository = tvlOhlcRepository;
         }
 
         public async Task<TopAssetsResponse> GetTopAssetsAsync(CancellationToken cancellationToken = default)
@@ -90,8 +87,7 @@ namespace AVMTradeReporter.Services
             // GetAssetsAsync already orders by real TVL (TVL_USD) descending.
             var universe = (await _assetRepository.GetAssetsAsync(null, null, 0, universeSize, cancellationToken)).ToList();
 
-            await StoreTvlSnapshotAsync(universe, now, cancellationToken);
-            var tvl24hAgo = await LoadTvlSnapshotAsync(now, cancellationToken);
+            var tvl24hAgo = await LoadTvl24hAgoAsync(universe, now, cancellationToken);
 
             // Windowed volumes straight from confirmed trades. The Volume1H/Volume24H counters on
             // BiatecAsset only re-window during pool refresh and go stale in between (they never
@@ -172,13 +168,12 @@ namespace AVMTradeReporter.Services
                     .Where(i => i.PriceChange24HPercent < 0)
                     .OrderBy(i => i.PriceChange24HPercent)
                     .Take(listSize).ToList(),
-                // Gainers include newly funded assets (absent from the 24h-ago snapshot, so their
-                // whole TVL is the gain). Their percent change from a zero baseline is undefined
-                // (null) and conceptually infinite, so they rank above every finite percent change,
-                // ordered by absolute USD gain among themselves.
+                // Newly funded assets (absent from the 24h-ago snapshot) have an undefined
+                // (null) percent change from a zero baseline, so they're excluded here rather
+                // than ranked as "infinite" growth ahead of assets with a real, finite gain.
                 TopValueGainers = liquid
-                    .Where(i => i.TVLChange24HUSD > 0)
-                    .OrderByDescending(i => i.TVLChange24HPercent ?? decimal.MaxValue)
+                    .Where(i => i.TVLChange24HUSD > 0 && i.TVLChange24HPercent != null)
+                    .OrderByDescending(i => i.TVLChange24HPercent)
                     .ThenByDescending(i => i.TVLChange24HUSD)
                     .Take(listSize).ToList(),
                 TopValueLosers = candidates
@@ -289,77 +284,27 @@ namespace AVMTradeReporter.Services
             return item;
         }
 
-        private static long UnixHour(DateTimeOffset time) => time.ToUnixTimeSeconds() / 3600;
-
         /// <summary>
-        /// Persists the current real TVL of every candidate asset into this hour's snapshot hash as an
-        /// intra-hour OHLC value (see <see cref="TvlSnapshotCodec"/>). Runs on every ~5 minute
-        /// recompute, merging into the hour's existing candle so high/low capture movement within the
-        /// hour instead of just the last observation.
+        /// Loads each candidate asset's real TVL close value at/near 24 hours ago from the durable
+        /// Elasticsearch TVL-OHLC index, in a single batched query. Assets absent from the result are
+        /// treated by <see cref="ToItem"/> as having had zero TVL 24h ago (same semantics as the old
+        /// Redis-hourly-snapshot approach this replaced).
         /// </summary>
-        private async Task StoreTvlSnapshotAsync(IEnumerable<BiatecAsset> universe, DateTimeOffset now, CancellationToken cancellationToken)
+        private async Task<IReadOnlyDictionary<ulong, decimal>?> LoadTvl24hAgoAsync(IReadOnlyCollection<BiatecAsset> universe, DateTimeOffset now, CancellationToken cancellationToken)
         {
-            if (_redisDatabase == null) return;
+            if (_tvlOhlcRepository == null) return null;
             try
             {
-                var key = TvlSnapshotKeyPrefix + UnixHour(now);
-                var existingEntries = await _redisDatabase.HashGetAllAsync(key);
-                var existing = existingEntries.ToDictionary(e => e.Name.ToString(), e => e.Value.ToString());
-
-                var entries = universe
-                    .Select(a =>
-                    {
-                        var field = a.Index.ToString(CultureInfo.InvariantCulture);
-                        existing.TryGetValue(field, out var prev);
-                        return new HashEntry(field, TvlSnapshotCodec.Merge(prev, a.TVL_USD));
-                    })
-                    .ToArray();
-                if (entries.Length == 0) return;
-                await _redisDatabase.HashSetAsync(key, entries);
-                await _redisDatabase.KeyExpireAsync(key, TvlSnapshotTtl);
+                var assetIds = universe.Select(a => a.Index).ToList();
+                if (assetIds.Count == 0) return null;
+                var result = await _tvlOhlcRepository.GetTvlAtOrBeforeAsync(assetIds, now.AddHours(-24), cancellationToken);
+                return result.Count > 0 ? result : null;
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to store hourly TVL snapshot in Redis");
+                _logger.LogWarning(ex, "Failed to load 24h-ago TVL baseline from Elasticsearch");
+                return null;
             }
-        }
-
-        /// <summary>
-        /// Loads the TVL snapshot closest to 24 hours ago. Tries hour offsets fanning out from 24
-        /// (24, 25, 23, 26, 22, ...) so short service outages around the 24h mark still resolve to a
-        /// nearby snapshot instead of losing the whole "value gainers/losers" feature.
-        /// </summary>
-        private async Task<IReadOnlyDictionary<ulong, decimal>?> LoadTvlSnapshotAsync(DateTimeOffset now, CancellationToken cancellationToken)
-        {
-            if (_redisDatabase == null) return null;
-            var currentHour = UnixHour(now);
-            foreach (var offset in new[] { 24, 25, 23, 26, 22, 27, 21, 28, 20 })
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                try
-                {
-                    var key = TvlSnapshotKeyPrefix + (currentHour - offset);
-                    var entries = await _redisDatabase.HashGetAllAsync(key);
-                    if (entries == null || entries.Length == 0) continue;
-
-                    var result = new Dictionary<ulong, decimal>(entries.Length);
-                    foreach (var entry in entries)
-                    {
-                        if (ulong.TryParse(entry.Name.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var assetId)
-                            && TvlSnapshotCodec.TryParse(entry.Value.ToString(), out _, out _, out _, out var tvl))
-                        {
-                            result[assetId] = tvl;
-                        }
-                    }
-                    if (result.Count > 0) return result;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to load TVL snapshot from Redis (offset {offset}h)", offset);
-                    return null;
-                }
-            }
-            return null;
         }
     }
 }

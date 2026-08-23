@@ -97,7 +97,11 @@ namespace AVMTradeReporter.Repository
             }
         }
 
-        private static DateTimeOffset GetBucketStart(DateTimeOffset ts, TimeSpan interval)
+        /// <summary>
+        /// Internal (not private) so <see cref="TvlOhlcRepository"/> can reuse the exact same
+        /// bucket-boundary logic for TVL candles, keeping both series' buckets aligned.
+        /// </summary>
+        internal static DateTimeOffset GetBucketStart(DateTimeOffset ts, TimeSpan interval)
         {
             if (interval.TotalDays >= 7)
             {

@@ -128,6 +128,7 @@ namespace AVMTradeReporter
             builder.Services.AddSingleton<LiquidityRepository>();
             builder.Services.AddSingleton<TransactionProcessor>();
             builder.Services.AddSingleton<OHLCRepository>(); // register OHLC repository
+            builder.Services.AddSingleton<TvlOhlcRepository>(); // register TVL OHLC repository
             builder.Services.AddSingleton<ISearchService, SearchService>();
             builder.Services.AddSingleton<ITradeQueryService, TradeQueryService>();
             builder.Services.AddSingleton<ILiquidityQueryService, LiquidityQueryService>();
@@ -471,6 +472,7 @@ namespace AVMTradeReporter
             _ = app.Services.GetService<TinyPoolProcessor>();
             _ = app.Services.GetService<BiatecPoolProcessor>();
             _ = app.Services.GetService<OHLCRepository>();
+            _ = app.Services.GetService<TvlOhlcRepository>();
             _ = app.Services.GetService<ISearchService>();
             _ = app.Services.GetService<ITradeQueryService>();
 

@@ -309,9 +309,17 @@ namespace AVMTradeReporter.Services
             }
         }
 
-        /// <summary>Deletes hourly TVL snapshot keys older than the configured cutoff (cross-network polluted).</summary>
+        /// <summary>
+        /// Deletes hourly TVL snapshot keys older than the configured cutoff (cross-network
+        /// polluted). Legacy cleanup only: TopAssetsService no longer writes these Redis keys (real
+        /// TVL history now lives durably in the Elasticsearch "tvlohlc" index — see
+        /// <see cref="Repository.TvlOhlcRepository"/>) but any pre-existing keys from before that
+        /// cutover still need this one-shot sweep on environments that had the cross-network
+        /// pollution bug.
+        /// </summary>
         private async Task CleanupTvlSnapshotsAsync(DateTimeOffset now, CancellationToken cancellationToken)
         {
+            const string legacyTvlSnapshotKeyBase = "asset:tvl:hourly:";
             var cutoff = _appConfig.OhlcRepair.TvlSnapshotCutoff;
             if (_redisDatabase == null || cutoff == null) return;
 
@@ -320,7 +328,7 @@ namespace AVMTradeReporter.Services
             var deletes = new List<Task<bool>>();
             for (var hour = oldestHour; hour < cutoffHour; hour++)
             {
-                var key = _appConfig.Redis.EnvironmentKeyPrefix + TopAssetsService.TvlSnapshotKeyBase + hour;
+                var key = _appConfig.Redis.EnvironmentKeyPrefix + legacyTvlSnapshotKeyBase + hour;
                 deletes.Add(_redisDatabase.KeyDeleteAsync(key));
             }
             if (deletes.Count == 0) return;

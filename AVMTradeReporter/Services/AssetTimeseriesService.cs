@@ -6,22 +6,20 @@ using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.QueryDsl;
 using Microsoft.Extensions.Options;
 using StackExchange.Redis;
-using System.Globalization;
 using System.Text.Json;
 
 namespace AVMTradeReporter.Services
 {
     /// <summary>
     /// Builds the 7 day hourly asset timeseries (USD price OHLC from the Elasticsearch "ohlc" index,
-    /// real TVL OHLC from the hourly Redis snapshots written by <see cref="TopAssetsService"/>) and
-    /// caches each asset's series in Redis for ~1 hour so list pages (assets, favorites, pools) can
-    /// request sparkline data for a whole page of assets and be served almost entirely from cache.
+    /// real TVL OHLC from the Elasticsearch "tvlohlc" index written by <see cref="AVMTradeReporter.Repository.TvlOhlcRepository"/>)
+    /// and caches each asset's series in Redis for ~1 hour so list pages (assets, favorites, pools)
+    /// can request sparkline data for a whole page of assets and be served almost entirely from cache.
     /// </summary>
     public class AssetTimeseriesService : IAssetTimeseriesService
     {
         public const string CacheKeyBase = "asset:timeseries:7d:";
         private string CacheKeyPrefix => _appConfig.Redis.EnvironmentKeyPrefix + CacheKeyBase;
-        private string TvlSnapshotKeyPrefix => _appConfig.Redis.EnvironmentKeyPrefix + TopAssetsService.TvlSnapshotKeyBase;
         private const int HoursBack = 7 * 24;
         // Slightly over an hour so the hourly background refresh normally replaces an entry before it
         // ever expires; on-demand computed entries for long-tail assets just expire and are recomputed
@@ -33,19 +31,22 @@ namespace AVMTradeReporter.Services
         private readonly ILogger<AssetTimeseriesService> _logger;
         private readonly IDatabase? _redisDatabase;
         private readonly AppConfiguration _appConfig;
+        private readonly TvlOhlcRepository? _tvlOhlcRepository;
 
         public AssetTimeseriesService(
             IAssetRepository assetRepository,
             ILogger<AssetTimeseriesService> logger,
             IOptions<AppConfiguration> appConfig,
             ElasticsearchClient? elastic = null,
-            IDatabase? redisDatabase = null)
+            IDatabase? redisDatabase = null,
+            TvlOhlcRepository? tvlOhlcRepository = null)
         {
             _assetRepository = assetRepository;
             _logger = logger;
             _appConfig = appConfig.Value;
             _elastic = elastic;
             _redisDatabase = redisDatabase;
+            _tvlOhlcRepository = tvlOhlcRepository;
         }
 
         public async Task<List<AssetTimeseries7D>> GetTimeseriesAsync(IReadOnlyCollection<ulong> assetIds, CancellationToken cancellationToken = default)
@@ -95,8 +96,6 @@ namespace AVMTradeReporter.Services
         private async Task<List<AssetTimeseries7D>> ComputeAndCacheAsync(IReadOnlyList<ulong> assetIds, CancellationToken cancellationToken)
         {
             var now = DateTimeOffset.UtcNow;
-            var currentHour = now.ToUnixTimeSeconds() / 3600;
-            var tvlByHour = await LoadTvlSnapshotsAsync(currentHour, cancellationToken);
 
             var results = new List<AssetTimeseries7D>(assetIds.Count);
             using var throttle = new SemaphoreSlim(8);
@@ -109,7 +108,9 @@ namespace AVMTradeReporter.Services
                     {
                         AssetId = id,
                         Price = await LoadPriceCandlesAsync(id, now, cancellationToken),
-                        Tvl = BuildTvlCandles(id, currentHour, tvlByHour),
+                        Tvl = _tvlOhlcRepository != null
+                            ? await _tvlOhlcRepository.GetCandlesAsync(id, now, HoursBack, cancellationToken)
+                            : new TimeseriesCandles(),
                         GeneratedAt = now
                     };
                     lock (results) results.Add(series);
@@ -136,63 +137,6 @@ namespace AVMTradeReporter.Services
 
             await StoreInCacheAsync(results, cancellationToken);
             return results;
-        }
-
-        /// <summary>Reads all hourly TVL snapshot hashes for the window once, shared by every asset in the batch.</summary>
-        private async Task<Dictionary<long, Dictionary<string, string>>> LoadTvlSnapshotsAsync(long currentHour, CancellationToken cancellationToken)
-        {
-            var result = new Dictionary<long, Dictionary<string, string>>();
-            if (_redisDatabase == null) return result;
-            try
-            {
-                var hours = Enumerable.Range(0, HoursBack + 1).Select(offset => currentHour - offset).ToArray();
-                var reads = hours.Select(h => _redisDatabase.HashGetAllAsync(TvlSnapshotKeyPrefix + h)).ToArray();
-                await Task.WhenAll(reads);
-                for (var i = 0; i < hours.Length; i++)
-                {
-                    var entries = reads[i].Result;
-                    if (entries == null || entries.Length == 0) continue;
-                    result[hours[i]] = entries.ToDictionary(e => e.Name.ToString(), e => e.Value.ToString());
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to load hourly TVL snapshots from Redis");
-            }
-            return result;
-        }
-
-        private static TimeseriesCandles BuildTvlCandles(ulong assetId, long currentHour, Dictionary<long, Dictionary<string, string>> tvlByHour)
-        {
-            var candles = new TimeseriesCandles();
-            var field = assetId.ToString(CultureInfo.InvariantCulture);
-            decimal? lastClose = null;
-            for (var hour = currentHour - HoursBack; hour <= currentHour; hour++)
-            {
-                decimal o, h, l, c;
-                if (tvlByHour.TryGetValue(hour, out var entries)
-                    && entries.TryGetValue(field, out var encoded)
-                    && TvlSnapshotCodec.TryParse(encoded, out o, out h, out l, out c))
-                {
-                    // use parsed values
-                }
-                else if (lastClose.HasValue)
-                {
-                    // Forward-fill missing hours as a flat candle so the sparkline has no holes.
-                    o = h = l = c = lastClose.Value;
-                }
-                else
-                {
-                    continue; // no data yet at the start of the window
-                }
-                candles.T.Add(hour * 3600);
-                candles.O.Add(o);
-                candles.H.Add(h);
-                candles.L.Add(l);
-                candles.C.Add(c);
-                lastClose = c;
-            }
-            return candles;
         }
 
         private async Task<TimeseriesCandles> LoadPriceCandlesAsync(ulong assetId, DateTimeOffset now, CancellationToken cancellationToken)

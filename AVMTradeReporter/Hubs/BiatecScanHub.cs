@@ -25,6 +25,7 @@ namespace AVMTradeReporter.Hubs
             public const string ERROR = "Error";
             public const string INFO = "Info";
             public const string OHLC = "OHLC";
+            public const string TVL = "TVL";
         }
 
         /// <summary>
@@ -53,6 +54,25 @@ namespace AVMTradeReporter.Hubs
         public async Task UnsubscribeFromOHLC(ulong assetIdA, ulong assetIdB)
         {
             await Groups.RemoveFromGroupAsync(Context.ConnectionId, OhlcGroupName(assetIdA, assetIdB));
+        }
+
+        /// <summary>
+        /// SignalR group name for real-time TVL (real total value locked, USD) ticks of a single asset.
+        /// </summary>
+        public static string TvlGroupName(ulong assetId) => $"tvl-{assetId}";
+
+        /// <summary>
+        /// Subscribes the calling connection to real-time TVL ticks for an asset. Intentionally
+        /// anonymous, same as SubscribeToOHLC: TVL is public market data too.
+        /// </summary>
+        public async Task SubscribeToTVL(ulong assetId)
+        {
+            await Groups.AddToGroupAsync(Context.ConnectionId, TvlGroupName(assetId));
+        }
+
+        public async Task UnsubscribeFromTVL(ulong assetId)
+        {
+            await Groups.RemoveFromGroupAsync(Context.ConnectionId, TvlGroupName(assetId));
         }
 
         private static readonly ConcurrentDictionary<string, SubscriptionFilter> User2Subscription = new ConcurrentDictionary<string, SubscriptionFilter>();
