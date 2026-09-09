@@ -31,6 +31,12 @@ namespace AVMTradeReporter.Processors.Pool
             var pool = await _poolRepository.GetPoolAsync(address, cancelationTokenSource.Token);
             var app = await _algod.GetApplicationByIDAsync(appId);
 
+            if (GetGlobalState(app, PactWeightedPoolHelper.KeyReserveA) != null)
+            {
+                // Pact weighted pool (ARC4 contract) - completely different global state layout
+                return await LoadWeightedPoolAsync(pool, address, appId, app, cancelationTokenSource.Token);
+            }
+
             var A = app.Params.GlobalState.FirstOrDefault(p => p.Key == Convert.ToBase64String(Encoding.ASCII.GetBytes("A")));
             if (A == null) throw new Exception("A is missing in global params");
             var B = app.Params.GlobalState.FirstOrDefault(p => p.Key == Convert.ToBase64String(Encoding.ASCII.GetBytes("B")));
@@ -210,6 +216,109 @@ namespace AVMTradeReporter.Processors.Pool
             {
                 _logger.LogInformation("Pool {appId} {appAddress} updated with pool refresh", pool.PoolAppId, pool.PoolAddress);
                 await _poolRepository.StorePoolAsync(pool, true, cancelationTokenSource.Token);
+            }
+            return pool;
+        }
+
+        private static Algorand.Algod.Model.TealKeyValue? GetGlobalState(Algorand.Algod.Model.Application app, string key)
+        {
+            return app.Params.GlobalState.FirstOrDefault(p => p.Key == Convert.ToBase64String(Encoding.ASCII.GetBytes(key)));
+        }
+
+        /// <summary>
+        /// Loads the Pact weighted pool (ARC4 contract with reserve_a / reserve_b / issued_lp / weight_a global state).
+        /// See <see cref="PactWeightedPoolHelper"/> for the differences from the classic Pact AMM.
+        /// </summary>
+        private async Task<AVMTradeReporter.Models.Data.Pool> LoadWeightedPoolAsync(AVMTradeReporter.Models.Data.Pool? pool, string address, ulong appId, Algorand.Algod.Model.Application app, CancellationToken cancellationToken)
+        {
+            var reserveA = GetGlobalState(app, PactWeightedPoolHelper.KeyReserveA);
+            if (reserveA == null) throw new Exception("reserve_a is missing in global params");
+            var reserveB = GetGlobalState(app, PactWeightedPoolHelper.KeyReserveB);
+            if (reserveB == null) throw new Exception("reserve_b is missing in global params");
+            var issuedLP = GetGlobalState(app, PactWeightedPoolHelper.KeyIssuedLP);
+            if (issuedLP == null) throw new Exception("issued_lp is missing in global params");
+            var lpAsset = GetGlobalState(app, "lp_asset");
+            if (lpAsset == null) throw new Exception("lp_asset is missing in global params");
+            var assetA = GetGlobalState(app, "asset_a");
+            if (assetA == null) throw new Exception("asset_a is missing in global params");
+            var assetB = GetGlobalState(app, "asset_b");
+            if (assetB == null) throw new Exception("asset_b is missing in global params");
+            var swapFeeBps = GetGlobalState(app, "swap_fee_bps");
+            var protocolFeeBps = GetGlobalState(app, "protocol_fee_bps");
+            var managerFeeBps = GetGlobalState(app, "manager_fee_bps");
+            var weightABps = GetGlobalState(app, "weight_a");
+
+            var hash = app.Params.ApprovalProgram.Bytes.ToSha256Hex();
+            var assetAId = assetA.Value.Uint;
+            var assetBId = assetB.Value.Uint;
+            var assetADecimals = (await _assetRepository.GetAssetAsync(assetAId, cancellationToken))?.Params?.Decimals;
+            var assetBDecimals = (await _assetRepository.GetAssetAsync(assetBId, cancellationToken))?.Params?.Decimals;
+
+            // swap_fee_bps is the total fee taken from the swap (e.g. 10 = 0.1%)
+            var lpFee = swapFeeBps == null ? 0.003m : swapFeeBps.Value.Uint / 10000m;
+            // protocol_fee_bps and manager_fee_bps are the portions of the swap fee (in bps of the fee) not going to liquidity providers (e.g. 2500 = 25%)
+            var protocolFeePortion = ((protocolFeeBps?.Value.Uint ?? 0) + (managerFeeBps?.Value.Uint ?? 0)) / 10000m;
+            // weight_a is in bps (5000 = 50%)
+            var weightA = weightABps == null ? 0.5m : weightABps.Value.Uint / 10000m;
+            var weightB = 1 - weightA;
+
+            _logger.LogInformation("Processing Pact weighted pool {appId}", appId);
+
+            var updated = false;
+            if (pool == null)
+            {
+                pool = new AVMTradeReporter.Models.Data.Pool
+                {
+                    PoolAddress = address,
+                    PoolAppId = appId,
+                    Protocol = DEXProtocol.Pact,
+                    A = reserveA.Value.Uint,
+                    B = reserveB.Value.Uint,
+                    L = issuedLP.Value.Uint,
+                    AssetIdLP = lpAsset.Value.Uint,
+                    AMMType = AMMType.WeightedAMM,
+                    WeightA = weightA,
+                    WeightB = weightB,
+                    Timestamp = DateTimeOffset.Now,
+                    ApprovalProgramHash = hash,
+                    LPFee = lpFee,
+                    ProtocolFeePortion = protocolFeePortion,
+                    AssetIdA = assetAId,
+                    AssetIdB = assetBId,
+                    AssetADecimals = assetADecimals,
+                    AssetBDecimals = assetBDecimals,
+                };
+                updated = true;
+            }
+            else
+            {
+                if (pool.Protocol != DEXProtocol.Pact) { pool.Protocol = DEXProtocol.Pact; updated = true; }
+                if (pool.A != reserveA.Value.Uint) { pool.A = reserveA.Value.Uint; updated = true; }
+                if (pool.B != reserveB.Value.Uint) { pool.B = reserveB.Value.Uint; updated = true; }
+                if (pool.StableA != null) { pool.StableA = null; updated = true; }
+                if (pool.StableB != null) { pool.StableB = null; updated = true; }
+                if (pool.Amplifier != null) { pool.Amplifier = null; updated = true; }
+                if (pool.L != issuedLP.Value.Uint) { pool.L = issuedLP.Value.Uint; updated = true; }
+                if (pool.AssetIdLP != lpAsset.Value.Uint) { pool.AssetIdLP = lpAsset.Value.Uint; updated = true; }
+                if (pool.ApprovalProgramHash != hash) { pool.ApprovalProgramHash = hash; updated = true; }
+                if (pool.LPFee != lpFee) { pool.LPFee = lpFee; updated = true; }
+                if (pool.ProtocolFeePortion != protocolFeePortion) { pool.ProtocolFeePortion = protocolFeePortion; updated = true; }
+                if (pool.AssetIdA != assetAId) { pool.AssetIdA = assetAId; updated = true; }
+                if (pool.AssetIdB != assetBId) { pool.AssetIdB = assetBId; updated = true; }
+                if (pool.AssetADecimals != assetADecimals) { pool.AssetADecimals = assetADecimals; updated = true; }
+                if (pool.AssetBDecimals != assetBDecimals) { pool.AssetBDecimals = assetBDecimals; updated = true; }
+                if (pool.AMMType != AMMType.WeightedAMM) { pool.AMMType = AMMType.WeightedAMM; updated = true; }
+                if (pool.WeightA != weightA) { pool.WeightA = weightA; updated = true; }
+                if (pool.WeightB != weightB) { pool.WeightB = weightB; updated = true; }
+                if (updated)
+                {
+                    pool.Timestamp = DateTimeOffset.Now;
+                }
+            }
+            if (updated)
+            {
+                _logger.LogInformation("Pool {appId} {appAddress} updated with pool refresh", pool.PoolAppId, pool.PoolAddress);
+                await _poolRepository.StorePoolAsync(pool, true, cancellationToken);
             }
             return pool;
         }

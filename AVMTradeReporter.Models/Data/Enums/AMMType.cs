@@ -7,6 +7,10 @@ namespace AVMTradeReporter.Models.Data.Enums
     {
         OldAMM,
         StableSwap,
-        ConcentratedLiquidityAMM
+        ConcentratedLiquidityAMM,
+        /// <summary>
+        /// Weighted constant-product AMM (Balancer style), e.g. Pact weighted pools. Weights are stored in Pool.WeightA / Pool.WeightB.
+        /// </summary>
+        WeightedAMM
     }
 }

@@ -19,6 +19,14 @@ namespace AVMTradeReporter.Models.Data
         public ulong? StableA { get; set; }
         public ulong? StableB { get; set; }
         public ulong? Amplifier { get; set; }
+        /// <summary>
+        /// Weight of asset A for weighted AMM pools (0..1). 0.5 means classic 50/50 constant product pool.
+        /// </summary>
+        public decimal? WeightA { get; set; }
+        /// <summary>
+        /// Weight of asset B for weighted AMM pools (0..1). 0.5 means classic 50/50 constant product pool.
+        /// </summary>
+        public decimal? WeightB { get; set; }
         // protocol fees in A asset
         public ulong? AF { get; set; }
         // protocol fees in B asset
@@ -175,6 +183,12 @@ namespace AVMTradeReporter.Models.Data
                         // for stable swap, we can return the minimum of the two amounts as the virtual amount.. so that the pool is balanced for price 1:1
                         return Math.Min(RealAmountA, RealAmountB);
                     }
+                    else if (AMMType == Enums.AMMType.WeightedAMM && WeightA.HasValue && WeightA.Value > 0)
+                    {
+                        // spot price in weighted pool is (B/wB)/(A/wA); scale the balances by the weight so that
+                        // VirtualAmountB / VirtualAmountA gives the correct price. For 50/50 pools this equals the real amount.
+                        return RealAmountA * 0.5m / WeightA.Value;
+                    }
                     else
                     {
                         return RealAmountA;
@@ -288,6 +302,10 @@ namespace AVMTradeReporter.Models.Data
                         // for stable swap, we can return the minimum of the two amounts as the virtual amount.. so that the pool is balanced for price 1:1
                         return Math.Min(RealAmountA, RealAmountB);
                     }
+                    else if (AMMType == Enums.AMMType.WeightedAMM && WeightB.HasValue && WeightB.Value > 0)
+                    {
+                        return RealAmountB * 0.5m / WeightB.Value;
+                    }
                     else
                     {
                         return RealAmountB;
@@ -392,6 +410,8 @@ namespace AVMTradeReporter.Models.Data
                 StableA = StableB,
                 StableB = StableA,
                 Amplifier = Amplifier,
+                WeightA = WeightB,
+                WeightB = WeightA,
                 AF = BF,
                 BF = AF,
                 L = L,

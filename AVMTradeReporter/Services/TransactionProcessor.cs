@@ -24,6 +24,8 @@ namespace AVMTradeReporter.Services
             // Initialize swap processors
             var pactSwap = new PactSwapProcessor(_logger);
             swapProcessors.Add(pactSwap.AppArg.ToLower(), pactSwap);
+            var pactWeightedSwap = new PactWeightedSwapProcessor(_logger);
+            swapProcessors.Add(pactWeightedSwap.AppArg.ToLower(), pactWeightedSwap);
             var biatecSwap = new BiatecSwapProcessor(_logger);
             swapProcessors.Add(biatecSwap.AppArg.ToLower(), biatecSwap);
             var tinySwap = new TinySwapProcessor(_logger);
@@ -32,6 +34,8 @@ namespace AVMTradeReporter.Services
             // Initialize liquidity processors
             var pactLAdd = new PactLiquidityAddProcessor(_logger);
             liquidityProcessors.Add(pactLAdd.AppArg.ToLower(), pactLAdd);
+            var pactWeightedLAdd = new PactWeightedLiquidityAddProcessor(_logger);
+            liquidityProcessors.Add(pactWeightedLAdd.AppArg.ToLower(), pactWeightedLAdd);
 
             var tinyLAdd = new TinyLiquidityAddProcessor(_logger);
             liquidityProcessors.Add(tinyLAdd.AppArg.ToLower(), tinyLAdd);
@@ -41,6 +45,8 @@ namespace AVMTradeReporter.Services
 
             var pactLRem = new PactLiquidityRemoveProcessor(_logger);
             liquidityProcessors.Add(pactLRem.AppArg.ToLower(), pactLRem);
+            var pactWeightedLRem = new PactWeightedLiquidityRemoveProcessor(_logger);
+            liquidityProcessors.Add(pactWeightedLRem.AppArg.ToLower(), pactWeightedLRem);
 
             var tinyLRem = new TinyLiquidityRemoveProcessor(_logger);
             liquidityProcessors.Add(tinyLRem.AppArg.ToLower(), tinyLRem);
