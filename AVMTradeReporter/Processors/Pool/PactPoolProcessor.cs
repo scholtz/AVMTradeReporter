@@ -36,6 +36,11 @@ namespace AVMTradeReporter.Processors.Pool
                 // Pact weighted pool (ARC4 contract) - completely different global state layout
                 return await LoadWeightedPoolAsync(pool, address, appId, app, cancelationTokenSource.Token);
             }
+            if (GetGlobalState(app, PactClammHelper.KeyCurrentPrice) != null)
+            {
+                // Pact CLAMM (tick based concentrated liquidity, ARC4 contract)
+                return await LoadClammPoolAsync(pool, address, appId, app, cancelationTokenSource.Token);
+            }
 
             var A = app.Params.GlobalState.FirstOrDefault(p => p.Key == Convert.ToBase64String(Encoding.ASCII.GetBytes("A")));
             if (A == null) throw new Exception("A is missing in global params");
@@ -310,6 +315,97 @@ namespace AVMTradeReporter.Processors.Pool
                 if (pool.AMMType != AMMType.WeightedAMM) { pool.AMMType = AMMType.WeightedAMM; updated = true; }
                 if (pool.WeightA != weightA) { pool.WeightA = weightA; updated = true; }
                 if (pool.WeightB != weightB) { pool.WeightB = weightB; updated = true; }
+                if (updated)
+                {
+                    pool.Timestamp = DateTimeOffset.Now;
+                }
+            }
+            if (updated)
+            {
+                _logger.LogInformation("Pool {appId} {appAddress} updated with pool refresh", pool.PoolAppId, pool.PoolAddress);
+                await _poolRepository.StorePoolAsync(pool, true, cancellationToken);
+            }
+            return pool;
+        }
+
+        /// <summary>
+        /// Loads the Pact CLAMM pool (tick based concentrated liquidity). See <see cref="PactClammHelper"/> for the layout.
+        /// The contract does not expose reserves, so A / B are kept from the stored pool and updated incrementally from events.
+        /// </summary>
+        private async Task<AVMTradeReporter.Models.Data.Pool> LoadClammPoolAsync(AVMTradeReporter.Models.Data.Pool? pool, string address, ulong appId, Algorand.Algod.Model.Application app, CancellationToken cancellationToken)
+        {
+            var assetA = GetGlobalState(app, "a");
+            if (assetA == null) throw new Exception("a (asset A id) is missing in global params");
+            var assetB = GetGlobalState(app, "b");
+            if (assetB == null) throw new Exception("b (asset B id) is missing in global params");
+            var currentPrice = GetGlobalState(app, PactClammHelper.KeyCurrentPrice);
+            if (currentPrice == null) throw new Exception("current_price is missing in global params");
+            var currentTick = GetGlobalState(app, PactClammHelper.KeyCurrentTick);
+            var tickSpacing = GetGlobalState(app, "tick_spacing");
+            var feeBps = GetGlobalState(app, "fee_bps");
+            var protocolFeeBps = GetGlobalState(app, "protocol_fee_bps");
+
+            var hash = app.Params.ApprovalProgram.Bytes.ToSha256Hex();
+            var assetAId = assetA.Value.Uint;
+            var assetBId = assetB.Value.Uint;
+            var assetADecimals = (await _assetRepository.GetAssetAsync(assetAId, cancellationToken))?.Params?.Decimals;
+            var assetBDecimals = (await _assetRepository.GetAssetAsync(assetBId, cancellationToken))?.Params?.Decimals;
+
+            var lpFee = feeBps == null ? 0.003m : feeBps.Value.Uint / 10000m;
+            // protocol_fee_bps is the portion of the swap fee (in bps of the fee) taken by the protocol (2000 = 20%)
+            var protocolFeePortion = (protocolFeeBps?.Value.Uint ?? 0) / 10000m;
+            var price = PactClammHelper.SqrtPriceX64ToPrice(currentPrice.Value.Uint, assetADecimals ?? 0, assetBDecimals ?? 0);
+            ulong? tick = currentTick?.Value.Uint;
+            ulong? spacing = tickSpacing?.Value.Uint;
+
+            _logger.LogInformation("Processing Pact CLAMM pool {appId}", appId);
+
+            var updated = false;
+            if (pool == null)
+            {
+                pool = new AVMTradeReporter.Models.Data.Pool
+                {
+                    PoolAddress = address,
+                    PoolAppId = appId,
+                    Protocol = DEXProtocol.Pact,
+                    A = 0,
+                    B = 0,
+                    L = 0,
+                    AssetIdLP = 0,
+                    AMMType = AMMType.TickBasedCLAMM,
+                    CurrentPrice = price,
+                    CurrentTick = tick,
+                    TickSpacing = spacing,
+                    Timestamp = DateTimeOffset.Now,
+                    ApprovalProgramHash = hash,
+                    LPFee = lpFee,
+                    ProtocolFeePortion = protocolFeePortion,
+                    AssetIdA = assetAId,
+                    AssetIdB = assetBId,
+                    AssetADecimals = assetADecimals,
+                    AssetBDecimals = assetBDecimals,
+                };
+                updated = true;
+            }
+            else
+            {
+                if (pool.Protocol != DEXProtocol.Pact) { pool.Protocol = DEXProtocol.Pact; updated = true; }
+                if (pool.A == null) { pool.A = 0; updated = true; }
+                if (pool.B == null) { pool.B = 0; updated = true; }
+                if (pool.StableA != null) { pool.StableA = null; updated = true; }
+                if (pool.StableB != null) { pool.StableB = null; updated = true; }
+                if (pool.Amplifier != null) { pool.Amplifier = null; updated = true; }
+                if (pool.ApprovalProgramHash != hash) { pool.ApprovalProgramHash = hash; updated = true; }
+                if (pool.LPFee != lpFee) { pool.LPFee = lpFee; updated = true; }
+                if (pool.ProtocolFeePortion != protocolFeePortion) { pool.ProtocolFeePortion = protocolFeePortion; updated = true; }
+                if (pool.AssetIdA != assetAId) { pool.AssetIdA = assetAId; updated = true; }
+                if (pool.AssetIdB != assetBId) { pool.AssetIdB = assetBId; updated = true; }
+                if (pool.AssetADecimals != assetADecimals) { pool.AssetADecimals = assetADecimals; updated = true; }
+                if (pool.AssetBDecimals != assetBDecimals) { pool.AssetBDecimals = assetBDecimals; updated = true; }
+                if (pool.AMMType != AMMType.TickBasedCLAMM) { pool.AMMType = AMMType.TickBasedCLAMM; updated = true; }
+                if (pool.CurrentPrice != price) { pool.CurrentPrice = price; updated = true; }
+                if (pool.CurrentTick != tick) { pool.CurrentTick = tick; updated = true; }
+                if (pool.TickSpacing != spacing) { pool.TickSpacing = spacing; updated = true; }
                 if (updated)
                 {
                     pool.Timestamp = DateTimeOffset.Now;

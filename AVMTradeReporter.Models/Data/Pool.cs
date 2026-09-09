@@ -27,6 +27,18 @@ namespace AVMTradeReporter.Models.Data
         /// Weight of asset B for weighted AMM pools (0..1). 0.5 means classic 50/50 constant product pool.
         /// </summary>
         public decimal? WeightB { get; set; }
+        /// <summary>
+        /// Current spot price of 1 unit of asset A in asset B (decimals adjusted) for tick based CLAMM pools.
+        /// </summary>
+        public decimal? CurrentPrice { get; set; }
+        /// <summary>
+        /// Current tick of the tick based CLAMM pool (raw contract value).
+        /// </summary>
+        public ulong? CurrentTick { get; set; }
+        /// <summary>
+        /// Tick spacing of the tick based CLAMM pool.
+        /// </summary>
+        public ulong? TickSpacing { get; set; }
         // protocol fees in A asset
         public ulong? AF { get; set; }
         // protocol fees in B asset
@@ -189,6 +201,17 @@ namespace AVMTradeReporter.Models.Data
                         // VirtualAmountB / VirtualAmountA gives the correct price. For 50/50 pools this equals the real amount.
                         return RealAmountA * 0.5m / WeightA.Value;
                     }
+                    else if (AMMType == Enums.AMMType.TickBasedCLAMM)
+                    {
+                        // the contract tells us the price directly; keep the product of the virtual amounts equal to the
+                        // product of the real reserves so that VirtualAmountB / VirtualAmountA == CurrentPrice
+                        if (CurrentPrice.HasValue && CurrentPrice.Value > 0)
+                        {
+                            var product = (double)(RealAmountA * RealAmountB);
+                            return Convert.ToDecimal(Math.Sqrt(product / (double)CurrentPrice.Value));
+                        }
+                        return RealAmountA;
+                    }
                     else
                     {
                         return RealAmountA;
@@ -306,6 +329,15 @@ namespace AVMTradeReporter.Models.Data
                     {
                         return RealAmountB * 0.5m / WeightB.Value;
                     }
+                    else if (AMMType == Enums.AMMType.TickBasedCLAMM)
+                    {
+                        if (CurrentPrice.HasValue && CurrentPrice.Value > 0)
+                        {
+                            var product = (double)(RealAmountA * RealAmountB);
+                            return Convert.ToDecimal(Math.Sqrt(product * (double)CurrentPrice.Value));
+                        }
+                        return RealAmountB;
+                    }
                     else
                     {
                         return RealAmountB;
@@ -412,6 +444,9 @@ namespace AVMTradeReporter.Models.Data
                 Amplifier = Amplifier,
                 WeightA = WeightB,
                 WeightB = WeightA,
+                CurrentPrice = CurrentPrice == null || CurrentPrice == 0 ? null : 1 / CurrentPrice,
+                CurrentTick = CurrentTick,
+                TickSpacing = TickSpacing,
                 AF = BF,
                 BF = AF,
                 L = L,

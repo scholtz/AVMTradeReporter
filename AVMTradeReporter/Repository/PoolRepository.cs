@@ -1,4 +1,4 @@
-using AVMTradeReporter.Hubs;
+﻿using AVMTradeReporter.Hubs;
 using AVMTradeReporter.Model.Configuration;
 using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Models.Data;
@@ -550,10 +550,7 @@ namespace AVMTradeReporter.Repository
                     return;
                 }
 
-                existingPool.A = trade.A;
-                existingPool.B = trade.B;
-                if (trade.L > 0)
-                    existingPool.L = trade.L;
+                PoolReserveUpdater.ApplyTrade(existingPool, trade);
                 existingPool.Timestamp = trade.Timestamp;
                 existingPool.Protocol = trade.Protocol;
 
@@ -635,10 +632,7 @@ namespace AVMTradeReporter.Repository
                 //existingPool.AssetIdA = liquidity.AssetIdA;
                 //existingPool.AssetIdB = liquidity.AssetIdB;
                 //existingPool.AssetIdLP = liquidity.AssetIdLP;
-                existingPool.A = liquidity.A;
-                existingPool.B = liquidity.B;
-                if (liquidity.L > 0)
-                    existingPool.L = liquidity.L;
+                PoolReserveUpdater.ApplyLiquidity(existingPool, liquidity);
                 existingPool.Timestamp = liquidity.Timestamp;
                 existingPool.Protocol = liquidity.Protocol;
                 if (liquidity.AF.HasValue) existingPool.AF = liquidity.AF.Value;
