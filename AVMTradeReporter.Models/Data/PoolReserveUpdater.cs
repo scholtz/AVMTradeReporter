@@ -34,6 +34,22 @@ namespace AVMTradeReporter.Models.Data
             }
             Add(pool, trade.AssetIdIn, trade.AssetAmountIn);
             Subtract(pool, trade.AssetIdOut, trade.AssetAmountOut);
+            ApplyPrice(pool, trade);
+        }
+
+        /// <summary>
+        /// Updates the pool price / tick from the post-swap state carried by the trade (tick based CLAMM pools).
+        /// </summary>
+        public static void ApplyPrice(Pool pool, Trade trade)
+        {
+            if (trade.PoolSqrtPriceX64.HasValue && trade.PoolSqrtPriceX64.Value > 0)
+            {
+                pool.CurrentPrice = TickMath.SqrtPriceX64ToPrice(trade.PoolSqrtPriceX64.Value, pool.AssetADecimals ?? 0, pool.AssetBDecimals ?? 0);
+            }
+            if (trade.PoolTick.HasValue)
+            {
+                pool.CurrentTick = trade.PoolTick.Value;
+            }
         }
 
         public static void ApplyLiquidity(Pool pool, Liquidity liquidity)

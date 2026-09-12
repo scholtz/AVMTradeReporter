@@ -111,7 +111,10 @@ namespace AVMTradeReporter.Processors.SWAP
                 TradeState = tradeState,
                 A = 0,
                 B = 0,
-                L = 0
+                L = 0,
+                // post-swap price / tick from the global state delta, used to keep Pool.CurrentPrice fresh between refreshes
+                PoolSqrtPriceX64 = PactClammHelper.GetGlobalDeltaUint(current, PactClammHelper.KeyCurrentPrice),
+                PoolTick = PactClammHelper.GetGlobalDeltaUint(current, PactClammHelper.KeyCurrentTick)
             };
         }
     }

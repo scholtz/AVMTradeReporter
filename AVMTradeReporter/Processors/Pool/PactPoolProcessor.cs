@@ -1,5 +1,6 @@
 ﻿using Algorand.Algod;
 using AVMTradeReporter.Extensions;
+using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Models.Data.Enums;
 using AVMTradeReporter.Repository;
 using System.Text;
@@ -354,9 +355,31 @@ namespace AVMTradeReporter.Processors.Pool
             var lpFee = feeBps == null ? 0.003m : feeBps.Value.Uint / 10000m;
             // protocol_fee_bps is the portion of the swap fee (in bps of the fee) taken by the protocol (2000 = 20%)
             var protocolFeePortion = (protocolFeeBps?.Value.Uint ?? 0) / 10000m;
+            // scale is the fixed point denominator of current_price / low_price / high_price (2^64 - 1 => Q64.64)
+            var scale = GetGlobalState(app, "scale");
+            if (scale != null && scale.Value.Uint != ulong.MaxValue)
+            {
+                _logger.LogWarning("Pact CLAMM pool {appId} uses unexpected price scale {scale}; price conversion assumes Q64.64", appId, scale.Value.Uint);
+            }
             var price = PactClammHelper.SqrtPriceX64ToPrice(currentPrice.Value.Uint, assetADecimals ?? 0, assetBDecimals ?? 0);
             ulong? tick = currentTick?.Value.Uint;
             ulong? spacing = tickSpacing?.Value.Uint;
+
+            // reserves are not in the global state: sum the liquidity of every tick (stored in the tick word boxes)
+            // at the current sqrt price. Falls back to the stored (event tracked) reserves when the boxes cannot be read.
+            ulong reserveA = pool?.A ?? 0;
+            ulong reserveB = pool?.B ?? 0;
+            ulong activeLiquidity = pool?.L ?? 0;
+            try
+            {
+                var ticks = await LoadClammTicksAsync(appId);
+                (reserveA, reserveB) = TickMath.ComputeReserves(ticks, currentPrice.Value.Uint, spacing ?? 1);
+                activeLiquidity = tick.HasValue ? TickMath.ActiveLiquidity(ticks, tick.Value) : 0;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to compute reserves of Pact CLAMM pool {appId} from tick boxes, keeping stored reserves", appId);
+            }
 
             _logger.LogInformation("Processing Pact CLAMM pool {appId}", appId);
 
@@ -368,9 +391,9 @@ namespace AVMTradeReporter.Processors.Pool
                     PoolAddress = address,
                     PoolAppId = appId,
                     Protocol = DEXProtocol.Pact,
-                    A = 0,
-                    B = 0,
-                    L = 0,
+                    A = reserveA,
+                    B = reserveB,
+                    L = activeLiquidity,
                     AssetIdLP = 0,
                     AMMType = AMMType.TickBasedCLAMM,
                     CurrentPrice = price,
@@ -390,8 +413,9 @@ namespace AVMTradeReporter.Processors.Pool
             else
             {
                 if (pool.Protocol != DEXProtocol.Pact) { pool.Protocol = DEXProtocol.Pact; updated = true; }
-                if (pool.A == null) { pool.A = 0; updated = true; }
-                if (pool.B == null) { pool.B = 0; updated = true; }
+                if (pool.A != reserveA) { pool.A = reserveA; updated = true; }
+                if (pool.B != reserveB) { pool.B = reserveB; updated = true; }
+                if (pool.L != activeLiquidity) { pool.L = activeLiquidity; updated = true; }
                 if (pool.StableA != null) { pool.StableA = null; updated = true; }
                 if (pool.StableB != null) { pool.StableB = null; updated = true; }
                 if (pool.Amplifier != null) { pool.Amplifier = null; updated = true; }
@@ -417,6 +441,27 @@ namespace AVMTradeReporter.Processors.Pool
                 await _poolRepository.StorePoolAsync(pool, true, cancellationToken);
             }
             return pool;
+        }
+
+        /// <summary>
+        /// Reads the per-tick liquidity of the Pact CLAMM pool from its tick word boxes (8 byte box names).
+        /// Position ('u' + address + word) and other boxes are skipped.
+        /// </summary>
+        private async Task<List<(ulong Tick, ulong Liquidity)>> LoadClammTicksAsync(ulong appId)
+        {
+            var result = new List<(ulong Tick, ulong Liquidity)>();
+            var boxes = await _algod.GetApplicationBoxesAsync(appId, null);
+            if (boxes?.Boxes == null) return result;
+            foreach (var descriptor in boxes.Boxes)
+            {
+                if (descriptor.Name == null || descriptor.Name.Length != 8) continue;
+                var word = BitConverter.ToUInt64(descriptor.Name.Reverse().ToArray(), 0);
+                if (word < TickMath.TickBase) continue;
+                var box = await _algod.GetApplicationBoxByNameAsync(appId, "b64:" + Convert.ToBase64String(descriptor.Name));
+                if (box?.Value == null) continue;
+                result.AddRange(TickMath.ParseTickWord(word, box.Value));
+            }
+            return result;
         }
 
         private ulong CalculateAmplifier(ulong initialA, ulong futureA, ulong initialATime, ulong futureATime)

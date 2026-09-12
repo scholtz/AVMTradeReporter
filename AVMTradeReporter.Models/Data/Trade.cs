@@ -97,6 +97,16 @@ namespace AVMTradeReporter.Models.Data
         public ulong L { get; set; }
 
         /// <summary>
+        /// Pool sqrt price after the swap (Q64.64, tick based CLAMM pools only). Used to update Pool.CurrentPrice.
+        /// </summary>
+        public ulong? PoolSqrtPriceX64 { get; set; }
+
+        /// <summary>
+        /// Pool tick after the swap (tick based CLAMM pools only).
+        /// </summary>
+        public ulong? PoolTick { get; set; }
+
+        /// <summary>
         /// Protocol fees in asset A (base units), if available.
         /// </summary>
         public ulong? AF { get; set; }

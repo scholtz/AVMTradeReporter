@@ -66,11 +66,19 @@ namespace AVMTradeReporter.Processors
         /// </summary>
         public static decimal SqrtPriceX64ToPrice(ulong sqrtPriceX64, ulong assetADecimals, ulong assetBDecimals)
         {
-            var sqrt = (double)sqrtPriceX64 / 18446744073709551616.0; // 2^64
-            var priceBaseUnits = sqrt * sqrt;
-            var price = priceBaseUnits * Math.Pow(10, (double)assetADecimals - (double)assetBDecimals);
-            if (double.IsNaN(price) || double.IsInfinity(price)) return 0;
-            return Convert.ToDecimal(price);
+            return AVMTradeReporter.Models.Data.TickMath.SqrtPriceX64ToPrice(sqrtPriceX64, assetADecimals, assetBDecimals);
+        }
+
+        /// <summary>
+        /// Reads an uint value from the global state delta of the app call (null when the key was not touched).
+        /// </summary>
+        public static ulong? GetGlobalDeltaUint(SignedTransaction current, string key)
+        {
+            var delta = current.Detail?.GlobalDelta;
+            if (delta == null) return null;
+            var item = delta.Where(kv => kv.Key.ToString() == key).Select(kv => kv.Value).FirstOrDefault();
+            if (item == null) return null;
+            return Convert.ToUInt64(item.Uint64);
         }
     }
 }

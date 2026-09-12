@@ -44,6 +44,8 @@ namespace AVMTradeReporterTests.Processors.SWAP
             // the CLAMM contract does not expose reserves - they are tracked incrementally by the pool repository
             Assert.That(trade.A, Is.EqualTo(0));
             Assert.That(trade.B, Is.EqualTo(0));
+            Assert.That(trade.PoolSqrtPriceX64, Is.EqualTo(6261539103397907236UL));
+            Assert.That(trade.PoolTick, Is.EqualTo(1000360));
             Assert.That(dummyLiquidityService.list.Count(l => l.PoolAppId == ClammPoolAppId), Is.EqualTo(0));
         }
 
@@ -69,6 +71,9 @@ namespace AVMTradeReporterTests.Processors.SWAP
             Assert.That(trade.AssetIdOut, Is.EqualTo(AssetB));
             Assert.That(trade.AssetAmountOut, Is.EqualTo(572191));
             Assert.That(trade.Trader, Is.EqualTo("L7RF6SLJVI4YSKNRGYBMXVQUVXWRPEEJMXJBTCTYMVGCZGU7P7GM6UUTY4"));
+            // post-swap price and tick from the global state delta (current_price / current_tick)
+            Assert.That(trade.PoolSqrtPriceX64, Is.EqualTo(6237834869436999446UL));
+            Assert.That(trade.PoolTick, Is.EqualTo(1000361));
         }
     }
 }
