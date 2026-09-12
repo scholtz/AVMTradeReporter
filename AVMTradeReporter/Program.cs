@@ -65,14 +65,18 @@ namespace AVMTradeReporter
                 });
                 c.AddSecurityDefinition("arc14", new OpenApiSecurityScheme
                 {
-                    Description = "ARC-0014 Algorand authentication transaction, base64-encoded and sent as a " +
-                        "Bearer token in the Authorization header (\"Authorization: Bearer <token>\"). See the " +
-                        "top-level API description for how to generate this token.",
+                    Description = "ARC-0014 Algorand authentication: a signed transaction, base64-encoded and sent " +
+                        "as the full Authorization header value, e.g. \"SigTx <base64-signed-tx>\". Paste the " +
+                        "whole value including the \"SigTx \" prefix. See the top-level API description for how " +
+                        "to generate this token.",
                     In = ParameterLocation.Header,
                     Name = "Authorization",
                     Type = SecuritySchemeType.ApiKey,
                 });
-                c.OperationFilter<Swashbuckle.AspNetCore.Filters.SecurityRequirementsOperationFilter>();
+                // The filter's default scheme name is "oauth2"; it must match the "arc14" definition above,
+                // otherwise [Authorize] endpoints get a requirement for a non-existent scheme and Swagger UI
+                // never attaches the token entered in the Authorize dialog.
+                c.OperationFilter<Swashbuckle.AspNetCore.Filters.SecurityRequirementsOperationFilter>(true, "arc14");
                 c.ResolveConflictingActions(apiDescriptions => apiDescriptions.First()); //This line
 
                 // Surface /// XML doc comments (summary/param/returns) from this assembly in Swagger UI.
