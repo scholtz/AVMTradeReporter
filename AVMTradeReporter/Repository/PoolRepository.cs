@@ -5,6 +5,7 @@ using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Models.Data.Enums;
 using AVMTradeReporter.Processors.Pool;
 using AVMTradeReporter.Services;
+using AVMTradeReporter.Services.ScamRating;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Core.Bulk;
 using Elastic.Clients.Elasticsearch.IndexManagement;
@@ -30,6 +31,7 @@ namespace AVMTradeReporter.Repository
         private readonly AppConfiguration _appConfig;
         private readonly IServiceProvider _serviceProvider;
         private readonly IAssetRepository? _assetRepository; // optional asset repository to enrich decimals
+        private readonly IScamRatingService? _scamRatingService; // optional - scores pools and zeroes balances of scam pools on store
         private readonly ISubscriber? _redisSubscriber; // cached Redis subscriber
 
         // In-memory cache for pools
@@ -48,7 +50,8 @@ namespace AVMTradeReporter.Repository
             IOptions<AppConfiguration> appConfig,
             IServiceProvider serviceProvider,
             IDatabase? redisDatabase = null,
-            IAssetRepository? assetRepository = null
+            IAssetRepository? assetRepository = null,
+            IScamRatingService? scamRatingService = null
             )
         {
             _elasticClient = elasticClient;
@@ -59,6 +62,7 @@ namespace AVMTradeReporter.Repository
             _appConfig = appConfig.Value;
             _serviceProvider = serviceProvider;
             _assetRepository = assetRepository;
+            _scamRatingService = scamRatingService;
             _redisSubscriber = _redisDatabase?.Multiplexer.GetSubscriber();
 
             CreatePoolIndexTemplateAsync().Wait();
@@ -345,6 +349,7 @@ namespace AVMTradeReporter.Repository
                             { "b", new LongNumberProperty() },
                             { "l", new LongNumberProperty() },
                             { "protocol", new KeywordProperty() },
+                            { "scamRating", new IntegerNumberProperty() },
                             { "timestamp", new DateProperty() }
                         }
                     }
@@ -398,6 +403,10 @@ namespace AVMTradeReporter.Repository
 
             try
             {
+                // Score the pool and enforce the scam policy (balances of a pool rated > 80 are forced
+                // to 0) before it reaches any cache, store or subscriber - every write path (trades,
+                // liquidity, pool processors, periodic refresh) funnels through here.
+                await ApplyScamRatingAsync(pool, token);
 
                 // Update in-memory cache
                 _poolsCache[pool.PoolAddress] = pool;
@@ -833,6 +842,26 @@ namespace AVMTradeReporter.Repository
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to publish pool update to SignalR hub");
+            }
+        }
+
+        private async Task ApplyScamRatingAsync(Pool pool, CancellationToken cancellationToken)
+        {
+            try
+            {
+                if (_scamRatingService != null)
+                {
+                    await _scamRatingService.ApplyAsync(pool, cancellationToken);
+                }
+                else
+                {
+                    ScamRatingPolicy.ApplyBalanceRule(pool);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to apply scam rating to pool {poolAddress}_{poolAppId}", pool.PoolAddress, pool.PoolAppId);
+                ScamRatingPolicy.ApplyBalanceRule(pool);
             }
         }
 

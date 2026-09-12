@@ -299,3 +299,24 @@ probe/strategy shape rather than the historical bare
 `../biatec-scan-web` is the Vue 3 frontend that consumes this API. See
 its `CLAUDE.md` for the cross-repo workflow (backend change → stage deploy →
 regenerate typed client → frontend change).
+
+## Pool scam rating (`Pool.ScamRating`, 0..100)
+
+Every pool write funnels through `PoolRepository.StorePoolAsync`, which calls
+`IScamRatingService.ApplyAsync` before the pool reaches any cache/store/hub:
+
+- `ScamRatingConfiguration.KnownScamPools` (app id -> rating) wins outright;
+  100 = known scammer pool. Mainnet default lists 3680724745, a fake "Biatec
+  CLAMM" pool (copies the CLAMM global-state layout and points `bc` at the
+  real config app 3074197827, but runs a foreign 470-byte approval program
+  and is not registered in the Biatec pool provider).
+- Otherwise the approval program hash is looked up in the ARC-56 registry
+  (`Arc56RegistryClient`, `https://scholtz.github.io/ARC56Registry/approval-programs/<h[:3]>/<h>.txt`);
+  a 404 adds `UnregisteredContractPoints` (5). A registry outage / unknown
+  answer adds nothing - never penalise on missing evidence.
+- `ScamRatingPolicy.ApplyBalanceRule`: rating > 80 forces A/B (and AF/BF,
+  StableA/StableB) to 0 so the pool contributes no TVL/price/depth anywhere.
+
+Tests: `AVMTradeReporterTests/Services/ScamRating/*` (pure policy, mocked
+registry HTTP, plus `[Category("Live")]` checks of the real CLAMM hash and
+the fake pool against the public registry + mainnet algod).

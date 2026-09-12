@@ -60,6 +60,15 @@ namespace AVMTradeReporter.Models.Data
         /// </summary>
         public string? ApprovalProgramHash { get; set; }
         /// <summary>
+        /// Scam rating of the pool, 0..100. 0 (default) means no scam signal was found; 100 means the
+        /// deployed pool is a known scammer pool that nobody should trust. Signals are accumulated by
+        /// <c>ScamRatingService</c> (e.g. +5 when the approval program hash is not present in the public
+        /// ARC-56 registry). When the rating exceeds <c>ScamRatingPolicy.ZeroBalancesThreshold</c> (80),
+        /// the pool's reported balances of asset A and asset B are forced to 0 so the pool never
+        /// contributes liquidity, TVL or price to the aggregated views.
+        /// </summary>
+        public int ScamRating { get; set; } = 0;
+        /// <summary>
         /// Fee for providing the liquidity
         /// </summary>
         public decimal? LPFee { get; set; }
@@ -457,6 +466,7 @@ namespace AVMTradeReporter.Models.Data
                 Timestamp = Timestamp,
                 AMMType = AMMType,
                 ApprovalProgramHash = ApprovalProgramHash,
+                ScamRating = ScamRating,
                 LPFee = LPFee,
                 ProtocolFeePortion = ProtocolFeePortion,
                 TotalTVLAssetAInUSD = TotalTVLAssetBInUSD, // swapped

@@ -84,6 +84,12 @@ namespace AVMTradeReporter.Model.Configuration
         public BlockProcessingConfiguration BlockProcessing { get; set; } = new BlockProcessingConfiguration();
 
         /// <summary>
+        /// Scam rating configuration (known scam pools, ARC-56 registry lookup used to score
+        /// pools whose contract is not publicly known).
+        /// </summary>
+        public ScamRatingConfiguration ScamRating { get; set; } = new ScamRatingConfiguration();
+
+        /// <summary>
         /// Stability index per asset id.
         /// Higher value means more stable / preferred base asset for USD price reporting.
         /// </summary>
@@ -362,5 +368,53 @@ namespace AVMTradeReporter.Model.Configuration
         /// How often to check memory usage in milliseconds. Default is 5000 ms (5 seconds).
         /// </summary>
         public int MemoryCheckIntervalMs { get; set; } = 5000;
+    }
+
+    /// <summary>
+    /// Configuration of the pool scam rating (see <c>Pool.ScamRating</c>).
+    /// </summary>
+    public class ScamRatingConfiguration
+    {
+        /// <summary>
+        /// Pool application ids with a manually assigned scam rating (0..100). A pool listed here gets
+        /// exactly this rating regardless of any other signal. 100 means a known scammer pool that
+        /// nobody should trust. Defaults to the pools identified so far on Algorand mainnet; override per
+        /// network in appsettings.json/ConfigMap (app ids are not portable across networks).
+        ///
+        /// 3680724745 - a fake "Biatec CLAMM" pool: it copies the global state layout of a Biatec CLAMM
+        /// pool (and even points its `bc` config key at the real Biatec config app), but its 470-byte
+        /// approval program is not the Biatec CLAMM contract, it is not registered in the Biatec pool
+        /// provider and its program hash is unknown to the ARC-56 registry.
+        /// </summary>
+        public Dictionary<ulong, int> KnownScamPools { get; set; } = new()
+        {
+            { 3680724745UL, 100 },
+        };
+
+        /// <summary>
+        /// Base URL of the ARC-56 program hash registry (https://github.com/scholtz/ARC56Registry).
+        /// Approval program hashes are looked up at
+        /// <c>{Arc56RegistryBaseUrl}/approval-programs/{hash[:3]}/{hash}.txt</c>. Point this at a
+        /// self-hosted <c>scholtz2/arc56-registry</c> container to avoid depending on GitHub Pages.
+        /// </summary>
+        public string Arc56RegistryBaseUrl { get; set; } = "https://scholtz.github.io/ARC56Registry";
+
+        /// <summary>
+        /// Points added to the scam rating when the pool's approval program hash is known but is not
+        /// present in the ARC-56 registry (i.e. no public ARC-56 spec describes the deployed contract).
+        /// </summary>
+        public int UnregisteredContractPoints { get; set; } = 5;
+
+        /// <summary>
+        /// How long a "not registered" registry answer is cached before the registry is asked again.
+        /// The registry is regenerated daily, so a contract that publishes its spec later is picked up
+        /// on the next lookup. "Registered" answers are cached for the lifetime of the process.
+        /// </summary>
+        public int NotRegisteredCacheHours { get; set; } = 24;
+
+        /// <summary>
+        /// Enables the ARC-56 registry lookup. When disabled only <see cref="KnownScamPools"/> is applied.
+        /// </summary>
+        public bool RegistryLookupEnabled { get; set; } = true;
     }
 }

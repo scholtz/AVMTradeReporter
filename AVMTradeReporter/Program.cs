@@ -1,4 +1,4 @@
-using Algorand;
+﻿using Algorand;
 using Algorand.Algod;
 using AlgorandAuthenticationV2;
 using AVMIndexReporter.Repository;
@@ -8,6 +8,7 @@ using AVMTradeReporter.Processors.Image;
 using AVMTradeReporter.Processors.Pool;
 using AVMTradeReporter.Repository;
 using AVMTradeReporter.Services;
+using AVMTradeReporter.Services.ScamRating;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Security;
 using Elastic.Transport;
@@ -140,6 +141,18 @@ namespace AVMTradeReporter
             builder.Services.AddSingleton<ITopAssetsService, TopAssetsService>();
             builder.Services.AddSingleton<IAssetTimeseriesService, AssetTimeseriesService>();
             builder.Services.AddSingleton<IOhlcUsdRepairService, OhlcUsdRepairService>();
+
+            // Scam rating: ARC-56 registry lookup + known scam pool list (see ScamRatingConfiguration)
+            builder.Services.AddSingleton<IArc56RegistryClient>(sp =>
+            {
+                var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+                httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("AVMTradeReporter/1.0");
+                return new Arc56RegistryClient(
+                    httpClient,
+                    sp.GetRequiredService<IOptions<AppConfiguration>>(),
+                    sp.GetRequiredService<ILogger<Arc56RegistryClient>>());
+            });
+            builder.Services.AddSingleton<IScamRatingService, ScamRatingService>();
 
             // Add Pool Processors
             builder.Services.AddSingleton<PactPoolProcessor>();
