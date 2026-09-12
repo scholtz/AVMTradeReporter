@@ -561,7 +561,11 @@ namespace AVMTradeReporter.Repository
 
                 PoolReserveUpdater.ApplyTrade(existingPool, trade);
                 existingPool.Timestamp = trade.Timestamp;
-                existingPool.Protocol = trade.Protocol;
+                if (!ScamRatingPolicy.IsProtocolLocked(existingPool))
+                {
+                    // a swap in a scam pool must not re-label it back to the protocol it imitates
+                    existingPool.Protocol = trade.Protocol;
+                }
 
                 if (trade.AF.HasValue) existingPool.AF = trade.AF.Value;
                 if (trade.BF.HasValue) existingPool.BF = trade.BF.Value;
@@ -643,7 +647,10 @@ namespace AVMTradeReporter.Repository
                 //existingPool.AssetIdLP = liquidity.AssetIdLP;
                 PoolReserveUpdater.ApplyLiquidity(existingPool, liquidity);
                 existingPool.Timestamp = liquidity.Timestamp;
-                existingPool.Protocol = liquidity.Protocol;
+                if (!ScamRatingPolicy.IsProtocolLocked(existingPool))
+                {
+                    existingPool.Protocol = liquidity.Protocol;
+                }
                 if (liquidity.AF.HasValue) existingPool.AF = liquidity.AF.Value;
                 if (liquidity.BF.HasValue) existingPool.BF = liquidity.BF.Value;
 
@@ -855,13 +862,13 @@ namespace AVMTradeReporter.Repository
                 }
                 else
                 {
-                    ScamRatingPolicy.ApplyBalanceRule(pool);
+                    ScamRatingPolicy.Enforce(pool);
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to apply scam rating to pool {poolAddress}_{poolAppId}", pool.PoolAddress, pool.PoolAppId);
-                ScamRatingPolicy.ApplyBalanceRule(pool);
+                ScamRatingPolicy.Enforce(pool);
             }
         }
 

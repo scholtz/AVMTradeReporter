@@ -1,4 +1,4 @@
-using AVMTradeReporter.Model.Configuration;
+﻿using AVMTradeReporter.Model.Configuration;
 using AVMTradeReporter.Models.Data;
 using Microsoft.Extensions.Options;
 
@@ -63,7 +63,7 @@ namespace AVMTradeReporter.Services.ScamRating
                 pool.ScamRating = rating;
                 changed = true;
             }
-            if (ScamRatingPolicy.ApplyBalanceRule(pool))
+            if (ScamRatingPolicy.Enforce(pool))
             {
                 changed = true;
             }

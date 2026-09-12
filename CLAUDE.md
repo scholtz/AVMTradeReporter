@@ -314,8 +314,13 @@ Every pool write funnels through `PoolRepository.StorePoolAsync`, which calls
   (`Arc56RegistryClient`, `https://scholtz.github.io/ARC56Registry/approval-programs/<h[:3]>/<h>.txt`);
   a 404 adds `UnregisteredContractPoints` (5). A registry outage / unknown
   answer adds nothing - never penalise on missing evidence.
-- `ScamRatingPolicy.ApplyBalanceRule`: rating > 80 forces A/B (and AF/BF,
-  StableA/StableB) to 0 so the pool contributes no TVL/price/depth anywhere.
+- `ScamRatingPolicy.Enforce`: rating > 80 forces A/B (and AF/BF,
+  StableA/StableB) to 0 so the pool contributes no TVL/price/depth anywhere,
+  and re-labels the pool `DEXProtocol.Scam`. That label is sticky:
+  `UpdatePoolFromTrade`/`UpdatePoolFromLiquidity` skip the protocol rewrite
+  when `ScamRatingPolicy.IsProtocolLocked`, and any pool-processor refresh
+  that flips it back to Biatec/Pact/Tiny is undone again in `StorePoolAsync`
+  (`ScamPoolProtocolStickinessTests.cs`).
 
 Tests: `AVMTradeReporterTests/Services/ScamRating/*` (pure policy, mocked
 registry HTTP, plus `[Category("Live")]` checks of the real CLAMM hash and

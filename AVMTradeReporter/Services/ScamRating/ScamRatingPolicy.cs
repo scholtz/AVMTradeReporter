@@ -1,4 +1,5 @@
-using AVMTradeReporter.Models.Data;
+﻿using AVMTradeReporter.Models.Data;
+using AVMTradeReporter.Models.Data.Enums;
 
 namespace AVMTradeReporter.Services.ScamRating
 {
@@ -30,6 +31,37 @@ namespace AVMTradeReporter.Services.ScamRating
         /// True when the pool's balances must be reported as 0 because of its scam rating.
         /// </summary>
         public static bool ShouldZeroBalances(int scamRating) => scamRating > ZeroBalancesThreshold;
+
+        /// <summary>
+        /// Applies the protocol rule: a pool rated above <see cref="ZeroBalancesThreshold"/> is
+        /// re-labelled <see cref="DEXProtocol.Scam"/> so it is never presented as (or processed like) the
+        /// protocol it imitates. The label is sticky - see <see cref="IsProtocolLocked"/>.
+        /// Returns true when the protocol was changed.
+        /// </summary>
+        public static bool ApplyProtocolRule(Pool pool)
+        {
+            if (!ShouldZeroBalances(pool.ScamRating)) return false;
+            if (pool.Protocol == DEXProtocol.Scam) return false;
+            pool.Protocol = DEXProtocol.Scam;
+            return true;
+        }
+
+        /// <summary>
+        /// True when the pool's protocol must not be rewritten by an incoming trade / liquidity event /
+        /// pool processor result (the pool is already labelled <see cref="DEXProtocol.Scam"/>).
+        /// </summary>
+        public static bool IsProtocolLocked(Pool pool) => pool.Protocol == DEXProtocol.Scam;
+
+        /// <summary>
+        /// Applies every consequence of the pool's current rating (protocol label + zero balances).
+        /// Returns true when anything changed.
+        /// </summary>
+        public static bool Enforce(Pool pool)
+        {
+            var protocolChanged = ApplyProtocolRule(pool);
+            var balancesChanged = ApplyBalanceRule(pool);
+            return protocolChanged || balancesChanged;
+        }
 
         /// <summary>
         /// Applies the balance rule to the pool: when its scam rating exceeds

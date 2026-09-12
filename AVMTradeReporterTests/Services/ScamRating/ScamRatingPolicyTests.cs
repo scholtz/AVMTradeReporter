@@ -94,6 +94,59 @@ namespace AVMTradeReporterTests.Services.ScamRating
             });
         }
 
+        [TestCase(0)]
+        [TestCase(80)]
+        public void ApplyProtocolRule_RatingAtOrBelow80_KeepsProtocol(int rating)
+        {
+            var pool = MakePool(rating);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(ScamRatingPolicy.ApplyProtocolRule(pool), Is.False);
+                Assert.That(pool.Protocol, Is.EqualTo(DEXProtocol.Biatec));
+                Assert.That(ScamRatingPolicy.IsProtocolLocked(pool), Is.False);
+            });
+        }
+
+        [TestCase(81)]
+        [TestCase(100)]
+        public void ApplyProtocolRule_RatingAbove80_RelabelsPoolAsScam(int rating)
+        {
+            var pool = MakePool(rating);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(ScamRatingPolicy.ApplyProtocolRule(pool), Is.True);
+                Assert.That(pool.Protocol, Is.EqualTo(DEXProtocol.Scam));
+                Assert.That(ScamRatingPolicy.IsProtocolLocked(pool), Is.True);
+                Assert.That(ScamRatingPolicy.ApplyProtocolRule(pool), Is.False, "already Scam - no further change");
+            });
+        }
+
+        [Test]
+        public void Enforce_KnownScam_RelabelsAndZeroesInOneGo()
+        {
+            var pool = MakePool(100);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(ScamRatingPolicy.Enforce(pool), Is.True);
+                Assert.That(pool.Protocol, Is.EqualTo(DEXProtocol.Scam));
+                Assert.That(pool.A, Is.EqualTo(0UL));
+                Assert.That(pool.B, Is.EqualTo(0UL));
+                Assert.That(ScamRatingPolicy.Enforce(pool), Is.False);
+            });
+        }
+
+        [Test]
+        public void Reverse_KeepsScamProtocol()
+        {
+            var pool = MakePool(100);
+            ScamRatingPolicy.Enforce(pool);
+
+            Assert.That(pool.Reverse().Protocol, Is.EqualTo(DEXProtocol.Scam));
+        }
+
         [Test]
         public void ApplyBalanceRule_AlreadyZeroed_ReportsNoChange()
         {
