@@ -1,8 +1,10 @@
 namespace AVMTradeReporter.Model.DTO
 {
     /// <summary>
-    /// Aggregated DEX trading statistics for a 24-hour window, formatted for DefiLlama export.
-    /// The window covers [<see cref="From"/>, <see cref="To"/>) where To = From + 1 day.
+    /// Aggregated DEX trading statistics for an arbitrary window, formatted for DefiLlama export.
+    /// The window covers [<see cref="From"/>, <see cref="To"/>). Defaults to a full day
+    /// (To = From + 1 day) when the caller does not request a specific end; an explicit end lets
+    /// callers pull sub-day (e.g. hourly) windows, as needed by DefiLlama's v2 adapter model.
     /// Only confirmed trades are included in the aggregation.
     /// </summary>
     public class DexStatsResponse
@@ -13,7 +15,7 @@ namespace AVMTradeReporter.Model.DTO
         /// <summary>Start of the statistics window (inclusive).</summary>
         public DateTimeOffset From { get; init; }
 
-        /// <summary>End of the statistics window (exclusive, equals From + 1 day).</summary>
+        /// <summary>End of the statistics window (exclusive; equals From + 1 day unless an explicit end was requested).</summary>
         public DateTimeOffset To { get; init; }
 
         /// <summary>Total USD volume traded during the window (sum of valueUSD across all confirmed trades).</summary>

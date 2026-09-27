@@ -25,20 +25,21 @@ namespace AVMTradeReporter.Services
         public async Task<DexStatsResponse> GetDexStatsAsync(
             DEXProtocol protocol,
             DateTimeOffset from,
+            DateTimeOffset? to = null,
             CancellationToken cancellationToken = default)
         {
-            var to = from.AddDays(1);
+            var windowEnd = to ?? from.AddDays(1);
 
             try
             {
                 var (volumeUSD, feesUSD, feesUSDProvider, feesUSDProtocol) =
-                    await _statsRepository.GetDexAggregationsAsync(protocol.ToString(), from, to, cancellationToken);
+                    await _statsRepository.GetDexAggregationsAsync(protocol.ToString(), from, windowEnd, cancellationToken);
 
                 return new DexStatsResponse
                 {
                     Protocol = protocol.ToString(),
                     From = from,
-                    To = to,
+                    To = windowEnd,
                     VolumeUSD = (decimal)volumeUSD,
                     FeesUSD = (decimal)feesUSD,
                     FeesLPUSD = (decimal)feesUSDProvider,
@@ -47,13 +48,13 @@ namespace AVMTradeReporter.Services
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to retrieve DEX stats for {Protocol} [{From} – {To}]", protocol, from, to);
+                _logger.LogError(ex, "Failed to retrieve DEX stats for {Protocol} [{From} – {To}]", protocol, from, windowEnd);
 
                 return new DexStatsResponse
                 {
                     Protocol = protocol.ToString(),
                     From = from,
-                    To = to
+                    To = windowEnd
                 };
             }
         }

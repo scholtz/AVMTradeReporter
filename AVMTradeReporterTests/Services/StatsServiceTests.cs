@@ -117,7 +117,7 @@ namespace AVMTradeReporterTests.Services
             // The mock repository returns synchronously, so cancellation is swallowed gracefully.
             Assert.DoesNotThrowAsync(async () =>
             {
-                var result = await _statsService.GetDexStatsAsync(DEXProtocol.Biatec, DateTimeOffset.UtcNow, cts.Token);
+                var result = await _statsService.GetDexStatsAsync(DEXProtocol.Biatec, DateTimeOffset.UtcNow, cancellationToken: cts.Token);
                 Assert.That(result, Is.Not.Null);
             });
         }
@@ -128,6 +128,31 @@ namespace AVMTradeReporterTests.Services
             var result = await _statsService.GetDexStatsAsync(DEXProtocol.Biatec, DateTimeOffset.UtcNow);
 
             Assert.That(result, Is.Not.Null);
+        }
+
+        [Test]
+        public async Task GetDexStatsAsync_WithExplicitTo_UsesRequestedWindowInsteadOfOneDay()
+        {
+            var from = new DateTimeOffset(2024, 6, 1, 12, 0, 0, TimeSpan.Zero);
+            var to = from.AddHours(1);
+
+            var result = await _statsService.GetDexStatsAsync(DEXProtocol.Biatec, from, to);
+
+            Assert.That(result.From, Is.EqualTo(from));
+            Assert.That(result.To, Is.EqualTo(to));
+            Assert.That(_mockRepository.LastFrom, Is.EqualTo(from));
+            Assert.That(_mockRepository.LastTo, Is.EqualTo(to));
+        }
+
+        [Test]
+        public async Task GetDexStatsAsync_WithoutTo_StillDefaultsToOneDayWindow()
+        {
+            var from = new DateTimeOffset(2024, 6, 1, 12, 0, 0, TimeSpan.Zero);
+
+            var result = await _statsService.GetDexStatsAsync(DEXProtocol.Biatec, from);
+
+            Assert.That(result.To, Is.EqualTo(from.AddDays(1)));
+            Assert.That(_mockRepository.LastTo, Is.EqualTo(from.AddDays(1)));
         }
     }
 
