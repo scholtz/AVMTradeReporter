@@ -25,16 +25,21 @@ namespace AVMTradeReporter.Controllers
         }
 
         /// <summary>
-        /// Returns aggregated 24-hour DEX statistics (volume, fees) for the given protocol starting at
-        /// <paramref name="timestamp"/>. The query window is [timestamp, timestamp + 1 day).
+        /// Returns aggregated DEX statistics (volume, fees) for the given protocol over the window
+        /// [<paramref name="timestamp"/>, <paramref name="to"/>). When <paramref name="to"/> is omitted,
+        /// the window defaults to a full day: [timestamp, timestamp + 1 day), preserving the original
+        /// daily-aggregate behaviour. An explicit <paramref name="to"/> allows arbitrary windows (e.g. 1
+        /// hour) for consumers that pull data more granularly, such as DefiLlama's v2 adapter model
+        /// (`pullHourly: true`).
         /// Only confirmed trades are included. Suitable for DefiLlama adapter consumption.
         /// </summary>
         /// <param name="dex">DEX protocol identifier: <c>Biatec</c>, <c>Pact</c>, or <c>Tiny</c>.</param>
-        /// <param name="timestamp">Inclusive start of the 24-hour statistics window.</param>
+        /// <param name="timestamp">Inclusive start of the statistics window.</param>
+        /// <param name="to">Exclusive end of the statistics window. Defaults to <paramref name="timestamp"/> + 1 day when omitted.</param>
         /// <param name="ct">Cancellation token.</param>
         /// <returns>
         /// 200 with <see cref="DexStatsResponse"/> containing volume and fee totals.<br/>
-        /// 400 when <paramref name="dex"/> is not a recognised protocol.
+        /// 400 when <paramref name="dex"/> is not a recognised protocol, or <paramref name="to"/> is not after <paramref name="timestamp"/>.
         /// </returns>
         [HttpGet("dex")]
         [ProducesResponseType(typeof(DexStatsResponse), StatusCodes.Status200OK)]
@@ -43,6 +48,7 @@ namespace AVMTradeReporter.Controllers
         public async Task<IActionResult> GetDexStats(
             [FromQuery] string dex,
             [FromQuery] DateTimeOffset timestamp,
+            [FromQuery] DateTimeOffset? to,
             CancellationToken ct)
         {
             if (!Enum.TryParse<DEXProtocol>(dex, ignoreCase: true, out var protocol))
@@ -51,14 +57,19 @@ namespace AVMTradeReporter.Controllers
                     $"Unknown DEX '{dex}'. Valid values: {string.Join(", ", Enum.GetNames<DEXProtocol>())}.");
             }
 
+            if (to.HasValue && to.Value <= timestamp)
+            {
+                return BadRequest($"'to' ({to.Value:o}) must be after 'timestamp' ({timestamp:o}).");
+            }
+
             try
             {
-                var stats = await _statsService.GetDexStatsAsync(protocol, timestamp, ct);
+                var stats = await _statsService.GetDexStatsAsync(protocol, timestamp, to, ct);
                 return Ok(stats);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Unhandled error retrieving DEX stats for {Dex} at {Timestamp}", dex, timestamp);
+                _logger.LogError(ex, "Unhandled error retrieving DEX stats for {Dex} at {Timestamp} to {To}", dex, timestamp, to);
                 return StatusCode(StatusCodes.Status500InternalServerError, "An error occurred while retrieving DEX statistics.");
             }
         }

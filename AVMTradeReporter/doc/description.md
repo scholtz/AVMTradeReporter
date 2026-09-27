@@ -168,12 +168,15 @@ REST API
 - GET /api/pool/stats
   - Optional: assetIdA, assetIdB
 - GET /api/stats/dex (no authentication required, designed for DefiLlama adapters)
-  - Query: dex (Biatec|Pact|Tiny), timestamp (DateTimeOffset, inclusive window start)
-  - Returns aggregated 24-hour statistics for the given DEX protocol over [timestamp, timestamp+1day)
+  - Query: dex (Biatec|Pact|Tiny), timestamp (DateTimeOffset, inclusive window start), to (DateTimeOffset, optional, exclusive window end)
+  - Returns aggregated statistics for the given DEX protocol over [timestamp, to)
+  - When `to` is omitted, defaults to a full day: [timestamp, timestamp+1day) - preserves the original daily-aggregate behaviour for DefiLlama's v1 adapter
+  - An explicit `to` allows arbitrary (e.g. hourly) windows, for DefiLlama's v2 adapter model (`pullHourly: true`); 400 if `to` is not after `timestamp`
   - Only confirmed trades are included in the aggregation
   - Response fields: protocol, from, to, volumeUSD, feesUSD, feesLPUSD, feesProtocolUSD
   - Powered by Elasticsearch sum aggregations on valueUSD, feesUSD, feesUSDProvider, feesUSDProtocol
-  - Example: GET /api/stats/dex?dex=Biatec&timestamp=2024-01-15T00:00:00Z
+  - Example (daily): GET /api/stats/dex?dex=Biatec&timestamp=2024-01-15T00:00:00Z
+  - Example (hourly): GET /api/stats/dex?dex=Biatec&timestamp=2024-01-15T00:00:00Z&to=2024-01-15T01:00:00Z
 - Test utilities (development)
   - GET /api/signalr/auth-test
   - GET /api/signalr/auth-test-authorized (requires auth)
