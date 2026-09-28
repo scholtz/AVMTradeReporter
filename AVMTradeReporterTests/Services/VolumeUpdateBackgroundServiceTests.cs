@@ -6,7 +6,7 @@ namespace AVMTradeReporterTests.Services
     /// <summary>
     /// Regression coverage for the pool-details 24H-volume bug: VolumeUpdateBackgroundService only
     /// ever refreshed pools that had a *new* trade since the last tick
-    /// (<c>TradeRepository.GetPoolsWithRecentTrades()</c>). A pool that stops trading is therefore
+    /// (<c>TradeRepository.DrainPoolsWithRecentTrades()</c>). A pool that stops trading is therefore
     /// never revisited again - its Volume1H/24H/7D are frozen forever at whatever they were the last
     /// time it traded, never decaying back toward zero as real time passes outside those windows.
     /// Fixed by adding a periodic full sweep across every cached pool address, independent of recent
@@ -65,6 +65,32 @@ namespace AVMTradeReporterTests.Services
             Assert.That(result, Is.EquivalentTo(new[] { "active-pool" }),
                 "The fast incremental path between full sweeps must stay cheap and only touch pools " +
                 "that actually traded.");
+        }
+
+        [Test]
+        public void ShouldAdvanceFullSweepClock_False_WhenDueSweepFailed()
+        {
+            // A due sweep that failed (e.g. a transient ES error) must not be recorded as completed,
+            // or a quiet pool goes uncorrected for up to another full interval on top of this one.
+            var result = VolumeUpdateBackgroundService.ShouldAdvanceFullSweepClock(fullSweepDue: true, sweepSucceeded: false);
+
+            Assert.That(result, Is.False);
+        }
+
+        [Test]
+        public void ShouldAdvanceFullSweepClock_True_WhenDueSweepSucceeded()
+        {
+            var result = VolumeUpdateBackgroundService.ShouldAdvanceFullSweepClock(fullSweepDue: true, sweepSucceeded: true);
+
+            Assert.That(result, Is.True);
+        }
+
+        [Test]
+        public void ShouldAdvanceFullSweepClock_False_WhenNoSweepWasDue()
+        {
+            var result = VolumeUpdateBackgroundService.ShouldAdvanceFullSweepClock(fullSweepDue: false, sweepSucceeded: true);
+
+            Assert.That(result, Is.False);
         }
     }
 }

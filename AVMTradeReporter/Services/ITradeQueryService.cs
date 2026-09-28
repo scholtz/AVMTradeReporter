@@ -16,7 +16,12 @@ namespace AVMTradeReporter.Services
 
         Task<PagedResult<Trade>> GetTradesAsync(TradeFilter filter, CancellationToken cancellationToken = default);
 
-        Task<Dictionary<string, (decimal Volume1H, decimal Volume24H, decimal Volume7D)>> GetPoolVolumesAsync(IEnumerable<string> poolAddresses, CancellationToken cancellationToken = default);
+        /// <summary>
+        /// Computes windowed 1H/24H/7D pool volumes directly from confirmed trades. Returns null
+        /// when Elasticsearch is unavailable or any window's query fails, so callers can skip the
+        /// update instead of mistaking a failed query for pools that genuinely have zero volume.
+        /// </summary>
+        Task<Dictionary<string, (decimal Volume1H, decimal Volume24H, decimal Volume7D)>?> GetPoolVolumesAsync(IEnumerable<string> poolAddresses, CancellationToken cancellationToken = default);
 
         Task<IReadOnlyDictionary<ulong, AssetVolumeWindows>?> GetAssetVolumeWindowsAsync(DateTimeOffset now, CancellationToken cancellationToken = default);
     }

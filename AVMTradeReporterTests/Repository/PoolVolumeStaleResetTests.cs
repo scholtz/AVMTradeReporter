@@ -27,9 +27,9 @@ namespace AVMTradeReporterTests.Repository
     {
         private class FakeTradeQueryService : ITradeQueryService
         {
-            private readonly Dictionary<string, (decimal Volume1H, decimal Volume24H, decimal Volume7D)> _volumes;
+            private readonly Dictionary<string, (decimal Volume1H, decimal Volume24H, decimal Volume7D)>? _volumes;
 
-            public FakeTradeQueryService(Dictionary<string, (decimal, decimal, decimal)> volumes)
+            public FakeTradeQueryService(Dictionary<string, (decimal, decimal, decimal)>? volumes)
             {
                 _volumes = volumes;
             }
@@ -53,9 +53,9 @@ namespace AVMTradeReporterTests.Repository
                     HasMore = false
                 });
 
-            public Task<Dictionary<string, (decimal Volume1H, decimal Volume24H, decimal Volume7D)>> GetPoolVolumesAsync(
+            public Task<Dictionary<string, (decimal Volume1H, decimal Volume24H, decimal Volume7D)>?> GetPoolVolumesAsync(
                 IEnumerable<string> poolAddresses, CancellationToken cancellationToken = default)
-                => Task.FromResult(new Dictionary<string, (decimal, decimal, decimal)>(_volumes));
+                => Task.FromResult(_volumes == null ? null : new Dictionary<string, (decimal, decimal, decimal)>(_volumes));
 
             public Task<IReadOnlyDictionary<ulong, AssetVolumeWindows>?> GetAssetVolumeWindowsAsync(
                 DateTimeOffset now, CancellationToken cancellationToken = default)
@@ -138,6 +138,40 @@ namespace AVMTradeReporterTests.Repository
             var updated = await repository.GetPoolAsync("active-pool", ct);
             Assert.That(updated!.Volume1H, Is.EqualTo(5m));
             Assert.That(updated.Volume24H, Is.EqualTo(50m));
+            Assert.That(updated.Volume7D, Is.EqualTo(500m));
+        }
+
+        [Test]
+        public async Task UpdatePoolVolumesAsync_LeavesLastKnownVolume_WhenTradeQueryServiceReportsFailure()
+        {
+            // GetPoolVolumesAsync returns null when Elasticsearch is unavailable or a window's query
+            // failed (see TradeQueryService). A transient outage must never be mistaken for "these
+            // pools genuinely have zero volume" - that would wipe every pool's real, last-known
+            // volume to 0 on every ES hiccup, which is worse than the stale-value bug this fixes.
+            var fakeTradeQueryService = new FakeTradeQueryService(null);
+            var repository = CreateRepository(fakeTradeQueryService);
+            var ct = CancellationToken.None;
+
+            var pool = new PoolModel
+            {
+                PoolAddress = "pool-during-outage",
+                AssetIdA = 1,
+                AssetIdB = 2,
+                AssetADecimals = 6,
+                AssetBDecimals = 6,
+                Volume1H = 3m,
+                Volume24H = 42m,
+                Volume7D = 500m,
+                Timestamp = DateTimeOffset.UtcNow,
+            };
+            await repository.StorePoolAsync(pool, false, ct);
+
+            await repository.UpdatePoolVolumesAsync(new[] { "pool-during-outage" }, ct);
+
+            var updated = await repository.GetPoolAsync("pool-during-outage", ct);
+            Assert.That(updated!.Volume24H, Is.EqualTo(42m),
+                "A failed volume query must leave the pool's last-known volume untouched, not zero it.");
+            Assert.That(updated.Volume1H, Is.EqualTo(3m));
             Assert.That(updated.Volume7D, Is.EqualTo(500m));
         }
     }

@@ -992,6 +992,16 @@ namespace AVMTradeReporter.Repository
                 var volumes = await tradeQueryService.GetPoolVolumesAsync(poolAddressList, cancellationToken);
                 _logger.LogDebug("UpdatePoolVolumesAsync {volumes}", volumes);
 
+                if (volumes == null)
+                {
+                    // GetPoolVolumesAsync returns null when Elasticsearch is unavailable or any
+                    // window's query failed - never treat a failed query as "these pools have zero
+                    // volume". Skip the update entirely so pools keep their last-known values instead
+                    // of being wiped to 0 by a transient ES outage.
+                    _logger.LogWarning("Skipping pool volume update - GetPoolVolumesAsync reported a query failure for {count} pools", poolAddressList.Count);
+                    return;
+                }
+
                 // GetPoolVolumesAsync only returns a dictionary entry for a pool when at least one
                 // confirmed trade landed within one of its lookback windows - an Elasticsearch terms
                 // aggregation never emits a bucket for zero matching documents. So a pool that has

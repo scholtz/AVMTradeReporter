@@ -20,7 +20,7 @@ namespace AVMTradeReporter.Repository
         private readonly OHLCRepository _ohlcRepository; // new dependency
 
         // Track pools that had trades for volume updates
-        private static readonly ConcurrentBag<string> _poolsWithRecentTrades = new();
+        private static ConcurrentBag<string> _poolsWithRecentTrades = new();
 
         public TradeRepository(
             ElasticsearchClient elasticClient,
@@ -266,14 +266,17 @@ namespace AVMTradeReporter.Repository
             }
         }
 
-        public static IEnumerable<string> GetPoolsWithRecentTrades()
+        /// <summary>
+        /// Atomically swaps in a fresh, empty bag and returns the distinct pool addresses that had
+        /// trades since the last drain. Combining the read and the clear into one atomic swap (rather
+        /// than a separate get-then-clear pair) closes a race where a trade added between those two
+        /// calls would be wiped by the clear without ever having been read - silently losing that
+        /// pool's fast-path volume refresh until its next trade.
+        /// </summary>
+        public static IEnumerable<string> DrainPoolsWithRecentTrades()
         {
-            return _poolsWithRecentTrades.Distinct();
-        }
-
-        public static void ClearPoolsWithRecentTrades()
-        {
-            _poolsWithRecentTrades.Clear();
+            var drained = Interlocked.Exchange(ref _poolsWithRecentTrades, new ConcurrentBag<string>());
+            return drained.Distinct();
         }
     }
 }
