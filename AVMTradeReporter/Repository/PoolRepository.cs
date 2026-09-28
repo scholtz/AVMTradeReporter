@@ -758,6 +758,11 @@ namespace AVMTradeReporter.Repository
             return _poolsCache.Count;
         }
 
+        public IEnumerable<string> GetAllPoolAddresses()
+        {
+            return _poolsCache.Keys.ToList();
+        }
+
         private async Task EnsureInitialized(CancellationToken cancellationToken)
         {
             if (!_isInitialized)
@@ -982,17 +987,39 @@ namespace AVMTradeReporter.Repository
                     _logger.LogWarning("TradeQueryService not available for volume updates");
                     return;
                 }
-                _logger.LogDebug("Updating volumes for {count} pools", poolAddresses.Count());
-                var volumes = await tradeQueryService.GetPoolVolumesAsync(poolAddresses, cancellationToken);
+                var poolAddressList = poolAddresses as ICollection<string> ?? poolAddresses.ToList();
+                _logger.LogDebug("Updating volumes for {count} pools", poolAddressList.Count);
+                var volumes = await tradeQueryService.GetPoolVolumesAsync(poolAddressList, cancellationToken);
                 _logger.LogDebug("UpdatePoolVolumesAsync {volumes}", volumes);
 
-                foreach (var kv in volumes)
+                if (volumes == null)
                 {
-                    if (_poolsCache.TryGetValue(kv.Key, out var pool))
+                    // GetPoolVolumesAsync returns null when Elasticsearch is unavailable or any
+                    // window's query failed - never treat a failed query as "these pools have zero
+                    // volume". Skip the update entirely so pools keep their last-known values instead
+                    // of being wiped to 0 by a transient ES outage.
+                    _logger.LogWarning("Skipping pool volume update - GetPoolVolumesAsync reported a query failure for {count} pools", poolAddressList.Count);
+                    return;
+                }
+
+                // GetPoolVolumesAsync only returns a dictionary entry for a pool when at least one
+                // confirmed trade landed within one of its lookback windows - an Elasticsearch terms
+                // aggregation never emits a bucket for zero matching documents. So a pool that has
+                // gone fully quiet (no trades in even the widest 7D window) is silently absent from
+                // `volumes`. Iterate the REQUESTED addresses, not the returned dictionary's keys, and
+                // default an absent pool's volumes to zero - otherwise its Volume1H/24H/7D stay
+                // frozen at whatever was last written, forever, even though it was explicitly
+                // included in this sweep.
+                foreach (var poolAddress in poolAddressList)
+                {
+                    if (_poolsCache.TryGetValue(poolAddress, out var pool))
                     {
-                        pool.Volume1H = kv.Value.Volume1H;
-                        pool.Volume24H = kv.Value.Volume24H;
-                        pool.Volume7D = kv.Value.Volume7D;
+                        var windowedVolume = volumes.TryGetValue(poolAddress, out var v)
+                            ? v
+                            : (Volume1H: 0m, Volume24H: 0m, Volume7D: 0m);
+                        pool.Volume1H = windowedVolume.Volume1H;
+                        pool.Volume24H = windowedVolume.Volume24H;
+                        pool.Volume7D = windowedVolume.Volume7D;
 
                         // Set historical prices from assets
                         if (_assetRepository != null)
@@ -1007,11 +1034,11 @@ namespace AVMTradeReporter.Repository
                             pool.PriceBUSD7D = assetB?.PriceUSD7D;
                         }
 
-                        _poolsCache[kv.Key] = pool; // update cache
+                        _poolsCache[poolAddress] = pool; // update cache
                     }
                 }
 
-                _logger.LogInformation("Updated volumes for {count} pools", volumes.Count);
+                _logger.LogInformation("Updated volumes for {count} pools", poolAddressList.Count);
             }
             catch (Exception ex)
             {

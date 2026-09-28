@@ -90,5 +90,10 @@ namespace AVMTradeReporterTests
         {
             throw new NotImplementedException();
         }
+
+        public IEnumerable<string> GetAllPoolAddresses()
+        {
+            return pools.Select(p => p.PoolAddress).ToList();
+        }
     }
 }

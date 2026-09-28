@@ -17,5 +17,12 @@ namespace AVMTradeReporter.Repository
         Task<int> GetPoolCountAsync(CancellationToken cancellationToken = default);
         IPoolProcessor? GetPoolProcessor(DEXProtocol protocol);
         Task UpdateAggregatedPool(ulong aId, ulong bId, CancellationToken cancellationToken);
+        /// <summary>
+        /// Snapshot of every pool address currently cached, regardless of trading activity - used
+        /// by <see cref="Services.VolumeUpdateBackgroundService"/>'s periodic full sweep so a pool
+        /// that has gone quiet (no new trades to trigger the fast incremental path) still gets its
+        /// Volume1H/24H/7D re-derived from real trailing-window trade data instead of staying frozen.
+        /// </summary>
+        IEnumerable<string> GetAllPoolAddresses();
     }
 }

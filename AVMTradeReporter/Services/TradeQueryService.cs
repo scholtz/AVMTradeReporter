@@ -79,14 +79,14 @@ namespace AVMTradeReporter.Services
             return CreatePagedResult(trades, trades.Count, normalizedFilter);
         }
 
-        public async Task<Dictionary<string, (decimal Volume1H, decimal Volume24H, decimal Volume7D)>> GetPoolVolumesAsync(IEnumerable<string> poolAddresses, CancellationToken cancellationToken = default)
+        public async Task<Dictionary<string, (decimal Volume1H, decimal Volume24H, decimal Volume7D)>?> GetPoolVolumesAsync(IEnumerable<string> poolAddresses, CancellationToken cancellationToken = default)
         {
             var volumes = new Dictionary<string, (decimal Volume1H, decimal Volume24H, decimal Volume7D)>();
 
             if (_elastic == null)
             {
                 _logger.LogWarning("Elasticsearch client not available for volume calculation");
-                return volumes;
+                return null;
             }
 
             var poolAddressSet = new HashSet<string>(poolAddresses);
@@ -185,12 +185,18 @@ namespace AVMTradeReporter.Services
                     }
                     else
                     {
+                        // Do not return the partially-built `volumes` here: a caller that defaults
+                        // an absent pool's volume to zero (PoolRepository.UpdatePoolVolumesAsync)
+                        // would otherwise mistake this transient failure for "genuinely no trades in
+                        // this window" and wipe out that pool's real, previously-known volume.
                         _logger.LogError("Elasticsearch query failed for {period}: {Error}", period.Key, searchResponse.DebugInformation);
+                        return null;
                     }
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Failed to calculate volumes for {period}", period.Key);
+                    return null;
                 }
             }
 

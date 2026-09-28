@@ -90,14 +90,14 @@ namespace AVMTradeReporterTests.Services
         }
 
         [Test]
-        public async Task GetPoolVolumesAsync_WithoutElasticsearch_ReturnsEmptyDictionary()
+        public async Task GetPoolVolumesAsync_WithoutElasticsearch_ReturnsNull()
         {
-            // Act
+            // Elasticsearch unavailable is a query failure, not "these pools have zero volume" -
+            // callers (PoolRepository.UpdatePoolVolumesAsync) must be able to tell the difference so
+            // they skip the update instead of wiping every pool's volume to 0.
             var result = await _tradeQueryService.GetPoolVolumesAsync(new List<string> { "pool1" });
 
-            // Assert
-            Assert.That(result, Is.Not.Null);
-            Assert.That(result.Count, Is.EqualTo(0));
+            Assert.That(result, Is.Null);
         }
 
         [Test]

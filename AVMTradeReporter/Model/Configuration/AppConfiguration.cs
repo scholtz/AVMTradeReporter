@@ -208,6 +208,15 @@ namespace AVMTradeReporter.Model.Configuration
         /// How often to update volumes (in seconds). Default is 60 seconds.
         /// </summary>
         public int IntervalSeconds { get; set; } = 60;
+
+        /// <summary>
+        /// How often to run a full sweep across EVERY cached pool, not just pools that had a new
+        /// trade since the last tick (in seconds). Default is 900 seconds (15 minutes). Without this,
+        /// a pool that stops trading keeps its last-known Volume1H/24H/7D forever - the fast
+        /// incremental path only ever revisits pools with brand new trades, so a quiet pool's stale
+        /// volume never decays back toward zero as time passes.
+        /// </summary>
+        public int FullSweepIntervalSeconds { get; set; } = 900;
     }
 
     public class AssetStatsConfiguration
