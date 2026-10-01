@@ -76,15 +76,19 @@ namespace AVMTradeReporter.Services.CoinGecko
         private readonly MemoryCache _eventsCache;
         private readonly ConcurrentDictionary<string, Lazy<Task<byte[]>>> _inFlight = new();
         private readonly ConcurrentDictionary<ulong, (CoinGeckoAsset? Asset, DateTimeOffset Expires)> _assets = new();
-        private readonly SemaphoreSlim _snapshotLock = new(1, 1);
+        private readonly object _rebuildLock = new();
+        private Task<PoolSnapshot>? _rebuild;
+        private readonly string _protocolFingerprint;
         private readonly SemaphoreSlim _computeGate;
-        private volatile PoolSnapshot _snapshot = new(new Dictionary<ulong, PairInfo>(), new Dictionary<ulong, DateTimeOffset>(), new HashSet<ulong>(), new HashSet<ulong>(), DateTimeOffset.MinValue);
+        private volatile PoolSnapshot _snapshot = new(new Dictionary<ulong, PairInfo>(), new Dictionary<ulong, DateTimeOffset>(), new HashSet<ulong>(), new HashSet<ulong>(), DateTimeOffset.MinValue, DateTimeOffset.MinValue);
 
         /// <param name="Pairs">Published pairs by pool application id.</param>
         /// <param name="Unresolved">Published pools whose asset decimals could not be read right now (algod), with the time they were first seen so. Always transient: the assets of a live pool exist; only a destroyed-asset tombstone is permanent and lands in <paramref name="Excluded"/>.</param>
         /// <param name="AssetIds">Every asset of a published pool: the only assets <c>/asset</c> answers for.</param>
         /// <param name="Excluded">Pools the repository knows but that must never be published (scam, malformed).</param>
-        private sealed record PoolSnapshot(Dictionary<ulong, PairInfo> Pairs, Dictionary<ulong, DateTimeOffset> Unresolved, HashSet<ulong> AssetIds, HashSet<ulong> Excluded, DateTimeOffset LoadedAt);
+        /// <param name="LoadedAt">When this snapshot was built (a forced, in-memory rebuild counts).</param>
+        /// <param name="FullRefreshAt">When unresolved pools were last retried at the asset repository - the regular cadence, which forced rebuilds must not keep postponing.</param>
+        private sealed record PoolSnapshot(Dictionary<ulong, PairInfo> Pairs, Dictionary<ulong, DateTimeOffset> Unresolved, HashSet<ulong> AssetIds, HashSet<ulong> Excluded, DateTimeOffset LoadedAt, DateTimeOffset FullRefreshAt);
 
         /// <summary>Pair lookup result: <see cref="Transient"/> means "exists but cannot be described right now - try again", not "unknown".</summary>
         /// <param name="Excluded">The pool is known but deliberately not published, so its events are skipped for good.</param>
@@ -116,6 +120,8 @@ namespace AVMTradeReporter.Services.CoinGecko
             _logger = logger;
             _time = timeProvider ?? TimeProvider.System;
             _computeGate = new SemaphoreSlim(Math.Max(1, _config.MaxConcurrentEventQueries));
+            // part of every events cache key: a changed protocol list must not be served from the previous configuration's cache
+            _protocolFingerprint = string.Join("+", _config.PublishedProtocols.Select(p => p.ToString().ToLowerInvariant()).OrderBy(p => p, StringComparer.Ordinal));
             _eventsCache = new MemoryCache(new MemoryCacheOptions { SizeLimit = Math.Max(1, _config.EventsMemoryCacheMegabytes) * 1024L * 1024L });
         }
 
@@ -283,92 +289,101 @@ namespace AVMTradeReporter.Services.CoinGecko
 
         private async Task<PoolSnapshot> GetSnapshotAsync(TimeSpan? forceIfOlderThan, CancellationToken cancellationToken)
         {
-            var maxAge = forceIfOlderThan ?? TimeSpan.FromSeconds(Math.Max(1, _config.PoolSnapshotSeconds));
-            // A forced refresh (somebody asked for an id the snapshot lacks - possibly an anonymous caller probing random ids)
-            // only re-reads the in-memory pool cache; the algod lookups behind an unresolved pool are retried on the regular
-            // PoolSnapshotSeconds cadence alone, so probing cannot multiply them.
-            var retryUnresolved = forceIfOlderThan == null;
+            var regular = TimeSpan.FromSeconds(Math.Max(1, _config.PoolSnapshotSeconds));
+            var maxAge = forceIfOlderThan ?? regular;
             var snapshot = _snapshot;
-            if (_time.GetUtcNow() - snapshot.LoadedAt < maxAge) return snapshot;
-
-            await _snapshotLock.WaitAsync(cancellationToken);
-            try
+            var now = _time.GetUtcNow();
+            Task<PoolSnapshot>? rebuild;
+            lock (_rebuildLock)
             {
-                snapshot = _snapshot;
-                if (_time.GetUtcNow() - snapshot.LoadedAt < maxAge) return snapshot;
-
-                var pairs = new Dictionary<ulong, PairInfo>();
-                var unresolved = new Dictionary<ulong, DateTimeOffset>();
-                var assetIds = new HashSet<ulong>();
-                var excluded = new HashSet<ulong>();
-                var now = _time.GetUtcNow();
-                var published = _config.PublishedProtocols;
-                var toResolve = new List<Pool>();
-
-                // One pass over the raw pool cache (no sort / copy as GetPoolsAsync would do - a forced refresh may run every
-                // 5 s under probing). Scam-labelled pools are classified too: their stored swaps still carry the protocol they
-                // had before the relabel, and "known but excluded" must not be confused with "not registered yet".
-                foreach (var address in _poolRepository.GetAllPoolAddresses())
+                rebuild = _rebuild is { IsCompleted: false } running ? running : null;
+                if (rebuild == null && now - snapshot.LoadedAt >= maxAge)
                 {
-                    var pool = await _poolRepository.GetPoolAsync(address, cancellationToken);
-                    if (pool == null) continue;
-                    if (!published.Contains(pool.Protocol) && pool.Protocol != DEXProtocol.Scam) continue;
-                    if (!published.Contains(pool.Protocol) || !IsPublishable(pool))
-                    {
-                        excluded.Add(pool.PoolAppId);
-                        continue;
-                    }
-                    assetIds.Add(pool.AssetIdA!.Value);
-                    assetIds.Add(pool.AssetIdB!.Value);
-                    if (snapshot.Pairs.TryGetValue(pool.PoolAppId, out var known))
-                    {
-                        // decimals never change; only the fee is re-read
-                        pairs[pool.PoolAppId] = known with { LpFee = pool.LPFee };
-                        continue;
-                    }
-                    if (!retryUnresolved && snapshot.Unresolved.TryGetValue(pool.PoolAppId, out var seenAt))
-                    {
-                        unresolved[pool.PoolAppId] = seenAt;
-                        continue;
-                    }
-                    toResolve.Add(pool);
+                    // Single flight. A forced rebuild (somebody asked for an id the snapshot lacks - possibly an anonymous
+                    // caller probing random ids) only re-reads the in-memory pool cache; the asset-repository lookups behind
+                    // unresolved pools follow the regular cadence (FullRefreshAt), which forced rebuilds must not postpone.
+                    var retryUnresolved = now - snapshot.FullRefreshAt >= regular;
+                    rebuild = _rebuild = Task.Run(() => RebuildSnapshotAsync(snapshot, retryUnresolved));
+                    _ = rebuild.ContinueWith(t => _logger.LogError(t.Exception, "CoinGecko: pair snapshot rebuild failed"), TaskContinuationOptions.OnlyOnFaulted);
                 }
+            }
+            if (rebuild == null) return snapshot;
+            // Stale-while-revalidate: whatever can be answered from the previous snapshot is, so a slow asset lookup inside the
+            // rebuild never stalls /pair, /asset or /events. The very first build (nothing to serve yet) and a lookup of an id
+            // the snapshot lacks (maybe a pool created a moment ago) wait for the fresh one.
+            if (forceIfOlderThan == null && snapshot.LoadedAt != DateTimeOffset.MinValue) return snapshot;
+            return await rebuild.WaitAsync(cancellationToken);
+        }
 
-                // Asset decimals missing on the pool are read from the asset repository (algod on a cold cache): in parallel,
-                // because this also runs as the startup warm-up before the pod opens its port.
-                var sync = new object();
-                await Parallel.ForEachAsync(toResolve,
-                    new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, _config.SnapshotResolveParallelism), CancellationToken = cancellationToken },
-                    async (pool, ct) =>
-                    {
-                        var (pair, permanent) = await ToPairInfoAsync(pool, ct);
-                        lock (sync)
-                        {
-                            if (pair != null) pairs[pair.AppId] = pair;
-                            else if (permanent)
-                            {
-                                excluded.Add(pool.PoolAppId);
-                                if (!snapshot.Excluded.Contains(pool.PoolAppId))
-                                    _logger.LogWarning("CoinGecko: pool {appId} references a destroyed asset - excluded for good", pool.PoolAppId);
-                            }
-                            else if (snapshot.Unresolved.TryGetValue(pool.PoolAppId, out var first))
-                            {
-                                unresolved[pool.PoolAppId] = first; // keep the time it was first seen undescribable
-                            }
-                            else
-                            {
-                                unresolved[pool.PoolAppId] = now;
-                                _logger.LogWarning("CoinGecko: pool {appId} cannot be described (asset decimals not readable); retried every {seconds} s, its events are held back meanwhile", pool.PoolAppId, _config.PoolSnapshotSeconds);
-                            }
-                        }
-                    });
-                _snapshot = new PoolSnapshot(pairs, unresolved, assetIds, excluded, now);
-                return _snapshot;
-            }
-            finally
+        private async Task<PoolSnapshot> RebuildSnapshotAsync(PoolSnapshot snapshot, bool retryUnresolved)
+        {
+            var pairs = new Dictionary<ulong, PairInfo>();
+            var unresolved = new Dictionary<ulong, DateTimeOffset>();
+            var assetIds = new HashSet<ulong>();
+            var excluded = new HashSet<ulong>();
+            var now = _time.GetUtcNow();
+            var published = _config.PublishedProtocols;
+            var toResolve = new List<Pool>();
+
+            // One pass over the raw pool cache (no sort / copy as GetPoolsAsync would do - a forced refresh may run every
+            // 5 s under probing). Scam-labelled pools are classified too: their stored swaps still carry the protocol they
+            // had before the relabel, and "known but excluded" must not be confused with "not registered yet".
+            foreach (var address in _poolRepository.GetAllPoolAddresses())
             {
-                _snapshotLock.Release();
+                var pool = await _poolRepository.GetPoolAsync(address, CancellationToken.None);
+                if (pool == null) continue;
+                if (!published.Contains(pool.Protocol) && pool.Protocol != DEXProtocol.Scam) continue;
+                if (!published.Contains(pool.Protocol) || !IsPublishable(pool))
+                {
+                    excluded.Add(pool.PoolAppId);
+                    continue;
+                }
+                assetIds.Add(pool.AssetIdA!.Value);
+                assetIds.Add(pool.AssetIdB!.Value);
+                if (snapshot.Pairs.TryGetValue(pool.PoolAppId, out var known))
+                {
+                    // decimals never change; only the fee is re-read
+                    pairs[pool.PoolAppId] = known with { LpFee = pool.LPFee };
+                    continue;
+                }
+                if (!retryUnresolved && snapshot.Unresolved.TryGetValue(pool.PoolAppId, out var seenAt))
+                {
+                    unresolved[pool.PoolAppId] = seenAt;
+                    continue;
+                }
+                toResolve.Add(pool);
             }
+
+            // Asset decimals missing on the pool are read from the asset repository (algod on a cold cache): in parallel,
+            // because this also runs as the startup warm-up before the pod opens its port.
+            var sync = new object();
+            await Parallel.ForEachAsync(toResolve,
+                new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, _config.SnapshotResolveParallelism) },
+                async (pool, ct) =>
+                {
+                    var (pair, permanent) = await ToPairInfoAsync(pool, ct);
+                    lock (sync)
+                    {
+                        if (pair != null) pairs[pair.AppId] = pair;
+                        else if (permanent)
+                        {
+                            excluded.Add(pool.PoolAppId);
+                            if (!snapshot.Excluded.Contains(pool.PoolAppId))
+                                _logger.LogWarning("CoinGecko: pool {appId} references a destroyed asset - excluded for good", pool.PoolAppId);
+                        }
+                        else if (snapshot.Unresolved.TryGetValue(pool.PoolAppId, out var first))
+                        {
+                            unresolved[pool.PoolAppId] = first; // keep the time it was first seen undescribable
+                        }
+                        else
+                        {
+                            unresolved[pool.PoolAppId] = now;
+                            _logger.LogWarning("CoinGecko: pool {appId} cannot be described (asset decimals not readable); retried every {seconds} s, its events are held back meanwhile", pool.PoolAppId, _config.PoolSnapshotSeconds);
+                        }
+                    }
+                });
+            _snapshot = new PoolSnapshot(pairs, unresolved, assetIds, excluded, now, retryUnresolved ? now : snapshot.FullRefreshAt);
+            return _snapshot;
         }
 
         /// <summary>
@@ -428,7 +443,7 @@ namespace AVMTradeReporter.Services.CoinGecko
             if (toBlock > latest.Round)
                 return CoinGeckoResult<byte[]>.Fail(CoinGeckoOutcome.Unavailable, $"toBlock {toBlock} is beyond the latest indexed block {latest.Round}, try again");
 
-            var key = $"{fromBlock}:{toBlock}";
+            var key = EventsKey(fromBlock, toBlock);
             if (_eventsCache.TryGetValue(key, out byte[]? hit) && hit != null) return CoinGeckoResult<byte[]>.Ok(hit);
 
             var redisKey = $"{_redisConfig.EnvironmentKeyPrefix}coingecko:events:v1:{key}";
@@ -447,6 +462,12 @@ namespace AVMTradeReporter.Services.CoinGecko
             }
             catch (TooManyEventsException ex)
             {
+                return CoinGeckoResult<byte[]>.Fail(CoinGeckoOutcome.BadRequest, ex.Message);
+            }
+            catch (BlockTooDenseException ex)
+            {
+                // deterministic: retrying can never help, and a 503 would keep the consumer at this range for ever
+                _logger.LogError("CoinGecko events {from}-{to}: {reason}", fromBlock, toBlock, ex.Message);
                 return CoinGeckoResult<byte[]>.Fail(CoinGeckoOutcome.BadRequest, ex.Message);
             }
             catch (TransientDataException ex)
@@ -488,7 +509,7 @@ namespace AVMTradeReporter.Services.CoinGecko
 
         internal async Task<List<CoinGeckoEvent>> BuildEventsAsync(ulong fromBlock, ulong toBlock, CancellationToken cancellationToken)
         {
-            var tooMany = _eventsCache.TryGetValue("too-many:" + fromBlock + ":" + toBlock, out string? knownTooMany) ? knownTooMany : null;
+            var tooMany = _eventsCache.TryGetValue("too-many:" + EventsKey(fromBlock, toBlock), out string? knownTooMany) ? knownTooMany : null;
             if (tooMany != null) throw new TooManyEventsException(tooMany);
             using var budget = new EventBudget(_config.MaxEventsPerRequest, _config.MaxParallelQueriesPerRange);
             var tradesTask = FetchBisectingAsync((lo, hi, size) => _source.GetTradesAsync(lo, hi, size, cancellationToken), fromBlock, toBlock, budget);
@@ -500,7 +521,7 @@ namespace AVMTradeReporter.Services.CoinGecko
             catch (TooManyEventsException ex)
             {
                 // remembered briefly so a client repeating the same oversize request does not re-run the whole fan-out
-                _eventsCache.Set("too-many:" + fromBlock + ":" + toBlock, ex.Message, new MemoryCacheEntryOptions { Size = 1, AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(60) });
+                _eventsCache.Set("too-many:" + EventsKey(fromBlock, toBlock), ex.Message, new MemoryCacheEntryOptions { Size = 1, AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(60) });
                 throw;
             }
             var trades = tradesTask.Result.DistinctBy(t => t.TxId).ToList();
@@ -594,6 +615,14 @@ namespace AVMTradeReporter.Services.CoinGecko
             public TooManyEventsException(string message) : base(message) { }
         }
 
+        /// <summary>One block holds more events than a single Elasticsearch query can return (index.max_result_window).</summary>
+        private sealed class BlockTooDenseException : Exception
+        {
+            public BlockTooDenseException(string message) : base(message) { }
+        }
+
+        private string EventsKey(ulong fromBlock, ulong toBlock) => $"{_protocolFingerprint}:{fromBlock}:{toBlock}";
+
         /// <summary>
         /// Loads every document of the block range without pagination limits: a full page might be truncated, so the
         /// range is halved (down to a single block) until each query returns fewer documents than the page size.
@@ -619,7 +648,7 @@ namespace AVMTradeReporter.Services.CoinGecko
                 budget.Consume(page.Count);
                 return page.ToList();
             }
-            if (lo == hi) throw new InvalidOperationException($"Block {lo} holds {page.Count} or more events - more than one query can return");
+            if (lo == hi) throw new BlockTooDenseException($"Block {lo} holds {page.Count} or more events - more than this API can return for one block");
 
             var mid = lo + (hi - lo) / 2;
             var leftTask = FetchBisectingAsync(query, lo, mid, budget);

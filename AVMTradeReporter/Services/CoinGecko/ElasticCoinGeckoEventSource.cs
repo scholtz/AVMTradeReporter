@@ -61,9 +61,13 @@ namespace AVMTradeReporter.Services.CoinGecko
                     f => ElasticKeywordQuery.DualKeywordTerms(f, "protocol", _protocols)))),
                 cancellationToken);
             if (!response.IsValidResponse) throw new InvalidOperationException($"Elasticsearch {index} query failed: {response.DebugInformation}");
-            // The bisection in CoinGeckoService relies on every document being inside [lo, hi]; keep that true whatever the
-            // index mapping does with the range query.
-            return response.Documents.Where(d => blockOf(d) >= lo && blockOf(d) <= hi).ToList();
+            // The bisection in CoinGeckoService relies on every document being inside [lo, hi] AND on the page size telling
+            // whether the page may be truncated - silently dropping a stray document would hide a full page. A document
+            // outside the range means the index's blockId mapping is broken: fail loudly (503, logged), never answer.
+            var documents = response.Documents.ToList();
+            var outside = documents.Count(d => blockOf(d) < lo || blockOf(d) > hi);
+            if (outside > 0) throw new InvalidOperationException($"Elasticsearch {index} returned {outside} document(s) outside blocks {lo}-{hi}: the blockId mapping of the index is broken");
+            return documents;
         }
     }
 }

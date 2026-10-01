@@ -34,9 +34,9 @@ namespace AVMTradeReporter.Services
         private readonly BlockRepository _blockRepository;
         private readonly IIndexedBlockTracker? _blockTracker;
 
-        // Blocks whose trades/liquidity could not be stored yet (they stay in _trades/_liquidityUpdates and are
-        // retried with the next block). They must not count as indexed for the GeckoTerminal latest-block watermark.
-        private readonly ConcurrentDictionary<ulong, long?> _blocksAwaitingStore = new();
+        // Not-yet-stored documents, per block: a block counts as indexed (latest-block watermark) only once ITS documents
+        // are acknowledged by Elasticsearch - see PendingBlockBatches.
+        private readonly PendingBlockBatches _pending = new();
 
         // Async processing support
         private readonly SemaphoreSlim _concurrentTasksSemaphore;
@@ -169,11 +169,13 @@ namespace AVMTradeReporter.Services
                     }
 
 #if !DEBUG
+                    var waited = false;
                     foreach (var (name, api) in Algods())
                     {
                         try
                         {
                             await api.WaitForBlockAsync(stoppingToken, Indexer?.Round ?? throw new Exception("Rund not defined"));
+                            waited = true;
                             break;
                         }
                         catch (OperationCanceledException)
@@ -185,6 +187,9 @@ namespace AVMTradeReporter.Services
                             _logger.LogWarning(ex, "{algod} failed waiting for round {round}, trying the next one", name, Indexer?.Round);
                         }
                     }
+                    // No algod at all: an outage. Back off (outer catch, one minute) with the round unchanged instead of
+                    // fetching, giving up on and skipping one block per iteration for as long as it lasts.
+                    if (!waited) throw new Exception($"No algod could wait for round {Indexer?.Round}");
 #endif
                     // Clean up completed tasks
                     CleanupCompletedTasks();
@@ -249,20 +254,16 @@ namespace AVMTradeReporter.Services
 
 
 
-        ConcurrentDictionary<string, Trade> _trades = new ConcurrentDictionary<string, Trade>();
-        ConcurrentDictionary<string, Liquidity> _liquidityUpdates = new ConcurrentDictionary<string, Liquidity>();
-
         private async Task RegisterTrade(Trade trade, CancellationToken cancellationToken)
         {
-
             await PopulateTradeUsdAsync(trade, cancellationToken);
-            _trades[trade.TxId] = trade;
+            _pending.Add(trade);
         }
 
         public async Task RegisterLiquidity(Liquidity liquidityUpdate, CancellationToken cancellationToken)
         {
             await PopulateLiquidityUsdAsync(liquidityUpdate, cancellationToken);
-            _liquidityUpdates[liquidityUpdate.TxId] = liquidityUpdate;
+            _pending.Add(liquidityUpdate);
         }
 
         private async Task PopulateTradeUsdAsync(Trade trade, CancellationToken cancellationToken)
@@ -484,14 +485,9 @@ namespace AVMTradeReporter.Services
 
         private async Task ProcessBlockWorkAsync(ulong blockId, CancellationToken cancellationToken)
         {
-            long? blockTimestamp = null;
-            // Only an explicit outcome may complete the block for the latest-block watermark: an unexpected exception parks
-            // it (its documents are still in _trades and go out with the next successful store).
-            var stored = false;
+            _pending.Open(blockId, null);
             try
             {
-                var algodConfig = _appConfig.Value.Algod;
-
                 _logger.LogInformation("Loading block {blockId}", blockId);
                 // A transient algod outage must not turn into a permanently skipped block (and a latest-block watermark
                 // that moves past it), so the fetch is retried a few times before the block is given up.
@@ -503,68 +499,48 @@ namespace AVMTradeReporter.Services
                 }
                 if (block == null || block.Block == null)
                 {
+                    // Lost for the indexer itself as well (see CLAUDE.md, known limits): never retried, so the watermark
+                    // must not wait for it.
                     _logger.LogError("Block {blockId} not found after {attempts} attempts - its trades are skipped", blockId, BlockFetchAttempts);
-                    stored = true; // lost for the indexer itself as well (see CLAUDE.md, known limits) - never retried, so do not hold the watermark
+                    _pending.Drop(blockId);
+                    if (!cancellationToken.IsCancellationRequested) _blockTracker?.MarkCompleted(blockId, null);
                     return;
                 }
 
-                blockTimestamp = block.Block?.Timestamp != null ? Convert.ToInt64(block.Block.Timestamp) : null;
-                _logger.LogInformation("Found transactions: {txCount}", block.Block?.Transactions?.Count ?? 0);
+                _pending.Open(blockId, block.Block.Timestamp != null ? Convert.ToInt64(block.Block.Timestamp) : null);
+                _logger.LogInformation("Found transactions: {txCount}", block.Block.Transactions?.Count ?? 0);
                 await _transactionProcessor.ProcessBlock(block, this, this, cancellationToken);
+                _pending.Close(blockId);
 
-                // Captured BEFORE the batches below are snapshotted: whatever an earlier failed block left in
-                // _trades/_liquidityUpdates is part of these batches, so a successful store completes those blocks too.
-                var retryBlocks = _blocksAwaitingStore.ToArray();
-                var tradeBatch = _trades.Values.ToArray();
-                var result = await _tradeRepository.StoreTradesAsync(tradeBatch, cancellationToken);
-                // Without Elasticsearch a store "fails" by design (the trades were still processed): nothing can be retried
-                // later, so the batch is dropped and the block counts as done rather than parked for ever.
-                if (result || !_tradeRepository.HasStorage)
-                {
-                    // Remove exactly what was stored. Clear() would also drop trades a concurrently processed block
-                    // registered after the snapshot above - they would never be stored and the block that owns them
-                    // would still count as indexed.
-                    foreach (var done in tradeBatch) _trades.TryRemove(new KeyValuePair<string, Trade>(done.TxId, done));
-                }
-                var tradesStored = result || tradeBatch.Length == 0 || !_tradeRepository.HasStorage;
-                var liquidityBatch = _liquidityUpdates.Values.ToArray();
-                result = await _liquidityRepository.StoreLiquidityUpdatesAsync(liquidityBatch, cancellationToken);
-                if (result || !_liquidityRepository.HasStorage)
-                {
-                    foreach (var done in liquidityBatch) _liquidityUpdates.TryRemove(new KeyValuePair<string, Liquidity>(done.TxId, done));
-                }
-                stored = tradesStored && (result || liquidityBatch.Length == 0 || !_liquidityRepository.HasStorage);
-                if (stored)
-                {
-                    foreach (var retry in retryBlocks)
-                    {
-                        if (_blocksAwaitingStore.TryRemove(retry.Key, out var ts)) _blockTracker?.MarkCompleted(retry.Key, ts);
-                    }
-                }
+                await FlushPendingAsync(cancellationToken);
 
-
-                if (block.Block != null)
-                {
-                    await _blockRepository.PublishToHub(Model.Data.Block.FromAlgorandBlock(block.Block), cancellationToken);
-                }
-
-                await Task.CompletedTask; // Placeholder for actual work
+                await _blockRepository.PublishToHub(Model.Data.Block.FromAlgorandBlock(block.Block), cancellationToken);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, ex.Message);
+                // Whatever was registered before the exception goes out with the next flush, and only then does the block
+                // count as stored for the latest-block watermark.
+                _pending.Close(blockId);
             }
-            finally
+        }
+
+        /// <summary>
+        /// Stores every closed pending block (one bulk call per index) and completes exactly the blocks whose documents
+        /// were acknowledged. Without Elasticsearch a store "fails" by design (the documents were still processed): nothing
+        /// can be retried later, so such blocks count as done rather than staying pending for ever.
+        /// </summary>
+        private async Task FlushPendingAsync(CancellationToken cancellationToken)
+        {
+            var completed = await _pending.FlushAsync(
+                async trades => await _tradeRepository.StoreTradesAsync(trades, cancellationToken) || !_tradeRepository.HasStorage,
+                async liquidity => await _liquidityRepository.StoreLiquidityUpdatesAsync(liquidity, cancellationToken) || !_liquidityRepository.HasStorage,
+                cancellationToken);
+            if (completed.Count == 0 && _pending.PendingCount > 0)
             {
-                // A block that is lost for good (algod failure, exception) is still "done": the indexer moves on, so
-                // holding the watermark back would stall latest-block forever. A block whose documents are only
-                // waiting for a retried store is held back until that store succeeds.
-                if (!cancellationToken.IsCancellationRequested)
-                {
-                    if (stored) _blockTracker?.MarkCompleted(blockId, blockTimestamp);
-                    else _blocksAwaitingStore[blockId] = blockTimestamp;
-                }
+                _logger.LogWarning("Storing pending documents failed; {count} block(s) stay pending and are retried with the next block", _pending.PendingCount);
             }
+            foreach (var (round, timestamp) in completed) _blockTracker?.MarkCompleted(round, timestamp);
         }
 
         public override async Task StopAsync(CancellationToken stoppingToken)

@@ -338,8 +338,10 @@ purpose (CoinGecko's indexer cannot sign ARC-14). Rules that are easy to break:
   the blocks whose trades are actually stored; GeckoTerminal treats latest-block as "all events up
   to here exist" and would skip the rest for good. The watermark is the highest *contiguous*
   completed block, held back `LatestBlockVisibilityDelaySeconds` for the Elasticsearch refresh and
-  mirrored to Redis for other replicas. A block whose store failed (`_blocksAwaitingStore` in
-  `TradeReporterBackgroundService`) must not count until a later store succeeds.
+  mirrored to Redis for other replicas. Documents are batched **per block** (`PendingBlockBatches`):
+  a block counts only once its own documents were acknowledged; a failed store keeps the batch
+  for the next flush. A block whose processing threw is closed as is and completes with the next
+  successful flush (its registered documents go out with it).
 - **`/events` must never truncate or emit an invalid event** (GeckoTerminal halts indexing on a bad
   event). Page-full ranges are bisected on `blockId`, not paginated; oversize ranges are a 400;
   unmappable events (unknown pool, zero amount, asset mismatch) are skipped + logged. Query only
@@ -376,4 +378,8 @@ purpose (CoinGecko's indexer cannot sign ARC-14). Rules that are easy to break:
   an **empty** pair snapshot (pool cache not initialised on this pod) makes every pair lookup
   transient so a range is never cached as "no events". The snapshot is warmed from `Program.cs`
   before the port opens (`ICoinGeckoService.WarmUpAsync`); a forced refresh for an unknown id only
-  re-reads the in-memory pool cache (unresolved pools retry algod on the regular cadence only).
+  re-reads the in-memory pool cache (unresolved pools retry algod on the regular cadence only,
+  tracked separately as `FullRefreshAt` so steady probing cannot postpone it); an expired snapshot
+  is served stale while one background rebuild runs (only the first build and "unknown id"
+  lookups wait for it). A single block with 10 000+ events is a deterministic 400 (cannot be
+  served by one query); the events cache key carries the protocol list.

@@ -142,8 +142,8 @@ namespace AVMTradeReporterTests.Services.CoinGecko
 
         private sealed class Counter { public int Value; }
 
-        /// <summary>A pool repository with one published pool that counts how often the pool cache is enumerated.</summary>
-        private static (Mock<IPoolRepository> Repo, Counter Loads) CountingPools()
+        /// <summary>A pool repository with one published pool that counts how often the pool cache is enumerated (and can be made to block).</summary>
+        private static (Mock<IPoolRepository> Repo, Counter Loads) CountingPools(ManualResetEventSlim? gate = null)
         {
             var loads = new Counter();
             var pool = Pool(PoolAppId, "POOLADDR", 0, 31566704);
@@ -151,6 +151,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             repo.Setup(p => p.GetAllPoolAddresses()).Returns(() =>
             {
                 Interlocked.Increment(ref loads.Value);
+                gate?.Wait(); // blocks only while the test holds the gate closed
                 return new[] { pool.PoolAddress };
             });
             repo.Setup(p => p.GetPoolAsync(pool.PoolAddress, It.IsAny<CancellationToken>())).ReturnsAsync(pool);
@@ -764,6 +765,55 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             Assert.That(calls.Value, Is.EqualTo(1));
             Assert.That((await service.GetPairAsync(PoolAppId.ToString(), default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Ok));
             Assert.That(calls.Value, Is.EqualTo(1));
+        }
+
+        [Test]
+        public async Task ExpiredSnapshot_IsServedStaleWhileOneRebuildRuns()
+        {
+            using var gate = new ManualResetEventSlim(initialState: true);
+            var (repo, loads) = CountingPools(gate);
+            _config.CoinGecko.PoolSnapshotSeconds = 1;
+            var service = new CoinGeckoService(Options.Create(_config), _tracker, _source, repo.Object, _assets.Object, new ServiceCollection().BuildServiceProvider(), NullLogger<CoinGeckoService>.Instance);
+            await service.WarmUpAsync(default);
+            gate.Reset(); // the next rebuild blocks inside the pool cache walk
+            await Task.Delay(1200);
+
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            var answers = await Task.WhenAll(Enumerable.Range(0, 5).Select(_ => service.GetPairAsync(PoolAppId.ToString(), default)));
+            watch.Stop();
+
+            Assert.That(answers.All(a => a.Outcome == CoinGeckoOutcome.Ok));
+            Assert.That(watch.ElapsedMilliseconds, Is.LessThan(500), "answered from the previous snapshot, not after the stuck rebuild");
+            Assert.That(loads.Value, Is.EqualTo(2), "exactly one rebuild was started");
+            gate.Set();
+        }
+
+        [Test]
+        public async Task ForcedRebuild_WhenTheRegularRefreshIsDue_RetriesUnresolvedPools()
+        {
+            // under steady probing every rebuild is a "forced" one; the asset lookups of unresolved pools must still happen on time
+            var assetsOk = false;
+            _assets.Setup(a => a.GetAssetAsync(12345, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => assetsOk ? Asset(12345, "Late", "LATE", 6, 1000) : null);
+            var pool = Pool(901, "LATE", 0, 12345);
+            pool.AssetADecimals = null;
+            pool.AssetBDecimals = null;
+            await _pools.StorePoolAsync(pool);
+            var service = Create(c => c.PoolSnapshotSeconds = 1);
+            Assert.That((await service.GetPairAsync("901", default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
+
+            assetsOk = true;
+            await Task.Delay(1200);
+            Assert.That((await service.GetPairAsync("777777", default)).Outcome, Is.EqualTo(CoinGeckoOutcome.NotFound), "an unknown id forces the rebuild");
+            Assert.That((await service.GetPairAsync("901", default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Ok));
+        }
+
+        [Test]
+        public async Task Events_BlockDenserThanOneQuery_IsADeterministic400()
+        {
+            for (var i = 0; i < 10_000; i++) _source.Trades.Add(Swap("T" + i, 10, (ulong)i + 1, 0));
+            var result = await Create(c => c.MaxEventsPerRequest = 100_000).GetEventsJsonAsync(10, 10, default);
+            Assert.That(result.Outcome, Is.EqualTo(CoinGeckoOutcome.BadRequest), "retrying can never help - a 503 would stall the consumer for ever");
         }
 
         [Test]
