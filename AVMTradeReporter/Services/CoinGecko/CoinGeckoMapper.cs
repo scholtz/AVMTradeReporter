@@ -83,7 +83,15 @@ namespace AVMTradeReporter.Services.CoinGecko
             if (trade.A == 0 && trade.B == 0) return null;
 
             // asset0 quoted in asset1 = (asset1 amount) / (asset0 amount) of this swap
-            var price = zeroToOne ? amountOut.Value / amountIn.Value : amountIn.Value / amountOut.Value;
+            decimal price;
+            try
+            {
+                price = zeroToOne ? amountOut.Value / amountIn.Value : amountIn.Value / amountOut.Value;
+            }
+            catch (OverflowException)
+            {
+                return null; // dust of a 19-decimal asset against a huge 0-decimal amount exceeds decimal's range: skip, never 503 for ever
+            }
             if (price <= 0) return null; // rounded to 0 by decimal precision - GeckoTerminal rejects a 0 price
 
             var swap = new CoinGeckoSwapEvent

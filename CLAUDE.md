@@ -355,13 +355,16 @@ purpose (CoinGecko's indexer cannot sign ARC-14). Rules that are easy to break:
   4 attempts, or whose per-transaction processing threw, is lost for the indexer itself, so it still
   counts as processed - freezing `latest-block` for ever would be worse than that gap.
   `Indexer.Round` is persisted when a block task *starts*, so after a crash it may sit above
-  blocks that were never stored: `SeedBlockTrackerAsync` compares it with the mirrored Redis
-  watermark and, when the gap is at most `MaxStartupRewindBlocks`, **rewinds the indexer** to
-  re-process them (`ResolveStartupSeed`, stores are idempotent upserts) - a bigger gap is a
-  reset / another indexer and is left alone. A published pool whose asset
-  decimals stay unresolvable for `UnresolvedPoolGraceMinutes` is skipped (logged) instead of
-  failing every `/events` range that touches it. `Protocols` is not pre-filled (config binding
-  appends to a default list) - use `PublishedProtocols`.
+  blocks that were never stored: the indexer therefore also persists `Indexer.StoredThrough`
+  (the contiguous completed watermark, written with every increment and on graceful shutdown)
+  and on startup **rewinds** `Round` to `StoredThrough + 1` (`ResolveStartupSeed`; stores are
+  idempotent upserts, so a replay only briefly double-counts pool volume until the next
+  recompute and re-publishes those trades to the hub). A deliberate forward jump of `Round`
+  must clear `StoredThrough` too. A published pool whose asset decimals cannot be read stays
+  *transient* (503 for ranges touching it) until they resolve - the assets of a live pool exist;
+  only a destroyed-asset tombstone (`IAssetRepository.IsDeletedAsync`) excludes a pool for good.
+  `Protocols` is not pre-filled (config binding appends to a default list) - use
+  `PublishedProtocols`.
 - More deliberate limits: `TradeRepository.StoreTradesAsync` reports success when the bulk call
   itself succeeded even if single documents were rejected (they are logged; unchanged
   behaviour, tracked with #23); `metadata.fees*In` uses the pool's *current* LP fee; synthetic

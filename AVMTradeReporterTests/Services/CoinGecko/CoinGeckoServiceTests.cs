@@ -21,6 +21,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         private sealed class FakeTracker : IIndexedBlockTracker
         {
             public IndexedBlock? Latest { get; set; }
+            public IndexedBlock? CompletedThrough => Latest;
             public void Seed(ulong completedRound, long unixTimestamp) => Latest = new IndexedBlock(completedRound, unixTimestamp);
             public void MarkCompleted(ulong round, long? unixTimestamp) => Latest = new IndexedBlock(round, unixTimestamp ?? 0);
             public Task<IndexedBlock?> GetLatestAsync(CancellationToken cancellationToken = default) => Task.FromResult(Latest);
@@ -139,6 +140,23 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             EventIndex = ev,
         };
 
+        private sealed class Counter { public int Value; }
+
+        /// <summary>A pool repository with one published pool that counts how often the pool cache is enumerated.</summary>
+        private static (Mock<IPoolRepository> Repo, Counter Loads) CountingPools()
+        {
+            var loads = new Counter();
+            var pool = Pool(PoolAppId, "POOLADDR", 0, 31566704);
+            var repo = new Mock<IPoolRepository>();
+            repo.Setup(p => p.GetAllPoolAddresses()).Returns(() =>
+            {
+                Interlocked.Increment(ref loads.Value);
+                return new[] { pool.PoolAddress };
+            });
+            repo.Setup(p => p.GetPoolAsync(pool.PoolAddress, It.IsAny<CancellationToken>())).ReturnsAsync(pool);
+            return (repo, loads);
+        }
+
         private static JsonElement[] Events(CoinGeckoResult<byte[]> result)
         {
             Assert.That(result.Outcome, Is.EqualTo(CoinGeckoOutcome.Ok), result.Error);
@@ -202,9 +220,21 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         }
 
         [Test]
+        public async Task Asset_UnreadableRightNow_IsRetryable503_NotACached404()
+        {
+            // AssetRepository answers null for an algod timeout as well as for a destroyed asset
+            await _pools.StorePoolAsync(Pool(902, "FLAKY", 0, 12345));
+            var service = Create();
+            Assert.That((await service.GetAssetAsync("12345", default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
+            Assert.That((await service.GetAssetAsync("12345", default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
+            _assets.Verify(a => a.GetAssetAsync(12345, It.IsAny<CancellationToken>()), Times.Exactly(2), "not cached - it may succeed next time");
+        }
+
+        [Test]
         public async Task Asset_DestroyedAssetOfAPublishedPool_IsNotFound_AndNotAskedAgainWithinTheCacheWindow()
         {
             await _pools.StorePoolAsync(Pool(902, "DESTROYED", 0, 12345));
+            _assets.Setup(a => a.IsDeletedAsync(12345, It.IsAny<CancellationToken>())).ReturnsAsync(true);
             var service = Create();
             Assert.That((await service.GetAssetAsync("12345", default)).Outcome, Is.EqualTo(CoinGeckoOutcome.NotFound));
             Assert.That((await service.GetAssetAsync("12345", default)).Outcome, Is.EqualTo(CoinGeckoOutcome.NotFound));
@@ -556,29 +586,47 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         }
 
         [Test]
-        public async Task Events_PoolThatStaysUndescribable_IsSkippedAfterTheGracePeriod_NotStallingTheIntegration()
+        public async Task Events_PoolWithADestroyedAsset_IsExcludedForGood_NotStallingTheIntegration()
         {
             var pool = Pool(901, "BROKEN", 0, 12345);
             pool.AssetADecimals = null;
             pool.AssetBDecimals = null;
             await _pools.StorePoolAsync(pool);
+            _assets.Setup(a => a.IsDeletedAsync(12345, It.IsAny<CancellationToken>())).ReturnsAsync(true);
             var broken = Swap("BROKEN", 10, 1, 0, appId: 901);
             broken.AssetIdOut = 12345;
             _source.Trades.Add(broken);
             _source.Trades.Add(Swap("OK", 10, 2, 0));
 
-            var events = Events(await Create(c => c.UnresolvedPoolGraceMinutes = 0).GetEventsJsonAsync(10, 10, default));
+            var events = Events(await Create().GetEventsJsonAsync(10, 10, default));
 
             Assert.That(events, Has.Length.EqualTo(1));
             Assert.That(events[0].GetProperty("txnId").GetString(), Is.EqualTo("TOP-OK"));
         }
 
         [Test]
+        public async Task Events_PoolUnreadableForLong_StaysTransient_NeverCachedAway()
+        {
+            // the assets of a live pool exist: however long algod misbehaves, its events must wait, not vanish
+            var pool = Pool(901, "FLAKY", 0, 12345);
+            pool.AssetADecimals = null;
+            pool.AssetBDecimals = null;
+            await _pools.StorePoolAsync(pool);
+            var trade = Swap("T", 10, 1, 0, appId: 901);
+            trade.AssetIdOut = 12345;
+            _source.Trades.Add(trade);
+            var service = Create(c => c.PoolSnapshotSeconds = 1);
+
+            Assert.That((await service.GetEventsJsonAsync(10, 10, default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
+            await Task.Delay(1200);
+            Assert.That((await service.GetEventsJsonAsync(10, 10, default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
+        }
+
+        [Test]
         public async Task PairAndAsset_LookupFailures_AreRetryable503_NotUnhandledErrors()
         {
             var failing = new Mock<IPoolRepository>();
-            failing.Setup(p => p.GetPoolsAsync(It.IsAny<ulong?>(), It.IsAny<ulong?>(), It.IsAny<string?>(), It.IsAny<DEXProtocol?>(), It.IsAny<int>(), It.IsAny<PoolOrderBy?>(), It.IsAny<SortDirection>(), It.IsAny<CancellationToken>()))
-                .ThrowsAsync(new InvalidOperationException("pools unavailable"));
+            failing.Setup(p => p.GetAllPoolAddresses()).Throws(new InvalidOperationException("pools unavailable"));
             var service = new CoinGeckoService(Options.Create(_config), _tracker, _source, failing.Object, _assets.Object, new ServiceCollection().BuildServiceProvider(), NullLogger<CoinGeckoService>.Instance);
 
             Assert.That((await service.GetPairAsync("1", default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
@@ -651,18 +699,11 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         public async Task Events_EachPoolIsResolvedOncePerRequest()
         {
             for (var i = 0; i < 50; i++) _source.Trades.Add(Swap("T" + i, 10, (ulong)i + 1, 0));
-            var counting = new Mock<IPoolRepository>();
-            var calls = 0;
-            counting.Setup(p => p.GetPoolsAsync(It.IsAny<ulong?>(), It.IsAny<ulong?>(), It.IsAny<string?>(), It.IsAny<DEXProtocol?>(), It.IsAny<int>(), It.IsAny<PoolOrderBy?>(), It.IsAny<SortDirection>(), It.IsAny<CancellationToken>()))
-                .Returns((ulong? _, ulong? _, string? _, DEXProtocol? protocol, int _, PoolOrderBy? _, SortDirection _, CancellationToken _) =>
-                {
-                    Interlocked.Increment(ref calls);
-                    return Task.FromResult(protocol == DEXProtocol.Biatec ? new List<PoolModel> { Pool(PoolAppId, "POOLADDR", 0, 31566704) } : new List<PoolModel>());
-                });
+            var (counting, calls) = CountingPools();
             var service = new CoinGeckoService(Options.Create(_config), _tracker, _source, counting.Object, _assets.Object, new ServiceCollection().BuildServiceProvider(), NullLogger<CoinGeckoService>.Instance);
 
             Assert.That(Events(await service.GetEventsJsonAsync(10, 10, default)), Has.Length.EqualTo(50));
-            Assert.That(calls, Is.LessThanOrEqualTo(2), "one snapshot load (published protocol + scam list), not one per event");
+            Assert.That(calls.Value, Is.EqualTo(1), "one snapshot load, not one per event");
         }
 
         [Test]
@@ -703,8 +744,9 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             pool.AssetBDecimals = null;
             await _pools.StorePoolAsync(pool);
             var service = Create(c => c.PoolSnapshotSeconds = 3600);
-            await service.GetPairAsync("901", default);
+            Assert.That((await service.GetPairAsync("901", default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
             var lookups = _assets.Invocations.Count(i => i.Method.Name == nameof(IAssetRepository.GetAssetAsync) && (ulong)i.Arguments[0] == 12345);
+            Assert.That(lookups, Is.GreaterThan(0));
 
             await Task.Delay(5200); // past MissingPoolRefreshInterval
             Assert.That((await service.GetPairAsync("777777", default)).Outcome, Is.EqualTo(CoinGeckoOutcome.NotFound));
@@ -715,21 +757,13 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         [Test]
         public async Task WarmUp_BuildsTheSnapshot_SoTheFirstRequestDoesNotLoadPools()
         {
-            var counting = new Mock<IPoolRepository>();
-            var calls = 0;
-            counting.Setup(p => p.GetPoolsAsync(It.IsAny<ulong?>(), It.IsAny<ulong?>(), It.IsAny<string?>(), It.IsAny<DEXProtocol?>(), It.IsAny<int>(), It.IsAny<PoolOrderBy?>(), It.IsAny<SortDirection>(), It.IsAny<CancellationToken>()))
-                .Returns((ulong? _, ulong? _, string? _, DEXProtocol? protocol, int _, PoolOrderBy? _, SortDirection _, CancellationToken _) =>
-                {
-                    Interlocked.Increment(ref calls);
-                    return Task.FromResult(protocol == DEXProtocol.Biatec ? new List<PoolModel> { Pool(PoolAppId, "POOLADDR", 0, 31566704) } : new List<PoolModel>());
-                });
+            var (counting, calls) = CountingPools();
             var service = new CoinGeckoService(Options.Create(_config), _tracker, _source, counting.Object, _assets.Object, new ServiceCollection().BuildServiceProvider(), NullLogger<CoinGeckoService>.Instance);
 
             await service.WarmUpAsync(default);
-            var afterWarmUp = calls;
-            Assert.That(afterWarmUp, Is.GreaterThan(0));
+            Assert.That(calls.Value, Is.EqualTo(1));
             Assert.That((await service.GetPairAsync(PoolAppId.ToString(), default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Ok));
-            Assert.That(calls, Is.EqualTo(afterWarmUp));
+            Assert.That(calls.Value, Is.EqualTo(1));
         }
 
         [Test]

@@ -507,13 +507,6 @@ namespace AVMTradeReporter.Model.Configuration
         public int RateLimitPerMinute { get; set; } = 1200;
 
         /// <summary>
-        /// Minutes a published pool whose asset decimals cannot be resolved is treated as "temporarily undescribable"
-        /// (requests touching it fail with a retryable 503). After that it is skipped - one broken pool must not stall the
-        /// whole integration for ever.
-        /// </summary>
-        public int UnresolvedPoolGraceMinutes { get; set; } = 10;
-
-        /// <summary>
         /// Seconds an event of a pool the pool cache does not know at all is held back (503) instead of skipped: a pool
         /// created moments ago is registered with a short delay, and its first events must not be dropped for good.
         /// </summary>
@@ -531,11 +524,9 @@ namespace AVMTradeReporter.Model.Configuration
         public int MaxParallelQueriesPerRange { get; set; } = 8;
 
         /// <summary>
-        /// On startup the forward indexer compares its persisted round with the last mirrored latest-block watermark.
-        /// <c>Indexer.Round</c> is persisted when a block task starts, so a crash leaves up to <c>MaxConcurrentTasks</c>
-        /// blocks unstored but "passed"; when the gap is at most this many blocks the indexer rewinds to re-process them
-        /// (trade / liquidity stores are idempotent). A bigger gap is left alone (another indexer, a deliberate reset).
+        /// Pools whose asset decimals are looked up at algod in parallel while the pair snapshot is (re)built - the warm-up
+        /// runs before the pod opens its port, so a cold cache must not cost one round trip per asset in sequence.
         /// </summary>
-        public int MaxStartupRewindBlocks { get; set; } = 50;
+        public int SnapshotResolveParallelism { get; set; } = 16;
     }
 }

@@ -81,7 +81,7 @@ namespace AVMTradeReporter.Services.CoinGecko
         private volatile PoolSnapshot _snapshot = new(new Dictionary<ulong, PairInfo>(), new Dictionary<ulong, DateTimeOffset>(), new HashSet<ulong>(), new HashSet<ulong>(), DateTimeOffset.MinValue);
 
         /// <param name="Pairs">Published pairs by pool application id.</param>
-        /// <param name="Unresolved">Published pools whose asset decimals could not be resolved, with the time they were first seen so (transient for <see cref="CoinGeckoConfiguration.UnresolvedPoolGraceMinutes"/>, then skipped).</param>
+        /// <param name="Unresolved">Published pools whose asset decimals could not be read right now (algod), with the time they were first seen so. Always transient: the assets of a live pool exist; only a destroyed-asset tombstone is permanent and lands in <paramref name="Excluded"/>.</param>
         /// <param name="AssetIds">Every asset of a published pool: the only assets <c>/asset</c> answers for.</param>
         /// <param name="Excluded">Pools the repository knows but that must never be published (scam, malformed).</param>
         private sealed record PoolSnapshot(Dictionary<ulong, PairInfo> Pairs, Dictionary<ulong, DateTimeOffset> Unresolved, HashSet<ulong> AssetIds, HashSet<ulong> Excluded, DateTimeOffset LoadedAt);
@@ -187,8 +187,14 @@ namespace AVMTradeReporter.Services.CoinGecko
                 _logger.LogError(ex, "CoinGecko asset {id} lookup failed", id);
                 return CoinGeckoResult<CoinGeckoAssetResponse>.Fail(CoinGeckoOutcome.Unavailable, "The asset cannot be loaded right now, try again");
             }
+            if (stored == null && !await _assetRepository.IsDeletedAsync(assetId, cancellationToken))
+            {
+                // null means "could not be read right now" (algod timeout) unless the repository holds a destroyed-asset tombstone:
+                // a published asset that exists is a retryable 503, never a cached 404 the indexer would act on.
+                return CoinGeckoResult<CoinGeckoAssetResponse>.Fail(CoinGeckoOutcome.Unavailable, "The asset cannot be loaded right now, try again");
+            }
             var asset = MapAsset(assetId, stored);
-            // a destroyed / unreadable asset of a published pool is cached briefly so repeated lookups do not hit algod each time
+            // a destroyed asset of a published pool is cached briefly so repeated lookups do not hit algod each time
             var ttl = asset == null ? TimeSpan.FromSeconds(Math.Min(30, _config.AssetCacheSeconds)) : TimeSpan.FromSeconds(_config.AssetCacheSeconds);
             _assets[assetId] = (asset, now + ttl);
             return asset == null
@@ -269,13 +275,10 @@ namespace AVMTradeReporter.Services.CoinGecko
             // No published pair at all means the pool cache is empty or still warming (PoolRepository.InitializeAsync failed on
             // this pod): every pool would look unknown and every range would be cached as "no events". Transient, never final.
             if (snapshot.Pairs.Count == 0) return new PairLookup(null, true);
-            // Undescribable pools are retried for a while (a slow algod, a cold asset cache); a pool that stays undescribable
-            // is then skipped instead of stalling the whole integration at its first block for ever.
-            var transient = snapshot.Unresolved.TryGetValue(appId, out var since)
-                && _time.GetUtcNow() - since < TimeSpan.FromMinutes(Math.Max(0, _config.UnresolvedPoolGraceMinutes));
-            // "Known" = the pool cache has the pool: relabelled scam pools, malformed pools and pools that stayed undescribable
-            // for the whole grace period are skipped for good. Only a pool the cache has never heard of can be a brand new one.
-            return new PairLookup(null, transient, snapshot.Excluded.Contains(appId) || snapshot.Unresolved.ContainsKey(appId));
+            // An undescribable pool (asset decimals not readable right now) stays transient until it resolves: its events exist
+            // and must not be cached away. The permanent case - a destroyed asset - is a tombstone and is in Excluded instead.
+            // "Known" = the pool cache has the pool; only a pool the cache has never heard of can be a brand new one.
+            return new PairLookup(null, snapshot.Unresolved.ContainsKey(appId), snapshot.Excluded.Contains(appId));
         }
 
         private async Task<PoolSnapshot> GetSnapshotAsync(TimeSpan? forceIfOlderThan, CancellationToken cancellationToken)
@@ -299,46 +302,66 @@ namespace AVMTradeReporter.Services.CoinGecko
                 var assetIds = new HashSet<ulong>();
                 var excluded = new HashSet<ulong>();
                 var now = _time.GetUtcNow();
-                // Scam-labelled pools are listed too (never published): their stored swaps still carry the protocol they had
-                // before the relabel, and "known but excluded" must not be confused with "not registered yet".
                 var published = _config.PublishedProtocols;
-                var scamPublished = published.Contains(DEXProtocol.Scam);
-                foreach (var protocol in published.Append(DEXProtocol.Scam).Distinct())
+                var toResolve = new List<Pool>();
+
+                // One pass over the raw pool cache (no sort / copy as GetPoolsAsync would do - a forced refresh may run every
+                // 5 s under probing). Scam-labelled pools are classified too: their stored swaps still carry the protocol they
+                // had before the relabel, and "known but excluded" must not be confused with "not registered yet".
+                foreach (var address in _poolRepository.GetAllPoolAddresses())
                 {
-                    var pools = await _poolRepository.GetPoolsAsync(null, null, null, protocol, int.MaxValue, null, SortDirection.Desc, cancellationToken);
-                    foreach (var pool in pools)
+                    var pool = await _poolRepository.GetPoolAsync(address, cancellationToken);
+                    if (pool == null) continue;
+                    if (!published.Contains(pool.Protocol) && pool.Protocol != DEXProtocol.Scam) continue;
+                    if (!published.Contains(pool.Protocol) || !IsPublishable(pool))
                     {
-                        if (protocol == DEXProtocol.Scam && !scamPublished || !IsPublishable(pool))
-                        {
-                            excluded.Add(pool.PoolAppId);
-                            continue;
-                        }
-                        assetIds.Add(pool.AssetIdA!.Value);
-                        assetIds.Add(pool.AssetIdB!.Value);
-                        if (snapshot.Pairs.TryGetValue(pool.PoolAppId, out var known))
-                        {
-                            // decimals never change; only the fee is re-read
-                            pairs[pool.PoolAppId] = known with { LpFee = pool.LPFee };
-                            continue;
-                        }
-                        if (!retryUnresolved && snapshot.Unresolved.TryGetValue(pool.PoolAppId, out var seenAt))
-                        {
-                            unresolved[pool.PoolAppId] = seenAt;
-                            continue;
-                        }
-                        var pair = await ToPairInfoAsync(pool, cancellationToken);
-                        if (pair != null) pairs[pair.AppId] = pair;
-                        else if (snapshot.Unresolved.TryGetValue(pool.PoolAppId, out var first))
-                        {
-                            unresolved[pool.PoolAppId] = first; // keep the time it was first seen undescribable
-                        }
-                        else
-                        {
-                            unresolved[pool.PoolAppId] = now;
-                            _logger.LogWarning("CoinGecko: pool {appId} cannot be described (asset decimals unknown); retried every {seconds} s, skipped after {minutes} min", pool.PoolAppId, _config.PoolSnapshotSeconds, _config.UnresolvedPoolGraceMinutes);
-                        }
+                        excluded.Add(pool.PoolAppId);
+                        continue;
                     }
+                    assetIds.Add(pool.AssetIdA!.Value);
+                    assetIds.Add(pool.AssetIdB!.Value);
+                    if (snapshot.Pairs.TryGetValue(pool.PoolAppId, out var known))
+                    {
+                        // decimals never change; only the fee is re-read
+                        pairs[pool.PoolAppId] = known with { LpFee = pool.LPFee };
+                        continue;
+                    }
+                    if (!retryUnresolved && snapshot.Unresolved.TryGetValue(pool.PoolAppId, out var seenAt))
+                    {
+                        unresolved[pool.PoolAppId] = seenAt;
+                        continue;
+                    }
+                    toResolve.Add(pool);
                 }
+
+                // Asset decimals missing on the pool are read from the asset repository (algod on a cold cache): in parallel,
+                // because this also runs as the startup warm-up before the pod opens its port.
+                var sync = new object();
+                await Parallel.ForEachAsync(toResolve,
+                    new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, _config.SnapshotResolveParallelism), CancellationToken = cancellationToken },
+                    async (pool, ct) =>
+                    {
+                        var (pair, permanent) = await ToPairInfoAsync(pool, ct);
+                        lock (sync)
+                        {
+                            if (pair != null) pairs[pair.AppId] = pair;
+                            else if (permanent)
+                            {
+                                excluded.Add(pool.PoolAppId);
+                                if (!snapshot.Excluded.Contains(pool.PoolAppId))
+                                    _logger.LogWarning("CoinGecko: pool {appId} references a destroyed asset - excluded for good", pool.PoolAppId);
+                            }
+                            else if (snapshot.Unresolved.TryGetValue(pool.PoolAppId, out var first))
+                            {
+                                unresolved[pool.PoolAppId] = first; // keep the time it was first seen undescribable
+                            }
+                            else
+                            {
+                                unresolved[pool.PoolAppId] = now;
+                                _logger.LogWarning("CoinGecko: pool {appId} cannot be described (asset decimals not readable); retried every {seconds} s, its events are held back meanwhile", pool.PoolAppId, _config.PoolSnapshotSeconds);
+                            }
+                        }
+                    });
                 _snapshot = new PoolSnapshot(pairs, unresolved, assetIds, excluded, now);
                 return _snapshot;
             }
@@ -359,29 +382,33 @@ namespace AVMTradeReporter.Services.CoinGecko
             return pool.AssetIdA != pool.AssetIdB;
         }
 
-        private async Task<PairInfo?> ToPairInfoAsync(Pool pool, CancellationToken cancellationToken)
+        /// <returns>The pair, or (null, permanent): permanent when an asset of the pool is destroyed, transient otherwise.</returns>
+        private async Task<(PairInfo? Pair, bool Permanent)> ToPairInfoAsync(Pool pool, CancellationToken cancellationToken)
         {
-            int? decimals0, decimals1;
             try
             {
-                decimals0 = await ResolveDecimalsAsync(pool.AssetADecimals, pool.AssetIdA!.Value, cancellationToken);
-                decimals1 = await ResolveDecimalsAsync(pool.AssetBDecimals, pool.AssetIdB!.Value, cancellationToken);
+                var a = ResolveDecimalsAsync(pool.AssetADecimals, pool.AssetIdA!.Value, cancellationToken);
+                var b = ResolveDecimalsAsync(pool.AssetBDecimals, pool.AssetIdB!.Value, cancellationToken);
+                await Task.WhenAll(a, b);
+                var (decimals0, permanent0) = a.Result;
+                var (decimals1, permanent1) = b.Result;
+                if (decimals0 == null || decimals1 == null) return (null, permanent0 || permanent1);
+                return (new PairInfo(pool.PoolAppId, pool.Protocol, pool.AssetIdA.Value, pool.AssetIdB.Value, decimals0.Value, decimals1.Value, pool.LPFee), false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // one failing lookup must not throw away the refresh of every other pool
                 _logger.LogWarning(ex, "CoinGecko: could not resolve asset decimals of pool {appId}", pool.PoolAppId);
-                return null;
+                return (null, false);
             }
-            if (decimals0 == null || decimals1 == null) return null;
-            return new PairInfo(pool.PoolAppId, pool.Protocol, pool.AssetIdA.Value, pool.AssetIdB.Value, decimals0.Value, decimals1.Value, pool.LPFee);
         }
 
-        private async Task<int?> ResolveDecimalsAsync(ulong? poolDecimals, ulong assetId, CancellationToken cancellationToken)
+        private async Task<(int? Decimals, bool Permanent)> ResolveDecimalsAsync(ulong? poolDecimals, ulong assetId, CancellationToken cancellationToken)
         {
-            if (poolDecimals.HasValue) return (int)poolDecimals.Value;
+            if (poolDecimals.HasValue) return ((int)poolDecimals.Value, false);
             var decimals = (await _assetRepository.GetAssetAsync(assetId, cancellationToken))?.Params?.Decimals;
-            return decimals.HasValue ? (int)decimals.Value : null;
+            if (decimals.HasValue) return ((int)decimals.Value, false);
+            return (null, await _assetRepository.IsDeletedAsync(assetId, cancellationToken));
         }
 
         // ---------------------------------------------------------------- events

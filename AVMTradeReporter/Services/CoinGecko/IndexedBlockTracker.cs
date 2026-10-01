@@ -26,6 +26,12 @@ namespace AVMTradeReporter.Services.CoinGecko
 
         /// <summary>The newest visible block, from this process or (other replica) from Redis. Null while unknown.</summary>
         Task<IndexedBlock?> GetLatestAsync(CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// This process's contiguous completed watermark BEFORE the visibility delay - what the indexer persists as
+        /// <c>Indexer.StoredThrough</c>. Null until seeded.
+        /// </summary>
+        IndexedBlock? CompletedThrough { get; }
     }
 
     public sealed class IndexedBlockTracker : IIndexedBlockTracker
@@ -55,6 +61,11 @@ namespace AVMTradeReporter.Services.CoinGecko
             _visibilityDelay = TimeSpan.FromSeconds(Math.Max(0, config.CoinGecko.LatestBlockVisibilityDelaySeconds));
             _redis = config.Redis.Enabled ? services.GetService<IDatabase>() : null;
             _redisKey = $"{config.Redis.EnvironmentKeyPrefix}coingecko:latest-block";
+        }
+
+        public IndexedBlock? CompletedThrough
+        {
+            get { lock (_lock) return _watermark; }
         }
 
         public void Seed(ulong completedRound, long unixTimestamp)

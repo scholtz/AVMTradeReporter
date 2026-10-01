@@ -169,28 +169,20 @@ namespace AVMTradeReporter.Services
                     }
 
 #if !DEBUG
-                    try
+                    foreach (var (name, api) in Algods())
                     {
-                        var blockStatus = await _algod.WaitForBlockAsync(stoppingToken, Indexer?.Round ?? throw new Exception("Rund not defined"));
-                    }
-                    catch
-                    {
-                        if (_algod2 != null)
+                        try
                         {
-                            try
-                            {
-
-                                var blockStatus = await _algod2.WaitForBlockAsync(stoppingToken, Indexer?.Round ?? throw new Exception("Rund not defined"));
-                            }
-                            catch
-                            {
-                                if (_algod3 != null)
-                                {
-                                    _logger.LogWarning("Algod2 failed, trying Algod3");
-                                    // Try algod3
-                                    var blockStatus = await _algod3.WaitForBlockAsync(stoppingToken, Indexer?.Round ?? throw new Exception("Rund not defined"));
-                                }
-                            }
+                            await api.WaitForBlockAsync(stoppingToken, Indexer?.Round ?? throw new Exception("Rund not defined"));
+                            break;
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            throw;
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "{algod} failed waiting for round {round}, trying the next one", name, Indexer?.Round);
                         }
                     }
 #endif
@@ -404,8 +396,15 @@ namespace AVMTradeReporter.Services
                 Indexer.Round = Indexer.Round + 1;
             }
             Indexer.Updated = DateTimeOffset.Now;
+            RecordStoredThrough();
             await _indexerRepository.StoreIndexerAsync(Indexer, cancellationToken);
 #endif
+        }
+
+        /// <summary>Copies the contiguous completed watermark onto the indexer document (see <see cref="Indexer.StoredThrough"/>).</summary>
+        private void RecordStoredThrough()
+        {
+            if (Indexer != null && _blockTracker?.CompletedThrough is { } completed) Indexer.StoredThrough = completed.Round;
         }
         /// <summary>
         /// Starts the GeckoTerminal latest-block watermark: every block below the indexer's current round was handled
@@ -417,23 +416,18 @@ namespace AVMTradeReporter.Services
             if (_appConfig.Value.Direction == "-") return;
             try
             {
-                // The previous run's watermark (mirrored in Redis; nothing is published locally yet). Indexer.Round is persisted
-                // when a block task STARTS, so after a crash it sits above blocks whose trades were never stored - the watermark
-                // must not claim them, and the indexer re-processes them (stores are idempotent upserts by tx id).
-                var mirrored = await _blockTracker.GetLatestAsync(cancellationToken);
-                var (seedRound, rewind) = ResolveStartupSeed(Indexer.Round, mirrored?.Round, (ulong)Math.Max(0, _appConfig.Value.CoinGecko.MaxStartupRewindBlocks));
+                // Indexer.Round is persisted when a block task STARTS, so after a crash it sits above blocks whose trades were
+                // never stored. Indexer.StoredThrough (persisted with every increment and on shutdown) is where the data really
+                // ends: the watermark starts there and the indexer re-processes the gap (stores are idempotent upserts by tx id).
+                // A deliberate forward jump of Round must clear StoredThrough on the indexer document as well.
+                var (seedRound, rewind) = ResolveStartupSeed(Indexer.Round, Indexer.StoredThrough);
                 if (rewind)
                 {
-                    _logger.LogWarning("Indexer round {round} is ahead of the last fully indexed block {watermark} (blocks were in flight when the previous run stopped) - re-processing {count} blocks",
+                    _logger.LogWarning("Indexer round {round} is ahead of the last fully stored block {storedThrough} (blocks were in flight when the previous run stopped) - re-processing {count} blocks",
                         Indexer.Round, seedRound, Indexer.Round - 1 - seedRound);
                     Indexer.Round = seedRound + 1;
                     Indexer.Updated = DateTimeOffset.Now;
                     await _indexerRepository.StoreIndexerAsync(Indexer, cancellationToken);
-                }
-                else if (mirrored != null && mirrored.Round + 1 < Indexer.Round)
-                {
-                    _logger.LogWarning("Last mirrored latest-block {watermark} is more than {max} blocks behind the indexer round {round}; not rewinding (another indexer, or a deliberate reset?)",
-                        mirrored.Round, _appConfig.Value.CoinGecko.MaxStartupRewindBlocks, Indexer.Round);
                 }
 
                 long timestamp = Indexer.Updated.ToUnixTimeSeconds(); // fallback: close to the block time, corrected by the next block
@@ -452,13 +446,13 @@ namespace AVMTradeReporter.Services
         private const int BlockFetchAttempts = 4;
 
         /// <summary>
-        /// Where the latest-block watermark (and, when it has to, the indexer) restarts: the mirrored watermark when it is
-        /// below the persisted round by at most <paramref name="maxRewind"/> blocks, otherwise the round before the indexer's.
+        /// Where the latest-block watermark (and, when it has to, the indexer) restarts: the persisted stored-through round
+        /// when it is below the round before the indexer's (the previous run died with blocks in flight), otherwise that round.
         /// </summary>
-        internal static (ulong SeedRound, bool Rewind) ResolveStartupSeed(ulong indexerRound, ulong? mirroredRound, ulong maxRewind)
+        internal static (ulong SeedRound, bool Rewind) ResolveStartupSeed(ulong indexerRound, ulong? storedThrough)
         {
             var seedRound = indexerRound - 1;
-            if (mirroredRound is { } mirrored && mirrored < seedRound && seedRound - mirrored <= maxRewind) return (mirrored, true);
+            if (storedThrough is { } stored && stored < seedRound) return (stored, true);
             return (seedRound, false);
         }
 
@@ -491,7 +485,9 @@ namespace AVMTradeReporter.Services
         private async Task ProcessBlockWorkAsync(ulong blockId, CancellationToken cancellationToken)
         {
             long? blockTimestamp = null;
-            var stored = true;
+            // Only an explicit outcome may complete the block for the latest-block watermark: an unexpected exception parks
+            // it (its documents are still in _trades and go out with the next successful store).
+            var stored = false;
             try
             {
                 var algodConfig = _appConfig.Value.Algod;
@@ -508,6 +504,7 @@ namespace AVMTradeReporter.Services
                 if (block == null || block.Block == null)
                 {
                     _logger.LogError("Block {blockId} not found after {attempts} attempts - its trades are skipped", blockId, BlockFetchAttempts);
+                    stored = true; // lost for the indexer itself as well (see CLAUDE.md, known limits) - never retried, so do not hold the watermark
                     return;
                 }
 
@@ -603,6 +600,20 @@ namespace AVMTradeReporter.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error while stopping background service");
+            }
+
+            // Persist where the stored data really ends, so a graceful restart neither loses nor replays blocks.
+            if (Indexer != null && _blockTracker?.CompletedThrough != null && _indexerRepository != null)
+            {
+                try
+                {
+                    RecordStoredThrough();
+                    await _indexerRepository.StoreIndexerAsync(Indexer, CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Could not persist the stored-through round on shutdown");
+                }
             }
 
             _concurrentTasksSemaphore?.Dispose();

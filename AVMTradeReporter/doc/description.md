@@ -189,7 +189,7 @@ REST API
     - `txnIndex` / `eventIndex` are persisted by the block processor (`Trade.TxnIndex/EventIndex`); documents indexed before that get a deterministic synthetic position after the real ones of their block.
     - events that cannot be expressed safely (unknown pool, zero amount, asset mismatch) are skipped and logged: GeckoTerminal halts indexing on an invalid event.
   - Rate limit: `/api/coingecko/*` has its own bucket per client IP (`CoinGecko.RateLimitPerMinute`, default 1200/min) instead of the 60/min anonymous budget - the indexer polls every ~2 s.
-  - Failures are retryable: storage / lookup trouble answers 503 (`Retry-After: 2`), never a partial event list, and nothing partial is cached. `/asset` only answers for assets of published pools.
+  - Failures are retryable: storage / lookup trouble answers 503 (`Retry-After: 2`), never a partial event list, and nothing partial is cached. `/asset` only answers for assets of published pools (404 only for a destroyed asset, 503 when it cannot be read right now).
   - Efficiency: asset/pair come from the in-memory caches; events cost two blockId-filtered Elasticsearch queries (range bisection instead of deep pagination) and are then cached in memory + Redis (`CoinGecko.EventsCacheSeconds`) with concurrent identical requests collapsed. Only the protocols in `CoinGecko.Protocols` (default Biatec) are published.
 - Test utilities (development)
   - GET /api/signalr/auth-test

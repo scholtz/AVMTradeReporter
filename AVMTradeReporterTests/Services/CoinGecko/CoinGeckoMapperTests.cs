@@ -178,6 +178,14 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         }
 
         [Test]
+        public void Swap_PriceBeyondDecimalRange_IsSkipped_NotThrown()
+        {
+            // 1 base unit of a 19-decimal asset0 for 1e10 units of a 0-decimal asset1: price 1e29 > decimal.MaxValue
+            var pair = new PairInfo(5, DEXProtocol.Biatec, 100, 200, 19, 0, null);
+            Assert.That(CoinGeckoMapper.TryMapSwap(Swap(100, 200, 1, 10_000_000_000), pair, new EventPositionPair(1, 0)), Is.Null);
+        }
+
+        [Test]
         public void Swap_PriceNeverZero_EvenForDustAgainstHugeAmount()
         {
             // 1 base unit of asset1 (6 decimals) for a huge amount of asset0 with 19 decimals -> price below decimal precision
