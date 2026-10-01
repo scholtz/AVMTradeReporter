@@ -141,8 +141,6 @@ namespace AVMTradeReporter.Services
                 _logger.LogError(ex, "Failed to initialize PoolRepository. Continuing without pool cache.");
             }
 
-            await SeedBlockTrackerAsync(stoppingToken);
-
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
@@ -151,6 +149,18 @@ namespace AVMTradeReporter.Services
                     {
                         await Task.Delay(1000);
                         continue;
+                    }
+                    if (!_trackerSeeded)
+                    {
+                        // Without the seeded watermark no block may be processed: its completion would be lost for
+                        // latest-block and StoredThrough would never be persisted. Elasticsearch / Redis trouble at startup
+                        // just delays the start.
+                        await SeedBlockTrackerAsync(stoppingToken);
+                        if (!_trackerSeeded)
+                        {
+                            await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+                            continue;
+                        }
                     }
                     //await ProcessBlockWorkAsync(52243617, stoppingToken);// pact
                     //await ProcessBlockWorkAsync(52279620, stoppingToken);// biatec
@@ -418,12 +428,24 @@ namespace AVMTradeReporter.Services
         /// Starts the GeckoTerminal latest-block watermark: every block below the indexer's current round was handled
         /// by an earlier run. Only the forward indexer owns the watermark (a backward / backfill indexer never does).
         /// </summary>
+        private bool _trackerSeeded;
+
         private async Task SeedBlockTrackerAsync(CancellationToken cancellationToken)
         {
-            if (_blockTracker == null || Indexer == null || Indexer.Round == 0) return;
-            if (_appConfig.Value.Direction == "-") return;
+            if (_blockTracker == null || Indexer == null || Indexer.Round == 0 || _appConfig.Value.Direction == "-")
+            {
+                _trackerSeeded = true; // nothing to seed (no tracker, or a backward / backfill indexer)
+                return;
+            }
             try
             {
+                if (_appConfig.Value.CoinGecko.ClearStoredThroughOnStartup && Indexer.StoredThrough != null)
+                {
+                    // the explicit way to move Round forward on purpose (see CoinGeckoConfiguration.ClearStoredThroughOnStartup)
+                    _logger.LogWarning("ClearStoredThroughOnStartup is set: forgetting StoredThrough {storedThrough}, the indexer continues at round {round}", Indexer.StoredThrough, Indexer.Round);
+                    Indexer.StoredThrough = null;
+                    await _indexerRepository.StoreIndexerAsync(Indexer, cancellationToken);
+                }
                 // Indexer.Round is persisted when a block task STARTS, so after a crash it sits above blocks whose trades were
                 // never stored. Indexer.StoredThrough (persisted with every increment and on shutdown) is where the data really
                 // ends: the watermark starts there and the indexer re-processes the gap (stores are idempotent upserts by tx id).
@@ -448,6 +470,7 @@ namespace AVMTradeReporter.Services
                 long? timestamp = header?.Block?.Timestamp != null ? Convert.ToInt64(header.Block.Timestamp) : null;
                 if (timestamp == null) _logger.LogWarning("Could not read the header of block {round}: the latest-block watermark starts unadvertised until the next block completes", seedRound);
                 _blockTracker.Seed(seedRound, timestamp, verified);
+                _trackerSeeded = true;
                 _logger.LogInformation("Latest indexed block watermark starts at {round}", seedRound);
             }
             catch (Exception ex)
@@ -619,8 +642,8 @@ namespace AVMTradeReporter.Services
         private async Task FlushPendingAsync(CancellationToken cancellationToken)
         {
             var flush = await _pending.FlushAsync(
-                trades => _tradeRepository.StoreTradesAsync(trades, cancellationToken),
-                liquidity => _liquidityRepository.StoreLiquidityUpdatesAsync(liquidity, cancellationToken),
+                (trades, publish) => _tradeRepository.StoreTradesAsync(trades, cancellationToken, publish),
+                (liquidity, publish) => _liquidityRepository.StoreLiquidityUpdatesAsync(liquidity, cancellationToken, publish),
                 cancellationToken);
             if (flush.Unreachable)
             {
@@ -638,7 +661,19 @@ namespace AVMTradeReporter.Services
         {
             _logger.LogInformation("Trade Reporter Background Service is stopping...");
 
-            // Wait for all running tasks to complete or timeout after 30 seconds
+            // First stop the loop: base.StopAsync cancels the stopping token and awaits ExecuteAsync, so no new block is
+            // started while the in-flight ones drain below. Otherwise the final StoredThrough would be written while the
+            // indexer still moved on, and the next start would replay half-processed blocks.
+            try
+            {
+                await base.StopAsync(stoppingToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error while stopping the indexing loop");
+            }
+
+            // Wait for the running block tasks to complete or timeout after 30 seconds
             try
             {
                 List<Task> tasksToWait;
@@ -652,15 +687,19 @@ namespace AVMTradeReporter.Services
                     _logger.LogInformation("Waiting for {taskCount} running block processing tasks to complete...", tasksToWait.Count);
                     using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
                     using var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, timeoutCts.Token);
-                    
+
                     try
                     {
                         await Task.WhenAll(tasksToWait).WaitAsync(combinedCts.Token);
-                        _logger.LogInformation("All block processing tasks completed successfully");
+                        _logger.LogInformation("All block processing tasks completed");
                     }
                     catch (OperationCanceledException)
                     {
                         _logger.LogWarning("Some block processing tasks did not complete within timeout");
+                    }
+                    catch (Exception)
+                    {
+                        // cancelled block tasks fault with their cancellation - expected, the restart re-processes them
                     }
                 }
             }
@@ -686,7 +725,6 @@ namespace AVMTradeReporter.Services
             }
 
             _concurrentTasksSemaphore?.Dispose();
-            await base.StopAsync(stoppingToken);
         }
 
         private async Task ProcessBlockAsyncWrapper(ulong blockId, CancellationToken cancellationToken)

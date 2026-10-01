@@ -194,6 +194,22 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         }
 
         [Test]
+        public async Task SeededButUnadvertised_NeverServesThePreviousRunsMirror()
+        {
+            var db = new Mock<StackExchange.Redis.IDatabase>();
+            db.Setup(d => d.StringGetAsync(It.IsAny<StackExchange.Redis.RedisKey>(), It.IsAny<StackExchange.Redis.CommandFlags>()))
+                .ReturnsAsync((StackExchange.Redis.RedisValue)System.Text.Json.JsonSerializer.Serialize(new IndexedBlock(60_050_000, 5000)));
+            var config = new AppConfiguration();
+            config.Redis.Enabled = true;
+            config.CoinGecko.LatestBlockVisibilityDelaySeconds = 0;
+            var tracker = new IndexedBlockTracker(Options.Create(config), NullLogger<IndexedBlockTracker>.Instance, new ServiceCollection().AddSingleton(db.Object).BuildServiceProvider());
+
+            Assert.That((await tracker.GetLatestAsync())!.Round, Is.EqualTo(60_050_000UL), "before seeding: a replica serves the mirror");
+            tracker.Seed(60_000_000, null); // re-index: the header could not be read
+            Assert.That(await tracker.GetLatestAsync(), Is.Null, "the stale mirror lies above blocks being rewritten");
+        }
+
+        [Test]
         public async Task Seed_DoesNotMoveTheWatermarkBackwards()
         {
             var tracker = Create();

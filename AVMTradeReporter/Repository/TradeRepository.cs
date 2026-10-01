@@ -96,7 +96,10 @@ namespace AVMTradeReporter.Repository
         /// <summary>
         /// Persists the trades (upsert by tx id) and reports, per document, what happened - see <see cref="StoreResult"/>.
         /// </summary>
-        public async Task<StoreResult> StoreTradesAsync(Trade[] trades, CancellationToken cancellationToken)
+        /// <param name="trades">Documents to upsert.</param>
+        /// <param name="cancellationToken">Cancellation token.</param>
+        /// <param name="publish">False when the documents were already announced to the live feed by an earlier attempt.</param>
+        public async Task<StoreResult> StoreTradesAsync(Trade[] trades, CancellationToken cancellationToken, bool publish = true)
         {
             if (!trades.Any())
             {
@@ -105,14 +108,19 @@ namespace AVMTradeReporter.Repository
 
             try
             {
-                _ = Task.Run(() => PublishTradesToHub(trades, cancellationToken));
-
-                foreach (var item in trades)
+                // Only a document's first store is announced: a document re-sent by a later flush (rejected before, or
+                // Elasticsearch unreachable) must not reach the live feed twice.
+                if (publish)
                 {
-                    BiatecScanHub.RecentTrades.Enqueue(item);
-                    if (BiatecScanHub.RecentTrades.Count > 100)
+                    _ = Task.Run(() => PublishTradesToHub(trades, cancellationToken));
+
+                    foreach (var item in trades)
                     {
-                        BiatecScanHub.RecentTrades.TryDequeue(out _);
+                        BiatecScanHub.RecentTrades.Enqueue(item);
+                        if (BiatecScanHub.RecentTrades.Count > 100)
+                        {
+                            BiatecScanHub.RecentTrades.TryDequeue(out _);
+                        }
                     }
                 }
 

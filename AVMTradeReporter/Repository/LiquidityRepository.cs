@@ -82,7 +82,10 @@ namespace AVMTradeReporter.Repository
         /// <summary>
         /// Persists the liquidity events (upsert by tx id) and reports, per document, what happened - see <see cref="StoreResult"/>.
         /// </summary>
-        public async Task<StoreResult> StoreLiquidityUpdatesAsync(Liquidity[] items, CancellationToken cancellationToken)
+        /// <param name="items">Documents to upsert.</param>
+        /// <param name="cancellationToken">Cancellation token.</param>
+        /// <param name="publish">False when the documents were already announced to the live feed by an earlier attempt.</param>
+        public async Task<StoreResult> StoreLiquidityUpdatesAsync(Liquidity[] items, CancellationToken cancellationToken, bool publish = true)
         {
             if (!items.Any())
             {
@@ -91,14 +94,19 @@ namespace AVMTradeReporter.Repository
 
             try
             {
-                _ = Task.Run(() => PublishLiquidityUpdatesToHub(items, cancellationToken));
-
-                foreach (var item in items)
+                // Only a document's first store is announced: a document re-sent by a later flush (rejected before, or
+                // Elasticsearch unreachable) must not reach the live feed twice.
+                if (publish)
                 {
-                    BiatecScanHub.RecentLiquidityUpdates.Enqueue(item);
-                    if (BiatecScanHub.RecentLiquidityUpdates.Count > 100)
+                    _ = Task.Run(() => PublishLiquidityUpdatesToHub(items, cancellationToken));
+
+                    foreach (var item in items)
                     {
-                        BiatecScanHub.RecentLiquidityUpdates.TryDequeue(out _);
+                        BiatecScanHub.RecentLiquidityUpdates.Enqueue(item);
+                        if (BiatecScanHub.RecentLiquidityUpdates.Count > 100)
+                        {
+                            BiatecScanHub.RecentLiquidityUpdates.TryDequeue(out _);
+                        }
                     }
                 }
 

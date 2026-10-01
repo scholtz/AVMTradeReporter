@@ -10,7 +10,8 @@ namespace AVMTradeReporter.Services
     /// every transaction of its block has been registered; only closed batches are flushed. Settlement is per document:
     /// what Elasticsearch accepted is forgotten, what it rejected is retried on the next flushes a bounded number of times
     /// and then dropped (a document it rejects for good must not hold the watermark for ever), and while Elasticsearch
-    /// cannot be reached at all nothing is dropped, however long it takes.
+    /// cannot be reached at all nothing is dropped, however long it takes. A document is announced to the live feed with
+    /// its first send only; re-sends pass <c>publish = false</c>.
     /// </summary>
     public sealed class PendingBlockBatches
     {
@@ -26,6 +27,7 @@ namespace AVMTradeReporter.Services
 
         private readonly ConcurrentDictionary<ulong, Batch> _pending = new();
         private readonly ConcurrentDictionary<string, int> _rejections = new();
+        private readonly HashSet<string> _sent = new(StringComparer.Ordinal); // guarded by _flushLock
         private readonly SemaphoreSlim _flushLock = new(1, 1);
 
         /// <param name="Completed">Blocks whose documents are now all settled (stored, or dropped after repeated rejection).</param>
@@ -53,14 +55,14 @@ namespace AVMTradeReporter.Services
         public int PendingCount => _pending.Count;
 
         /// <summary>
-        /// Stores the documents of every closed batch (one bulk call per index), settles them per document and returns the
-        /// blocks whose documents are thereby all settled. Flushes are serialized: block tasks finish concurrently, and the
-        /// second flush must only see what the first one left behind, not store (and publish to the hub) the same
-        /// documents twice.
+        /// Stores the documents of every closed batch (documents sent for the first time and re-sent ones separately, so only
+        /// the former are announced), settles them per document and returns the blocks whose documents are thereby all
+        /// settled. Flushes are serialized: block tasks finish concurrently, and the second flush must only see what the
+        /// first one left behind.
         /// </summary>
         public async Task<FlushResult> FlushAsync(
-            Func<Trade[], Task<StoreResult>> storeTrades,
-            Func<Liquidity[], Task<StoreResult>> storeLiquidity,
+            Func<Trade[], bool, Task<StoreResult>> storeTrades,
+            Func<Liquidity[], bool, Task<StoreResult>> storeLiquidity,
             CancellationToken cancellationToken,
             int maxRejections = DefaultMaxRejections)
         {
@@ -73,16 +75,8 @@ namespace AVMTradeReporter.Services
 
                 var abandoned = new List<string>();
                 var unreachable = false;
-
-                var trades = closed.SelectMany(kv => kv.Value.Trades.Values).ToArray();
-                var tradeResult = trades.Length == 0 ? StoreResult.AllStored : await storeTrades(trades);
-                if (tradeResult.Reached) Settle(closed, b => b.Trades, tradeResult.RejectedIds, maxRejections, abandoned);
-                else unreachable = true;
-
-                var liquidity = closed.SelectMany(kv => kv.Value.Liquidity.Values).ToArray();
-                var liquidityResult = liquidity.Length == 0 ? StoreResult.AllStored : await storeLiquidity(liquidity);
-                if (liquidityResult.Reached) Settle(closed, b => b.Liquidity, liquidityResult.RejectedIds, maxRejections, abandoned);
-                else unreachable = true;
+                unreachable |= !await StoreAsync(closed, b => b.Trades, t => t.TxId, storeTrades, maxRejections, abandoned);
+                unreachable |= !await StoreAsync(closed, b => b.Liquidity, l => l.TxId, storeLiquidity, maxRejections, abandoned);
 
                 if (cancellationToken.IsCancellationRequested) return new FlushResult(none, unreachable, abandoned);
 
@@ -100,7 +94,35 @@ namespace AVMTradeReporter.Services
             }
         }
 
-        private void Settle<T>(KeyValuePair<ulong, Batch>[] closed, Func<Batch, ConcurrentDictionary<string, T>> documents, IReadOnlyCollection<string> rejectedIds, int maxRejections, List<string> abandoned)
+        /// <returns>False when a store could not reach Elasticsearch.</returns>
+        private async Task<bool> StoreAsync<T>(
+            KeyValuePair<ulong, Batch>[] closed,
+            Func<Batch, ConcurrentDictionary<string, T>> documents,
+            Func<T, string> idOf,
+            Func<T[], bool, Task<StoreResult>> store,
+            int maxRejections,
+            List<string> abandoned)
+        {
+            var all = closed.SelectMany(kv => documents(kv.Value).Values).ToArray();
+            if (all.Length == 0) return true;
+            var reached = true;
+            foreach (var (docs, publish) in new[] { (all.Where(d => !_sent.Contains(idOf(d))).ToArray(), true), (all.Where(d => _sent.Contains(idOf(d))).ToArray(), false) })
+            {
+                if (docs.Length == 0) continue;
+                var result = await store(docs, publish);
+                foreach (var d in docs) _sent.Add(idOf(d));
+                if (!result.Reached)
+                {
+                    reached = false;
+                    continue;
+                }
+                var covered = docs.Select(idOf).ToHashSet(StringComparer.Ordinal);
+                Settle(closed, documents, covered, result.RejectedIds, maxRejections, abandoned);
+            }
+            return reached;
+        }
+
+        private void Settle<T>(KeyValuePair<ulong, Batch>[] closed, Func<Batch, ConcurrentDictionary<string, T>> documents, IReadOnlySet<string> covered, IReadOnlyCollection<string> rejectedIds, int maxRejections, List<string> abandoned)
         {
             var rejected = rejectedIds as IReadOnlySet<string> ?? rejectedIds.ToHashSet(StringComparer.Ordinal);
             foreach (var kv in closed)
@@ -108,20 +130,26 @@ namespace AVMTradeReporter.Services
                 var docs = documents(kv.Value);
                 foreach (var txId in docs.Keys.ToList())
                 {
+                    if (!covered.Contains(txId)) continue;
                     if (!rejected.Contains(txId))
                     {
-                        docs.TryRemove(txId, out _);
-                        _rejections.TryRemove(txId, out _);
+                        Forget(docs, txId);
                         continue;
                     }
                     if (_rejections.AddOrUpdate(txId, 1, (_, count) => count + 1) >= Math.Max(1, maxRejections))
                     {
-                        docs.TryRemove(txId, out _);
-                        _rejections.TryRemove(txId, out _);
+                        Forget(docs, txId);
                         abandoned.Add(txId);
                     }
                 }
             }
+        }
+
+        private void Forget<T>(ConcurrentDictionary<string, T> docs, string txId)
+        {
+            docs.TryRemove(txId, out _);
+            _rejections.TryRemove(txId, out _);
+            _sent.Remove(txId);
         }
     }
 }

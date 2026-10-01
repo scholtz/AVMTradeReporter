@@ -328,9 +328,9 @@ namespace AVMTradeReporter.Services.CoinGecko
             var toResolve = new List<Pool>();
             var anyPool = false;
 
-            // One pass over the raw pool cache (no sort / copy as GetPoolsAsync would do - a forced refresh may run every
-            // 5 s under probing). Scam-labelled pools are classified too: their stored swaps still carry the protocol they
-            // had before the relabel, and "known but excluded" must not be confused with "not registered yet".
+            // One pass over the raw pool cache (no sort, no enrichment - GetPoolsAsync would do both, and a forced refresh may
+            // run every 5 s under probing). Scam-labelled pools are classified too: their stored swaps still carry the
+            // protocol they had before the relabel, and "known but excluded" must not be confused with "not registered yet".
             foreach (var address in _poolRepository.GetAllPoolAddresses())
             {
                 // the RAW entry: GetPoolAsync hides pools whose decimals are not enriched yet, which are exactly the ones
@@ -353,9 +353,10 @@ namespace AVMTradeReporter.Services.CoinGecko
                     continue;
                 }
                 var decimalsOnPool = pool.AssetADecimals.HasValue && pool.AssetBDecimals.HasValue;
-                if (!retryUnresolved && !decimalsOnPool && snapshot.Unresolved.TryGetValue(pool.PoolAppId, out var seenAt))
+                if (!retryUnresolved && !decimalsOnPool)
                 {
-                    unresolved[pool.PoolAppId] = seenAt; // would need the asset repository - regular cadence only
+                    // would need the asset repository (algod): on the regular cadence only, never on a probe-triggered rebuild
+                    unresolved[pool.PoolAppId] = snapshot.Unresolved.TryGetValue(pool.PoolAppId, out var seenAt) ? seenAt : now;
                     continue;
                 }
                 toResolve.Add(pool);
@@ -452,6 +453,9 @@ namespace AVMTradeReporter.Services.CoinGecko
 
             var key = EventsKey(fromBlock, toBlock);
             if (_eventsCache.TryGetValue(key, out byte[]? hit) && hit != null) return CoinGeckoResult<byte[]>.Ok(hit);
+            // a transient failure a moment ago still holds: the consumer retries every ~2 s, the storage queries need not
+            if (_eventsCache.TryGetValue("transient:" + key, out string? recentReason) && recentReason != null)
+                return CoinGeckoResult<byte[]>.Fail(CoinGeckoOutcome.Unavailable, recentReason);
 
             var redisKey = $"{_redisConfig.EnvironmentKeyPrefix}coingecko:events:v1:{key}";
             var fromRedis = await TryReadRedisAsync(redisKey);
@@ -480,6 +484,8 @@ namespace AVMTradeReporter.Services.CoinGecko
             catch (TransientDataException ex)
             {
                 _logger.LogWarning("CoinGecko events {from}-{to} cannot be answered completely right now: {reason}", fromBlock, toBlock, ex.Message);
+                if (_config.TransientMemoSeconds > 0)
+                    _eventsCache.Set("transient:" + key, ex.Message, new MemoryCacheEntryOptions { Size = 1, AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(_config.TransientMemoSeconds) });
                 return CoinGeckoResult<byte[]>.Fail(CoinGeckoOutcome.Unavailable, ex.Message);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)

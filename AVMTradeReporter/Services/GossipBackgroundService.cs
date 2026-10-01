@@ -68,15 +68,18 @@ namespace AVMTradeReporter.Services
             {
                 // Mempool previews: once Elasticsearch was reached the buffer is cleared, rejected documents included (they are
                 // written again, confirmed, by the block processor; nothing here is worth re-sending for ever).
-                var result = await _tradeRepository.StoreTradesAsync(_trades.Values.ToArray(), cancellationToken);
+                var trades = _trades.Values.ToArray();
+                var result = await _tradeRepository.StoreTradesAsync(trades, cancellationToken);
                 if (result.Reached)
                 {
-                    _trades.Clear();
+                    // exactly what was sent - a preview registered meanwhile goes out with the next batch
+                    foreach (var sent in trades) _trades.TryRemove(new KeyValuePair<string, Trade>(sent.TxId, sent));
                 }
-                result = await _liquidityRepository.StoreLiquidityUpdatesAsync(_liquidityUpdates.Values.ToArray(), cancellationToken);
+                var liquidity = _liquidityUpdates.Values.ToArray();
+                result = await _liquidityRepository.StoreLiquidityUpdatesAsync(liquidity, cancellationToken);
                 if (result.Reached)
                 {
-                    _liquidityUpdates.Clear();
+                    foreach (var sent in liquidity) _liquidityUpdates.TryRemove(new KeyValuePair<string, Liquidity>(sent.TxId, sent));
                 }
                 await Task.CompletedTask; // Placeholder for actual work
             }

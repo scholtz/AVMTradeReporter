@@ -520,6 +520,18 @@ namespace AVMTradeReporter.Model.Configuration
         public int UnknownPoolLoadAttempts { get; set; } = 10;
 
         /// <summary>
+        /// Seconds a transient <c>/events</c> failure (pool not registered yet, snapshot catching up, too many builds) is
+        /// remembered per range, so the consumer's 2-second retries do not re-run the storage queries each time.
+        /// </summary>
+        public int TransientMemoSeconds { get; set; } = 3;
+
+        /// <summary>
+        /// Set to true for ONE start after moving <c>Indexer.Round</c> forward on purpose (skipping a range): the persisted
+        /// <c>StoredThrough</c> is cleared so the indexer does not rewind to it. Unset it again afterwards.
+        /// </summary>
+        public bool ClearStoredThroughOnStartup { get; set; } = false;
+
+        /// <summary>
         /// How many uncached <c>/events</c> ranges may be built (Elasticsearch queries) at the same time; further ones wait a
         /// few seconds and then fail with a retryable 503. Cached ranges are not limited.
         /// </summary>

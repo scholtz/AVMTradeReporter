@@ -96,6 +96,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             _config = new AppConfiguration();
             _config.Redis.Enabled = false;
             _config.CoinGecko.ElasticPageSize = 1000;
+            _config.CoinGecko.TransientMemoSeconds = 0; // the memo uses the real clock; tested on its own below
 
             _assets = new Mock<IAssetRepository>();
             _assets.Setup(a => a.GetAssetAsync(It.IsAny<ulong>(), It.IsAny<CancellationToken>()))
@@ -895,6 +896,20 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             Assert.That((await service.GetEventsJsonAsync(10, 10, default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable), "one load attempt, failed");
             var events = Events(await service.GetEventsJsonAsync(10, 10, default));
             Assert.That(events.Select(e => e.GetProperty("txnId").GetString()), Is.EqualTo(new[] { "TOP-OK" }), "attempts used up: the pool's events are skipped, the rest is served");
+        }
+
+        [Test]
+        public async Task Events_TransientFailure_IsRememberedBriefly_SoRetriesDoNotHitStorage()
+        {
+            var fresh = Swap("FRESH", 10, 1, 0, appId: 424242);
+            fresh.Timestamp = _time.GetUtcNow();
+            _source.Trades.Add(fresh);
+            var service = Create(c => c.TransientMemoSeconds = 30);
+
+            Assert.That((await service.GetEventsJsonAsync(10, 10, default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
+            var queries = _source.TradeCalls;
+            Assert.That((await service.GetEventsJsonAsync(10, 10, default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
+            Assert.That(_source.TradeCalls, Is.EqualTo(queries), "the 2-second retry is answered from the memo");
         }
 
         [Test]

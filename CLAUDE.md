@@ -383,7 +383,9 @@ purpose (CoinGecko's indexer cannot sign ARC-14). Rules that are easy to break:
 - More deliberate limits: stores report per document (`StoreResult`); a document Elasticsearch
   rejects is retried on the next flushes `PendingBlockBatches.DefaultMaxRejections` (3) times, then
   dropped (logged, the block completes without it), while an *unreachable* Elasticsearch keeps
-  every batch pending indefinitely - the watermark waits; `metadata.fees*In` uses the pool's *current* LP fee; synthetic
+  every batch pending indefinitely - the watermark waits (re-sends pass `publish: false`, so the
+  live feed sees a document once); a forward jump of `Round` is done with
+  `CoinGecko.ClearStoredThroughOnStartup` for one start; `metadata.fees*In` uses the pool's *current* LP fee; synthetic
   positions of documents indexed before `TxnIndex` existed are deterministic per block but not
   chronological; the Redis latest-block mirror never lowers a higher value (delete the key after
   an intentional re-index); uncached `/events` ranges are built at most

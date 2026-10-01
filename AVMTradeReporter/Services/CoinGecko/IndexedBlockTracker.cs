@@ -177,6 +177,9 @@ namespace AVMTradeReporter.Services.CoinGecko
             lock (_lock)
             {
                 if (_published != null) return _published;
+                // Seeded but nothing advertised yet (the seed's block header could not be read): the previous run's mirror
+                // must not be served from here - it may lie above blocks this run is re-processing.
+                if (_watermark != null) return null;
             }
             if (_redis == null) return null;
 
