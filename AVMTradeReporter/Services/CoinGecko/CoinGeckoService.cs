@@ -242,6 +242,8 @@ namespace AVMTradeReporter.Services.CoinGecko
         {
             var snapshot = await GetSnapshotAsync(forceIfOlderThan: null, cancellationToken);
             if (snapshot.Pairs.TryGetValue(appId, out var pair)) return new PairLookup(pair, false);
+            // Known and deliberately not published (scam, malformed): no point in rebuilding the snapshot to look for it again.
+            if (snapshot.Excluded.Contains(appId)) return new PairLookup(null, false, true);
 
             // A pool created after the snapshot was taken (or one whose decimals could not be read): refresh once
             // (rate limited) before answering "unknown".
@@ -275,12 +277,14 @@ namespace AVMTradeReporter.Services.CoinGecko
                 var now = _time.GetUtcNow();
                 // Scam-labelled pools are listed too (never published): their stored swaps still carry the protocol they had
                 // before the relabel, and "known but excluded" must not be confused with "not registered yet".
-                foreach (var protocol in _config.PublishedProtocols.Append(DEXProtocol.Scam).Distinct())
+                var published = _config.PublishedProtocols;
+                var scamPublished = published.Contains(DEXProtocol.Scam);
+                foreach (var protocol in published.Append(DEXProtocol.Scam).Distinct())
                 {
                     var pools = await _poolRepository.GetPoolsAsync(null, null, null, protocol, int.MaxValue, null, SortDirection.Desc, cancellationToken);
                     foreach (var pool in pools)
                     {
-                        if (protocol == DEXProtocol.Scam && !_config.PublishedProtocols.Contains(DEXProtocol.Scam) || !IsPublishable(pool))
+                        if (protocol == DEXProtocol.Scam && !scamPublished || !IsPublishable(pool))
                         {
                             excluded.Add(pool.PoolAppId);
                             continue;
@@ -354,9 +358,10 @@ namespace AVMTradeReporter.Services.CoinGecko
 
             var latest = await _tracker.GetLatestAsync(cancellationToken);
             if (latest == null) return CoinGeckoResult<byte[]>.Fail(CoinGeckoOutcome.Unavailable, "The indexer has not completed a block yet");
-            // Beyond latest-block the data is incomplete; answering would let the consumer skip events for good.
+            // Beyond latest-block the data is incomplete; answering would let the consumer skip events for good. Replicas may
+            // legitimately disagree by a block (the watermark is mirrored through Redis), so this is a retryable 503, not a 400.
             if (toBlock > latest.Round)
-                return CoinGeckoResult<byte[]>.Fail(CoinGeckoOutcome.BadRequest, $"toBlock {toBlock} is beyond the latest indexed block {latest.Round}");
+                return CoinGeckoResult<byte[]>.Fail(CoinGeckoOutcome.Unavailable, $"toBlock {toBlock} is beyond the latest indexed block {latest.Round}, try again");
 
             var key = $"{fromBlock}:{toBlock}";
             if (_eventsCache.TryGetValue(key, out byte[]? hit) && hit != null) return CoinGeckoResult<byte[]>.Ok(hit);

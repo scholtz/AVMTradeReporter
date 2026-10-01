@@ -324,7 +324,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         {
             var service = Create();
             var result = await service.GetEventsJsonAsync(1000, 1001, default);
-            Assert.That(result.Outcome, Is.EqualTo(CoinGeckoOutcome.BadRequest));
+            Assert.That(result.Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable), "retryable: another replica may simply be a block ahead");
             Assert.That(result.Error, Does.Contain("latest"));
             Assert.That(_source.TradeCalls, Is.Zero, "must not even query data that may be incomplete");
         }
