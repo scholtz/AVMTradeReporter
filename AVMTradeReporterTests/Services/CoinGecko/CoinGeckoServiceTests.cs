@@ -527,6 +527,43 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         }
 
         [Test]
+        public async Task Events_PoolThatStaysUndescribable_IsSkippedAfterTheGracePeriod_NotStallingTheIntegration()
+        {
+            var pool = Pool(901, "BROKEN", 0, 12345);
+            pool.AssetADecimals = null;
+            pool.AssetBDecimals = null;
+            await _pools.StorePoolAsync(pool);
+            var broken = Swap("BROKEN", 10, 1, 0, appId: 901);
+            broken.AssetIdOut = 12345;
+            _source.Trades.Add(broken);
+            _source.Trades.Add(Swap("OK", 10, 2, 0));
+
+            var events = Events(await Create(c => c.UnresolvedPoolGraceMinutes = 0).GetEventsJsonAsync(10, 10, default));
+
+            Assert.That(events, Has.Length.EqualTo(1));
+            Assert.That(events[0].GetProperty("txnId").GetString(), Is.EqualTo("TOP-OK"));
+        }
+
+        [Test]
+        public async Task PairAndAsset_LookupFailures_AreRetryable503_NotUnhandledErrors()
+        {
+            var failing = new Mock<IPoolRepository>();
+            failing.Setup(p => p.GetPoolsAsync(It.IsAny<ulong?>(), It.IsAny<ulong?>(), It.IsAny<string?>(), It.IsAny<DEXProtocol?>(), It.IsAny<int>(), It.IsAny<PoolOrderBy?>(), It.IsAny<SortDirection>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new InvalidOperationException("pools unavailable"));
+            var service = new CoinGeckoService(Options.Create(_config), _tracker, _source, failing.Object, _assets.Object, new ServiceCollection().BuildServiceProvider(), NullLogger<CoinGeckoService>.Instance);
+
+            Assert.That((await service.GetPairAsync("1", default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
+            Assert.That((await service.GetAssetAsync("0", default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
+        }
+
+        [Test]
+        public async Task Asset_RepositoryFailure_IsRetryable503()
+        {
+            _assets.Setup(a => a.GetAssetAsync(0, It.IsAny<CancellationToken>())).ThrowsAsync(new HttpRequestException("algod down"));
+            Assert.That((await Create().GetAssetAsync("0", default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
+        }
+
+        [Test]
         public async Task Events_OutputIsPlainJsonWithEventsArray()
         {
             var json = System.Text.Encoding.UTF8.GetString((await Create().GetEventsJsonAsync(1, 1, default)).Value!);

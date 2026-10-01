@@ -419,14 +419,21 @@ namespace AVMTradeReporter.Services
             {
                 var seedRound = Indexer.Round - 1;
                 long timestamp = Indexer.Updated.ToUnixTimeSeconds(); // fallback: close to the block time, corrected by the next block
-                try
+                foreach (var algod in new[] { _algod, _algod2, _algod3 }.Where(a => a != null))
                 {
-                    var header = await _algod.GetBlockAsync(seedRound, Format.Msgpack, true);
-                    if (header?.Block?.Timestamp != null) timestamp = Convert.ToInt64(header.Block.Timestamp);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Could not read the header of block {round} for the latest-block watermark, using the indexer update time", seedRound);
+                    try
+                    {
+                        var header = await algod!.GetBlockAsync(seedRound, Format.Msgpack, true);
+                        if (header?.Block?.Timestamp != null)
+                        {
+                            timestamp = Convert.ToInt64(header.Block.Timestamp);
+                            break;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Could not read the header of block {round} for the latest-block watermark, trying the next algod / the indexer update time", seedRound);
+                    }
                 }
                 _blockTracker.Seed(seedRound, timestamp);
                 _logger.LogInformation("Latest indexed block watermark starts at {round}", seedRound);
@@ -434,6 +441,40 @@ namespace AVMTradeReporter.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to seed the latest indexed block watermark");
+            }
+        }
+
+        private const int BlockFetchAttempts = 4;
+
+        /// <summary>Loads a block from the first algod that answers (primary, then the fallbacks); null when none does.</summary>
+        private async Task<CertifiedBlock?> TryFetchBlockAsync(ulong blockId)
+        {
+            try
+            {
+                return await _algod.GetBlockAsync(blockId, Format.Msgpack, false);
+            }
+            catch
+            {
+                if (_algod2 == null) return null;
+                _logger.LogWarning("Algod failed, trying Algod2");
+            }
+            try
+            {
+                return await _algod2.GetBlockAsync(blockId, Format.Msgpack, false);
+            }
+            catch
+            {
+                if (_algod3 == null) return null;
+                _logger.LogWarning("Algod2 failed, trying Algod3");
+            }
+            try
+            {
+                return await _algod3.GetBlockAsync(blockId, Format.Msgpack, false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Algod3 failed to return block {blockId}", blockId);
+                return null;
             }
         }
 
@@ -446,33 +487,17 @@ namespace AVMTradeReporter.Services
                 var algodConfig = _appConfig.Value.Algod;
 
                 _logger.LogInformation("Loading block {blockId}", blockId);
+                // A transient algod outage must not turn into a permanently skipped block (and a latest-block watermark
+                // that moves past it), so the fetch is retried a few times before the block is given up.
                 CertifiedBlock? block = null;
-                try
+                for (var attempt = 1; attempt <= BlockFetchAttempts && (block == null || block.Block == null); attempt++)
                 {
-                    block = await _algod.GetBlockAsync(blockId, Format.Msgpack, false);
-                }
-                catch
-                {
-                    if (_algod2 != null)
-                    {
-                        _logger.LogWarning("Algod failed, trying Algod2");
-                        try
-                        {
-                            block = await _algod2.GetBlockAsync(blockId, Format.Msgpack, false);
-                        }
-                        catch
-                        {
-                            if (_algod3 != null)
-                            {
-                                _logger.LogWarning("Algod2 failed, trying Algod3");
-                                block = await _algod3.GetBlockAsync(blockId, Format.Msgpack, false);
-                            }
-                        }
-                    }
+                    if (attempt > 1) await Task.Delay(TimeSpan.FromSeconds(attempt), cancellationToken);
+                    block = await TryFetchBlockAsync(blockId);
                 }
                 if (block == null || block.Block == null)
                 {
-                    _logger.LogWarning("Block {blockId} not found", blockId);
+                    _logger.LogError("Block {blockId} not found after {attempts} attempts - its trades are skipped", blockId, BlockFetchAttempts);
                     return;
                 }
 

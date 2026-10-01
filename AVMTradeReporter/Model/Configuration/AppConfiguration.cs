@@ -497,5 +497,12 @@ namespace AVMTradeReporter.Model.Configuration
         /// the 60/min anonymous budget of the rest of the API).
         /// </summary>
         public int RateLimitPerMinute { get; set; } = 1200;
+
+        /// <summary>
+        /// Minutes a published pool whose asset decimals cannot be resolved is treated as "temporarily undescribable"
+        /// (requests touching it fail with a retryable 503). After that it is skipped - one broken pool must not stall the
+        /// whole integration for ever.
+        /// </summary>
+        public int UnresolvedPoolGraceMinutes { get; set; } = 10;
     }
 }
