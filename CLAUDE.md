@@ -353,9 +353,12 @@ purpose (CoinGecko's indexer cannot sign ARC-14). Rules that are easy to break:
   asset A/B (immutable on-chain order).
 - **Known limits (deliberate, same data the website has):** a block that algod cannot return after
   4 attempts, or whose per-transaction processing threw, is lost for the indexer itself, so it still
-  counts as processed - freezing `latest-block` for ever would be worse than that gap. Likewise
-  `Indexer.Round` is persisted when a block task *starts*, so a crash can lose up to
-  `MaxConcurrentTasks` in-flight blocks before the watermark seed. A published pool whose asset
+  counts as processed - freezing `latest-block` for ever would be worse than that gap.
+  `Indexer.Round` is persisted when a block task *starts*, so after a crash it may sit above
+  blocks that were never stored: `SeedBlockTrackerAsync` compares it with the mirrored Redis
+  watermark and, when the gap is at most `MaxStartupRewindBlocks`, **rewinds the indexer** to
+  re-process them (`ResolveStartupSeed`, stores are idempotent upserts) - a bigger gap is a
+  reset / another indexer and is left alone. A published pool whose asset
   decimals stay unresolvable for `UnresolvedPoolGraceMinutes` is skipped (logged) instead of
   failing every `/events` range that touches it. `Protocols` is not pre-filled (config binding
   appends to a default list) - use `PublishedProtocols`.
@@ -366,4 +369,8 @@ purpose (CoinGecko's indexer cannot sign ARC-14). Rules that are easy to break:
   chronological; the Redis latest-block mirror never lowers a higher value (delete the key after
   an intentional re-index); uncached `/events` ranges are built at most
   `MaxConcurrentEventQueries` at a time and an event of a pool the cache has never heard of is
-  held back (503) for `UnknownPoolGraceSeconds` so a brand new pool's first events are not lost.
+  held back (503) for `UnknownPoolGraceSeconds` so a brand new pool's first events are not lost;
+  an **empty** pair snapshot (pool cache not initialised on this pod) makes every pair lookup
+  transient so a range is never cached as "no events". The snapshot is warmed from `Program.cs`
+  before the port opens (`ICoinGeckoService.WarmUpAsync`); a forced refresh for an unknown id only
+  re-reads the in-memory pool cache (unresolved pools retry algod on the regular cadence only).

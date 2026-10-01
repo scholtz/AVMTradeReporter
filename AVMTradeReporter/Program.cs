@@ -501,6 +501,9 @@ namespace AVMTradeReporter
             _ = app.Services.GetService<AggregatedPoolRepository>() ?? throw new Exception("aggregatedPoolRepository not initialized");
             var poolRepository = app.Services.GetService<IPoolRepository>() as PoolRepository ?? throw new Exception("Pool repository not initialized");
             poolRepository.InitializeAsync(cancellationTokenSource.Token).Wait();
+            // The CoinGecko pair snapshot is derived from the pool cache (plus asset decimals): warm it here, before the port
+            // opens, like every other in-memory cache (see CLAUDE.md "HA deploys") instead of on the first request to a new pod.
+            app.Services.GetRequiredService<AVMTradeReporter.Services.CoinGecko.ICoinGeckoService>().WarmUpAsync(cancellationTokenSource.Token).Wait();
 
             _ = app.Services.GetService<IDefaultApi>();
             _ = app.Services.GetService<BlockRepository>();

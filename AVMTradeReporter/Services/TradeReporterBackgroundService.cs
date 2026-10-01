@@ -417,24 +417,29 @@ namespace AVMTradeReporter.Services
             if (_appConfig.Value.Direction == "-") return;
             try
             {
-                var seedRound = Indexer.Round - 1;
-                long timestamp = Indexer.Updated.ToUnixTimeSeconds(); // fallback: close to the block time, corrected by the next block
-                foreach (var algod in new[] { _algod, _algod2, _algod3 }.Where(a => a != null))
+                // The previous run's watermark (mirrored in Redis; nothing is published locally yet). Indexer.Round is persisted
+                // when a block task STARTS, so after a crash it sits above blocks whose trades were never stored - the watermark
+                // must not claim them, and the indexer re-processes them (stores are idempotent upserts by tx id).
+                var mirrored = await _blockTracker.GetLatestAsync(cancellationToken);
+                var (seedRound, rewind) = ResolveStartupSeed(Indexer.Round, mirrored?.Round, (ulong)Math.Max(0, _appConfig.Value.CoinGecko.MaxStartupRewindBlocks));
+                if (rewind)
                 {
-                    try
-                    {
-                        var header = await algod!.GetBlockAsync(seedRound, Format.Msgpack, true);
-                        if (header?.Block?.Timestamp != null)
-                        {
-                            timestamp = Convert.ToInt64(header.Block.Timestamp);
-                            break;
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Could not read the header of block {round} for the latest-block watermark, trying the next algod / the indexer update time", seedRound);
-                    }
+                    _logger.LogWarning("Indexer round {round} is ahead of the last fully indexed block {watermark} (blocks were in flight when the previous run stopped) - re-processing {count} blocks",
+                        Indexer.Round, seedRound, Indexer.Round - 1 - seedRound);
+                    Indexer.Round = seedRound + 1;
+                    Indexer.Updated = DateTimeOffset.Now;
+                    await _indexerRepository.StoreIndexerAsync(Indexer, cancellationToken);
                 }
+                else if (mirrored != null && mirrored.Round + 1 < Indexer.Round)
+                {
+                    _logger.LogWarning("Last mirrored latest-block {watermark} is more than {max} blocks behind the indexer round {round}; not rewinding (another indexer, or a deliberate reset?)",
+                        mirrored.Round, _appConfig.Value.CoinGecko.MaxStartupRewindBlocks, Indexer.Round);
+                }
+
+                long timestamp = Indexer.Updated.ToUnixTimeSeconds(); // fallback: close to the block time, corrected by the next block
+                var header = await TryFetchBlockAsync(seedRound, headerOnly: true);
+                if (header?.Block?.Timestamp != null) timestamp = Convert.ToInt64(header.Block.Timestamp);
+                else _logger.LogWarning("Could not read the header of block {round} for the latest-block watermark, using the indexer update time", seedRound);
                 _blockTracker.Seed(seedRound, timestamp);
                 _logger.LogInformation("Latest indexed block watermark starts at {round}", seedRound);
             }
@@ -446,36 +451,41 @@ namespace AVMTradeReporter.Services
 
         private const int BlockFetchAttempts = 4;
 
-        /// <summary>Loads a block from the first algod that answers (primary, then the fallbacks); null when none does.</summary>
-        private async Task<CertifiedBlock?> TryFetchBlockAsync(ulong blockId)
+        /// <summary>
+        /// Where the latest-block watermark (and, when it has to, the indexer) restarts: the mirrored watermark when it is
+        /// below the persisted round by at most <paramref name="maxRewind"/> blocks, otherwise the round before the indexer's.
+        /// </summary>
+        internal static (ulong SeedRound, bool Rewind) ResolveStartupSeed(ulong indexerRound, ulong? mirroredRound, ulong maxRewind)
         {
-            try
+            var seedRound = indexerRound - 1;
+            if (mirroredRound is { } mirrored && mirrored < seedRound && seedRound - mirrored <= maxRewind) return (mirrored, true);
+            return (seedRound, false);
+        }
+
+        private IEnumerable<(string Name, Algorand.Algod.IDefaultApi Api)> Algods()
+        {
+            yield return ("Algod", _algod);
+            if (_algod2 != null) yield return ("Algod2", _algod2);
+            if (_algod3 != null) yield return ("Algod3", _algod3);
+        }
+
+        /// <summary>Loads a block from the first algod that answers (primary, then the fallbacks); null when none does.</summary>
+        private async Task<CertifiedBlock?> TryFetchBlockAsync(ulong blockId, bool headerOnly)
+        {
+            foreach (var (name, api) in Algods())
             {
-                return await _algod.GetBlockAsync(blockId, Format.Msgpack, false);
+                try
+                {
+                    var block = await api.GetBlockAsync(blockId, Format.Msgpack, headerOnly);
+                    if (block?.Block != null) return block;
+                    _logger.LogWarning("{algod} returned no block {blockId}", name, blockId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "{algod} failed to return block {blockId}", name, blockId);
+                }
             }
-            catch
-            {
-                if (_algod2 == null) return null;
-                _logger.LogWarning("Algod failed, trying Algod2");
-            }
-            try
-            {
-                return await _algod2.GetBlockAsync(blockId, Format.Msgpack, false);
-            }
-            catch
-            {
-                if (_algod3 == null) return null;
-                _logger.LogWarning("Algod2 failed, trying Algod3");
-            }
-            try
-            {
-                return await _algod3.GetBlockAsync(blockId, Format.Msgpack, false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Algod3 failed to return block {blockId}", blockId);
-                return null;
-            }
+            return null;
         }
 
         private async Task ProcessBlockWorkAsync(ulong blockId, CancellationToken cancellationToken)
@@ -493,7 +503,7 @@ namespace AVMTradeReporter.Services
                 for (var attempt = 1; attempt <= BlockFetchAttempts && (block == null || block.Block == null); attempt++)
                 {
                     if (attempt > 1) await Task.Delay(TimeSpan.FromSeconds(attempt), cancellationToken);
-                    block = await TryFetchBlockAsync(blockId);
+                    block = await TryFetchBlockAsync(blockId, headerOnly: false);
                 }
                 if (block == null || block.Block == null)
                 {
@@ -510,21 +520,23 @@ namespace AVMTradeReporter.Services
                 var retryBlocks = _blocksAwaitingStore.ToArray();
                 var tradeBatch = _trades.Values.ToArray();
                 var result = await _tradeRepository.StoreTradesAsync(tradeBatch, cancellationToken);
-                if (result)
+                // Without Elasticsearch a store "fails" by design (the trades were still processed): nothing can be retried
+                // later, so the batch is dropped and the block counts as done rather than parked for ever.
+                if (result || !_tradeRepository.HasStorage)
                 {
                     // Remove exactly what was stored. Clear() would also drop trades a concurrently processed block
                     // registered after the snapshot above - they would never be stored and the block that owns them
                     // would still count as indexed.
                     foreach (var done in tradeBatch) _trades.TryRemove(new KeyValuePair<string, Trade>(done.TxId, done));
                 }
-                var tradesStored = result || tradeBatch.Length == 0;
+                var tradesStored = result || tradeBatch.Length == 0 || !_tradeRepository.HasStorage;
                 var liquidityBatch = _liquidityUpdates.Values.ToArray();
                 result = await _liquidityRepository.StoreLiquidityUpdatesAsync(liquidityBatch, cancellationToken);
-                if (result)
+                if (result || !_liquidityRepository.HasStorage)
                 {
                     foreach (var done in liquidityBatch) _liquidityUpdates.TryRemove(new KeyValuePair<string, Liquidity>(done.TxId, done));
                 }
-                stored = tradesStored && (result || liquidityBatch.Length == 0);
+                stored = tradesStored && (result || liquidityBatch.Length == 0 || !_liquidityRepository.HasStorage);
                 if (stored)
                 {
                     foreach (var retry in retryBlocks)

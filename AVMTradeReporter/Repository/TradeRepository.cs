@@ -93,6 +93,9 @@ namespace AVMTradeReporter.Repository
 
             Console.WriteLine($"Template created: {response.IsValidResponse}");
         }
+        /// <summary>False when no Elasticsearch is configured: trades are then processed (pools, OHLC) but never persisted.</summary>
+        public bool HasStorage => _elasticClient != null;
+
         public async Task<bool> StoreTradesAsync(Trade[] trades, CancellationToken cancellationToken)
         {
             if (!trades.Any())

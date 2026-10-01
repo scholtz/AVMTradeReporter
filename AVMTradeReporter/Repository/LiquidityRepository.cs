@@ -79,6 +79,9 @@ namespace AVMTradeReporter.Repository
             Console.WriteLine($"Template created: {response.IsValidResponse}");
         }
 
+        /// <summary>False when no Elasticsearch is configured: liquidity events are processed but never persisted.</summary>
+        public bool HasStorage => _elasticClient != null;
+
         public async Task<bool> StoreLiquidityUpdatesAsync(Liquidity[] items, CancellationToken cancellationToken)
         {
             if (!items.Any())

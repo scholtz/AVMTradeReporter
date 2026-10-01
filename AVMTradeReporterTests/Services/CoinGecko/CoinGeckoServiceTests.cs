@@ -32,7 +32,10 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             public List<Liquidity> Liquidity { get; } = new();
             public bool IsAvailable { get; set; } = true;
             public Exception? Failure { get; set; }
+            public TimeSpan QueryDelay { get; set; }
             public int TradeCalls;
+            private int _inFlight;
+            public int MaxInFlight;
             public int LiquidityCalls;
             public List<(ulong Lo, ulong Hi, int Size)> TradeQueries { get; } = new();
 
@@ -41,15 +44,29 @@ namespace AVMTradeReporterTests.Services.CoinGecko
                 Interlocked.Increment(ref TradeCalls);
                 if (Failure != null) throw Failure;
                 lock (TradeQueries) TradeQueries.Add((lo, hi, size));
-                IReadOnlyList<Trade> result = Trades.Where(t => t.BlockId >= lo && t.BlockId <= hi).OrderBy(t => t.BlockId).Take(size).ToList();
-                return Task.FromResult(result);
+                return RunAsync(() => (IReadOnlyList<Trade>)Trades.Where(t => t.BlockId >= lo && t.BlockId <= hi).OrderBy(t => t.BlockId).Take(size).ToList());
             }
 
             public Task<IReadOnlyList<Liquidity>> GetLiquidityAsync(ulong lo, ulong hi, int size, CancellationToken cancellationToken)
             {
                 Interlocked.Increment(ref LiquidityCalls);
-                IReadOnlyList<Liquidity> result = Liquidity.Where(t => t.BlockId >= lo && t.BlockId <= hi).OrderBy(t => t.BlockId).Take(size).ToList();
-                return Task.FromResult(result);
+                return RunAsync(() => (IReadOnlyList<Liquidity>)Liquidity.Where(t => t.BlockId >= lo && t.BlockId <= hi).OrderBy(t => t.BlockId).Take(size).ToList());
+            }
+
+            private async Task<T> RunAsync<T>(Func<T> produce)
+            {
+                var now = Interlocked.Increment(ref _inFlight);
+                int seen;
+                while ((seen = MaxInFlight) < now && Interlocked.CompareExchange(ref MaxInFlight, now, seen) != seen) { }
+                try
+                {
+                    if (QueryDelay > TimeSpan.Zero) await Task.Delay(QueryDelay);
+                    return produce();
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref _inFlight);
+                }
             }
         }
 
@@ -338,6 +355,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             _tracker.Latest = new IndexedBlock(1000, 1);
             _source.IsAvailable = false;
             Assert.That((await Create().GetEventsJsonAsync(1, 2, default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
+            Assert.That((await Create().GetLatestBlockAsync(default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable), "a watermark without event storage would mislead the consumer");
         }
 
         [Test]
@@ -645,6 +663,73 @@ namespace AVMTradeReporterTests.Services.CoinGecko
 
             Assert.That(Events(await service.GetEventsJsonAsync(10, 10, default)), Has.Length.EqualTo(50));
             Assert.That(calls, Is.LessThanOrEqualTo(2), "one snapshot load (published protocol + scam list), not one per event");
+        }
+
+        [Test]
+        public async Task Events_EmptyPoolCache_IsTransient_NotCachedAsNoEvents()
+        {
+            // the pod's pool cache failed to initialise / is still warming: every pool looks unknown
+            _pools = new MockPoolRepository();
+            _source.Trades.Add(Swap("OLD", 10, 1, 0)); // older than UnknownPoolGraceSeconds
+            var service = Create(c => c.PoolSnapshotSeconds = 1);
+
+            Assert.That((await service.GetEventsJsonAsync(10, 10, default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
+            Assert.That((await service.GetPairAsync(PoolAppId.ToString(), default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
+
+            await _pools.StorePoolAsync(Pool(PoolAppId, "POOLADDR", 0, 31566704));
+            await Task.Delay(1200);
+            Assert.That(Events(await service.GetEventsJsonAsync(10, 10, default)), Has.Length.EqualTo(1), "nothing partial was cached");
+        }
+
+        [Test]
+        public async Task Events_BisectionFanOutIsBounded()
+        {
+            for (ulong b = 100; b < 164; b++) _source.Trades.Add(Swap("T" + b, b, 1, 0));
+            _source.QueryDelay = TimeSpan.FromMilliseconds(5);
+            _tracker.Latest = new IndexedBlock(5000, 1);
+            var service = Create(c => { c.ElasticPageSize = 1; c.MaxParallelQueriesPerRange = 2; });
+
+            Assert.That(Events(await service.GetEventsJsonAsync(100, 163, default)), Has.Length.EqualTo(64));
+            Assert.That(_source.MaxInFlight, Is.LessThanOrEqualTo(2));
+            Assert.That(_source.TradeCalls, Is.GreaterThan(64), "the range really was bisected");
+        }
+
+        [Test]
+        public async Task ForcedRefreshForAnUnknownId_DoesNotRetryAlgoLookups()
+        {
+            // one published pool whose decimals cannot be resolved -> the asset repository is asked on the regular refresh only
+            var pool = Pool(901, "UNRESOLVED", 0, 12345);
+            pool.AssetADecimals = null;
+            pool.AssetBDecimals = null;
+            await _pools.StorePoolAsync(pool);
+            var service = Create(c => c.PoolSnapshotSeconds = 3600);
+            await service.GetPairAsync("901", default);
+            var lookups = _assets.Invocations.Count(i => i.Method.Name == nameof(IAssetRepository.GetAssetAsync) && (ulong)i.Arguments[0] == 12345);
+
+            await Task.Delay(5200); // past MissingPoolRefreshInterval
+            Assert.That((await service.GetPairAsync("777777", default)).Outcome, Is.EqualTo(CoinGeckoOutcome.NotFound));
+
+            Assert.That(_assets.Invocations.Count(i => i.Method.Name == nameof(IAssetRepository.GetAssetAsync) && (ulong)i.Arguments[0] == 12345), Is.EqualTo(lookups));
+        }
+
+        [Test]
+        public async Task WarmUp_BuildsTheSnapshot_SoTheFirstRequestDoesNotLoadPools()
+        {
+            var counting = new Mock<IPoolRepository>();
+            var calls = 0;
+            counting.Setup(p => p.GetPoolsAsync(It.IsAny<ulong?>(), It.IsAny<ulong?>(), It.IsAny<string?>(), It.IsAny<DEXProtocol?>(), It.IsAny<int>(), It.IsAny<PoolOrderBy?>(), It.IsAny<SortDirection>(), It.IsAny<CancellationToken>()))
+                .Returns((ulong? _, ulong? _, string? _, DEXProtocol? protocol, int _, PoolOrderBy? _, SortDirection _, CancellationToken _) =>
+                {
+                    Interlocked.Increment(ref calls);
+                    return Task.FromResult(protocol == DEXProtocol.Biatec ? new List<PoolModel> { Pool(PoolAppId, "POOLADDR", 0, 31566704) } : new List<PoolModel>());
+                });
+            var service = new CoinGeckoService(Options.Create(_config), _tracker, _source, counting.Object, _assets.Object, new ServiceCollection().BuildServiceProvider(), NullLogger<CoinGeckoService>.Instance);
+
+            await service.WarmUpAsync(default);
+            var afterWarmUp = calls;
+            Assert.That(afterWarmUp, Is.GreaterThan(0));
+            Assert.That((await service.GetPairAsync(PoolAppId.ToString(), default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Ok));
+            Assert.That(calls, Is.EqualTo(afterWarmUp));
         }
 
         [Test]

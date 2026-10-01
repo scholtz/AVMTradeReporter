@@ -524,5 +524,18 @@ namespace AVMTradeReporter.Model.Configuration
         /// few seconds and then fail with a retryable 503. Cached ranges are not limited.
         /// </summary>
         public int MaxConcurrentEventQueries { get; set; } = 4;
+
+        /// <summary>
+        /// Elasticsearch queries one <c>/events</c> range may run in parallel while it bisects a dense block range.
+        /// </summary>
+        public int MaxParallelQueriesPerRange { get; set; } = 8;
+
+        /// <summary>
+        /// On startup the forward indexer compares its persisted round with the last mirrored latest-block watermark.
+        /// <c>Indexer.Round</c> is persisted when a block task starts, so a crash leaves up to <c>MaxConcurrentTasks</c>
+        /// blocks unstored but "passed"; when the gap is at most this many blocks the indexer rewinds to re-process them
+        /// (trade / liquidity stores are idempotent). A bigger gap is left alone (another indexer, a deliberate reset).
+        /// </summary>
+        public int MaxStartupRewindBlocks { get; set; } = 50;
     }
 }

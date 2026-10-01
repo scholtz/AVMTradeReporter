@@ -39,6 +39,9 @@ namespace AVMTradeReporter.Services.CoinGecko
 
         /// <summary>The UTF-8 JSON body of the <c>/events</c> response (cached bytes are served as they are).</summary>
         Task<CoinGeckoResult<byte[]>> GetEventsJsonAsync(ulong fromBlock, ulong toBlock, CancellationToken cancellationToken);
+
+        /// <summary>Builds the pair snapshot once at startup, before the pod serves traffic (CLAUDE.md "HA deploys").</summary>
+        Task WarmUpAsync(CancellationToken cancellationToken);
     }
 
     /// <summary>
@@ -121,12 +124,27 @@ namespace AVMTradeReporter.Services.CoinGecko
         public async Task<CoinGeckoResult<CoinGeckoLatestBlockResponse>> GetLatestBlockAsync(CancellationToken cancellationToken)
         {
             if (!_config.Enabled) return CoinGeckoResult<CoinGeckoLatestBlockResponse>.Fail(CoinGeckoOutcome.Unavailable, "disabled");
+            // Without event storage the watermark means nothing to a consumer: /events cannot be answered either.
+            if (!_source.IsAvailable) return CoinGeckoResult<CoinGeckoLatestBlockResponse>.Fail(CoinGeckoOutcome.Unavailable, "Event storage is not available");
             var latest = await _tracker.GetLatestAsync(cancellationToken);
             if (latest == null) return CoinGeckoResult<CoinGeckoLatestBlockResponse>.Fail(CoinGeckoOutcome.Unavailable, "The indexer has not completed a block yet");
             return CoinGeckoResult<CoinGeckoLatestBlockResponse>.Ok(new CoinGeckoLatestBlockResponse
             {
                 Block = new CoinGeckoBlock { BlockNumber = latest.Round, BlockTimestamp = latest.UnixTimestamp },
             });
+        }
+
+        public async Task WarmUpAsync(CancellationToken cancellationToken)
+        {
+            if (!_config.Enabled) return;
+            try
+            {
+                await GetSnapshotAsync(forceIfOlderThan: null, cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex, "CoinGecko: pair snapshot warm-up failed - the integration answers 503 until a refresh succeeds");
+            }
         }
 
         // ---------------------------------------------------------------- asset
@@ -245,10 +263,12 @@ namespace AVMTradeReporter.Services.CoinGecko
             // Known and deliberately not published (scam, malformed): no point in rebuilding the snapshot to look for it again.
             if (snapshot.Excluded.Contains(appId)) return new PairLookup(null, false, true);
 
-            // A pool created after the snapshot was taken (or one whose decimals could not be read): refresh once
-            // (rate limited) before answering "unknown".
+            // A pool created after the snapshot was taken: refresh once (rate limited, in-memory only) before answering "unknown".
             snapshot = await GetSnapshotAsync(MissingPoolRefreshInterval, cancellationToken);
             if (snapshot.Pairs.TryGetValue(appId, out pair)) return new PairLookup(pair, false);
+            // No published pair at all means the pool cache is empty or still warming (PoolRepository.InitializeAsync failed on
+            // this pod): every pool would look unknown and every range would be cached as "no events". Transient, never final.
+            if (snapshot.Pairs.Count == 0) return new PairLookup(null, true);
             // Undescribable pools are retried for a while (a slow algod, a cold asset cache); a pool that stays undescribable
             // is then skipped instead of stalling the whole integration at its first block for ever.
             var transient = snapshot.Unresolved.TryGetValue(appId, out var since)
@@ -261,6 +281,10 @@ namespace AVMTradeReporter.Services.CoinGecko
         private async Task<PoolSnapshot> GetSnapshotAsync(TimeSpan? forceIfOlderThan, CancellationToken cancellationToken)
         {
             var maxAge = forceIfOlderThan ?? TimeSpan.FromSeconds(Math.Max(1, _config.PoolSnapshotSeconds));
+            // A forced refresh (somebody asked for an id the snapshot lacks - possibly an anonymous caller probing random ids)
+            // only re-reads the in-memory pool cache; the algod lookups behind an unresolved pool are retried on the regular
+            // PoolSnapshotSeconds cadence alone, so probing cannot multiply them.
+            var retryUnresolved = forceIfOlderThan == null;
             var snapshot = _snapshot;
             if (_time.GetUtcNow() - snapshot.LoadedAt < maxAge) return snapshot;
 
@@ -291,13 +315,27 @@ namespace AVMTradeReporter.Services.CoinGecko
                         }
                         assetIds.Add(pool.AssetIdA!.Value);
                         assetIds.Add(pool.AssetIdB!.Value);
+                        if (snapshot.Pairs.TryGetValue(pool.PoolAppId, out var known))
+                        {
+                            // decimals never change; only the fee is re-read
+                            pairs[pool.PoolAppId] = known with { LpFee = pool.LPFee };
+                            continue;
+                        }
+                        if (!retryUnresolved && snapshot.Unresolved.TryGetValue(pool.PoolAppId, out var seenAt))
+                        {
+                            unresolved[pool.PoolAppId] = seenAt;
+                            continue;
+                        }
                         var pair = await ToPairInfoAsync(pool, cancellationToken);
                         if (pair != null) pairs[pair.AppId] = pair;
+                        else if (snapshot.Unresolved.TryGetValue(pool.PoolAppId, out var first))
+                        {
+                            unresolved[pool.PoolAppId] = first; // keep the time it was first seen undescribable
+                        }
                         else
                         {
-                            // keep the time it was first seen undescribable across snapshot refreshes
-                            unresolved[pool.PoolAppId] = snapshot.Unresolved.TryGetValue(pool.PoolAppId, out var first) ? first : now;
-                            _logger.LogWarning("CoinGecko: pool {appId} cannot be described (asset decimals unknown), unresolved since {since}", pool.PoolAppId, unresolved[pool.PoolAppId]);
+                            unresolved[pool.PoolAppId] = now;
+                            _logger.LogWarning("CoinGecko: pool {appId} cannot be described (asset decimals unknown); retried every {seconds} s, skipped after {minutes} min", pool.PoolAppId, _config.PoolSnapshotSeconds, _config.UnresolvedPoolGraceMinutes);
                         }
                     }
                 }
@@ -425,7 +463,7 @@ namespace AVMTradeReporter.Services.CoinGecko
         {
             var tooMany = _eventsCache.TryGetValue("too-many:" + fromBlock + ":" + toBlock, out string? knownTooMany) ? knownTooMany : null;
             if (tooMany != null) throw new TooManyEventsException(tooMany);
-            var budget = new EventBudget(_config.MaxEventsPerRequest);
+            using var budget = new EventBudget(_config.MaxEventsPerRequest, _config.MaxParallelQueriesPerRange);
             var tradesTask = FetchBisectingAsync((lo, hi, size) => _source.GetTradesAsync(lo, hi, size, cancellationToken), fromBlock, toBlock, budget);
             var liquidityTask = FetchBisectingAsync((lo, hi, size) => _source.GetLiquidityAsync(lo, hi, size, cancellationToken), fromBlock, toBlock, budget);
             try
@@ -495,11 +533,22 @@ namespace AVMTradeReporter.Services.CoinGecko
             return events;
         }
 
-        private sealed class EventBudget
+        private sealed class EventBudget : IDisposable
         {
             private int _remaining;
             private readonly int _limit;
-            public EventBudget(int limit) { _limit = limit; _remaining = limit; }
+
+            /// <summary>Caps the Elasticsearch queries one range runs at once: bisecting a dense range doubles the fan-out per level.</summary>
+            public SemaphoreSlim Gate { get; }
+
+            public EventBudget(int limit, int maxParallelQueries)
+            {
+                _limit = limit;
+                _remaining = limit;
+                Gate = new SemaphoreSlim(Math.Max(1, maxParallelQueries));
+            }
+
+            public void Dispose() => Gate.Dispose();
             public void Consume(int count)
             {
                 if (Interlocked.Add(ref _remaining, -count) < 0) ThrowIfExceeded();
@@ -528,7 +577,16 @@ namespace AVMTradeReporter.Services.CoinGecko
             var pageSize = Math.Clamp(_config.ElasticPageSize, 1, 10000);
             var singleBlockSize = 10000; // index.max_result_window default; one block never holds this many DEX events
             var size = lo == hi ? singleBlockSize : pageSize;
-            var page = await query(lo, hi, size);
+            IReadOnlyList<T> page;
+            await budget.Gate.WaitAsync();
+            try
+            {
+                page = await query(lo, hi, size);
+            }
+            finally
+            {
+                budget.Gate.Release();
+            }
             if (page.Count < size)
             {
                 budget.Consume(page.Count);

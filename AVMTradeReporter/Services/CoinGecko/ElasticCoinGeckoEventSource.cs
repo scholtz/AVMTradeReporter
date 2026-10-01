@@ -3,7 +3,6 @@ using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Models.Data.Enums;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Core.Search;
-using Elastic.Clients.Elasticsearch.QueryDsl;
 using Microsoft.Extensions.Options;
 
 namespace AVMTradeReporter.Services.CoinGecko
@@ -27,53 +26,44 @@ namespace AVMTradeReporter.Services.CoinGecko
     /// Elasticsearch implementation. Filters only on <c>blockId</c> (a numeric field in every mapping variant), the
     /// confirmed state and the protocol, and sorts only by <c>blockId</c>: sorting or searching-after on
     /// <c>txId</c> would fail on the production "trades" index, whose string fields predate the index template
-    /// and are dynamically mapped as text (see <c>TradeQueryService.AddDualKeywordTerm</c>).
+    /// and are dynamically mapped as text (see <see cref="ElasticKeywordQuery"/>).
     /// </summary>
     public sealed class ElasticCoinGeckoEventSource : ICoinGeckoEventSource
     {
         private readonly ElasticsearchClient? _elastic;
-        private readonly IReadOnlyList<DEXProtocol> _protocols;
+        private readonly string[] _protocols;
 
         public ElasticCoinGeckoEventSource(IServiceProvider services, IOptions<AppConfiguration> options)
         {
             _elastic = services.GetService<ElasticsearchClient>();
-            _protocols = options.Value.CoinGecko.PublishedProtocols;
+            _protocols = options.Value.CoinGecko.PublishedProtocols.Select(p => p.ToString()).ToArray();
         }
 
         public bool IsAvailable => _elastic != null;
 
-        public async Task<IReadOnlyList<Trade>> GetTradesAsync(ulong lo, ulong hi, int size, CancellationToken cancellationToken)
-        {
-            if (_elastic == null) throw new InvalidOperationException("Elasticsearch is not configured");
-            var response = await _elastic.SearchAsync<Trade>(s => s
-                .Indices("trades")
-                .Size(size)
-                .TrackTotalHits(new TrackHits(false))
-                .Sort(so => so.Field(f => f.Field(t => t.BlockId).Order(SortOrder.Asc)))
-                .Query(q => q.Bool(b => b.Filter(
-                    f => f.Range(r => r.Number(n => n.Field(t => t.BlockId).Gte(lo).Lte(hi))),
-                    f => ElasticKeywordQuery.DualKeywordTerms(f, "tradeState", new[] { nameof(TxState.Confirmed) }),
-                    f => ElasticKeywordQuery.DualKeywordTerms(f, "protocol", _protocols.Select(p => p.ToString()))))),
-                cancellationToken);
-            if (!response.IsValidResponse) throw new InvalidOperationException($"Elasticsearch trades query failed: {response.DebugInformation}");
-            return response.Documents.ToList();
-        }
+        public Task<IReadOnlyList<Trade>> GetTradesAsync(ulong lo, ulong hi, int size, CancellationToken cancellationToken)
+            => SearchRangeAsync<Trade>("trades", "tradeState", t => t.BlockId, lo, hi, size, cancellationToken);
 
-        public async Task<IReadOnlyList<Liquidity>> GetLiquidityAsync(ulong lo, ulong hi, int size, CancellationToken cancellationToken)
+        public Task<IReadOnlyList<Liquidity>> GetLiquidityAsync(ulong lo, ulong hi, int size, CancellationToken cancellationToken)
+            => SearchRangeAsync<Liquidity>("liquidity", "txState", l => l.BlockId, lo, hi, size, cancellationToken);
+
+        private async Task<IReadOnlyList<T>> SearchRangeAsync<T>(string index, string stateField, Func<T, ulong> blockOf, ulong lo, ulong hi, int size, CancellationToken cancellationToken)
         {
             if (_elastic == null) throw new InvalidOperationException("Elasticsearch is not configured");
-            var response = await _elastic.SearchAsync<Liquidity>(s => s
-                .Indices("liquidity")
+            var response = await _elastic.SearchAsync<T>(s => s
+                .Indices(index)
                 .Size(size)
                 .TrackTotalHits(new TrackHits(false))
-                .Sort(so => so.Field(f => f.Field(t => t.BlockId).Order(SortOrder.Asc)))
+                .Sort(so => so.Field(f => f.Field("blockId").Order(SortOrder.Asc)))
                 .Query(q => q.Bool(b => b.Filter(
-                    f => f.Range(r => r.Number(n => n.Field(t => t.BlockId).Gte(lo).Lte(hi))),
-                    f => ElasticKeywordQuery.DualKeywordTerms(f, "txState", new[] { nameof(TxState.Confirmed) }),
-                    f => ElasticKeywordQuery.DualKeywordTerms(f, "protocol", _protocols.Select(p => p.ToString()))))),
+                    f => f.Range(r => r.Number(n => n.Field("blockId").Gte(lo).Lte(hi))),
+                    f => ElasticKeywordQuery.DualKeywordTerms(f, stateField, new[] { nameof(TxState.Confirmed) }),
+                    f => ElasticKeywordQuery.DualKeywordTerms(f, "protocol", _protocols)))),
                 cancellationToken);
-            if (!response.IsValidResponse) throw new InvalidOperationException($"Elasticsearch liquidity query failed: {response.DebugInformation}");
-            return response.Documents.Where(d => d.BlockId >= lo && d.BlockId <= hi).ToList();
+            if (!response.IsValidResponse) throw new InvalidOperationException($"Elasticsearch {index} query failed: {response.DebugInformation}");
+            // The bisection in CoinGeckoService relies on every document being inside [lo, hi]; keep that true whatever the
+            // index mapping does with the range query.
+            return response.Documents.Where(d => blockOf(d) >= lo && blockOf(d) <= hi).ToList();
         }
     }
 }
