@@ -33,14 +33,18 @@ namespace AVMTradeReporter.Services.CoinGecko
                 var taken = new HashSet<(ulong, uint)>();
 
                 ulong maxReal = 0;
+                var nextFree = new Dictionary<ulong, uint>(); // per transaction: the first event index after the stamped ones
                 foreach (var i in real.OrderBy(i => keys[i].TxnIndex!.Value)
-                             .ThenBy(i => keys[i].EventIndex ?? uint.MaxValue)
+                             .ThenBy(i => keys[i].EventIndex ?? uint.MaxValue) // stamped events first, unstamped ones after them
                              .ThenBy(i => keys[i].Kind)
                              .ThenBy(i => keys[i].TieBreak, StringComparer.Ordinal))
                 {
                     var txn = keys[i].TxnIndex!.Value;
-                    var ev = keys[i].EventIndex ?? 0;
+                    // a document with a known transaction but no event index takes the next free slot after the stamped
+                    // events of that transaction (the sort above guarantees those were placed first)
+                    var ev = keys[i].EventIndex ?? nextFree.GetValueOrDefault(txn);
                     while (!taken.Add((txn, ev))) ev++;
+                    nextFree[txn] = Math.Max(nextFree.GetValueOrDefault(txn), ev + 1);
                     result[i] = new EventPositionPair(txn, ev);
                     if (txn > maxReal) maxReal = txn;
                 }

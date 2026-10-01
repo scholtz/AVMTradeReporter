@@ -50,6 +50,16 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         }
 
         [Test]
+        public void KnownTransactionWithoutEventIndex_TakesTheSlotAfterTheStampedEvents()
+        {
+            var keys = new[] { new EventOrderKey(10, 5, null, "T", "T-unstamped", 0), Real(10, 5, 0, "T"), Real(10, 5, 1, "T") };
+            var positions = CoinGeckoEventOrdering.AssignPositions(keys);
+            Assert.That(positions[1], Is.EqualTo(new EventPositionPair(5, 0)));
+            Assert.That(positions[2], Is.EqualTo(new EventPositionPair(5, 1)));
+            Assert.That(positions[0], Is.EqualTo(new EventPositionPair(5, 2)), "after the stamped ones, not colliding with event 0");
+        }
+
+        [Test]
         public void Positions_AreScopedPerBlock()
         {
             var positions = CoinGeckoEventOrdering.AssignPositions(new[] { Legacy(10, "X", "X1"), Legacy(11, "X", "X1"), Real(12, 2, 0) });

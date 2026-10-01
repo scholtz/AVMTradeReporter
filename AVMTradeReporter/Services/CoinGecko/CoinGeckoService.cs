@@ -80,7 +80,7 @@ namespace AVMTradeReporter.Services.CoinGecko
         private Task<PoolSnapshot>? _rebuild;
         private readonly string _protocolFingerprint;
         private readonly SemaphoreSlim _computeGate;
-        private volatile PoolSnapshot _snapshot = new(new Dictionary<ulong, PairInfo>(), new Dictionary<ulong, DateTimeOffset>(), new HashSet<ulong>(), new HashSet<ulong>(), DateTimeOffset.MinValue, DateTimeOffset.MinValue);
+        private volatile PoolSnapshot _snapshot = new(new Dictionary<ulong, PairInfo>(), new Dictionary<ulong, DateTimeOffset>(), new HashSet<ulong>(), new HashSet<ulong>(), DateTimeOffset.MinValue, DateTimeOffset.MinValue, true);
 
         /// <param name="Pairs">Published pairs by pool application id.</param>
         /// <param name="Unresolved">Published pools whose asset decimals could not be read right now (algod), with the time they were first seen so. Always transient: the assets of a live pool exist; only a destroyed-asset tombstone is permanent and lands in <paramref name="Excluded"/>.</param>
@@ -88,7 +88,8 @@ namespace AVMTradeReporter.Services.CoinGecko
         /// <param name="Excluded">Pools the repository knows but that must never be published (scam, malformed).</param>
         /// <param name="LoadedAt">When this snapshot was built (a forced, in-memory rebuild counts).</param>
         /// <param name="FullRefreshAt">When unresolved pools were last retried at the asset repository - the regular cadence, which forced rebuilds must not keep postponing.</param>
-        private sealed record PoolSnapshot(Dictionary<ulong, PairInfo> Pairs, Dictionary<ulong, DateTimeOffset> Unresolved, HashSet<ulong> AssetIds, HashSet<ulong> Excluded, DateTimeOffset LoadedAt, DateTimeOffset FullRefreshAt);
+        /// <param name="PoolCacheEmpty">The pool repository held no pool at all (any protocol): not initialised on this pod, or still warming.</param>
+        private sealed record PoolSnapshot(Dictionary<ulong, PairInfo> Pairs, Dictionary<ulong, DateTimeOffset> Unresolved, HashSet<ulong> AssetIds, HashSet<ulong> Excluded, DateTimeOffset LoadedAt, DateTimeOffset FullRefreshAt, bool PoolCacheEmpty);
 
         /// <summary>Pair lookup result: <see cref="Transient"/> means "exists but cannot be described right now - try again", not "unknown".</summary>
         /// <param name="Excluded">The pool is known but deliberately not published, so its events are skipped for good.</param>
@@ -278,9 +279,10 @@ namespace AVMTradeReporter.Services.CoinGecko
             // A pool created after the snapshot was taken: refresh once (rate limited, in-memory only) before answering "unknown".
             snapshot = await GetSnapshotAsync(MissingPoolRefreshInterval, cancellationToken);
             if (snapshot.Pairs.TryGetValue(appId, out pair)) return new PairLookup(pair, false);
-            // No published pair at all means the pool cache is empty or still warming (PoolRepository.InitializeAsync failed on
-            // this pod): every pool would look unknown and every range would be cached as "no events". Transient, never final.
-            if (snapshot.Pairs.Count == 0) return new PairLookup(null, true);
+            // An empty pool cache (PoolRepository.InitializeAsync failed on this pod, or still warming) makes every pool look
+            // unknown and would cache every range as "no events": transient, never final. A deployment that simply has no pool
+            // of a published protocol is a different thing - its lookups are honest 404s.
+            if (snapshot.PoolCacheEmpty) return new PairLookup(null, true);
             // An undescribable pool (asset decimals not readable right now) stays transient until it resolves: its events exist
             // and must not be cached away. The permanent case - a destroyed asset - is a tombstone and is in Excluded instead.
             // "Known" = the pool cache has the pool; only a pool the cache has never heard of can be a brand new one.
@@ -324,6 +326,7 @@ namespace AVMTradeReporter.Services.CoinGecko
             var now = _time.GetUtcNow();
             var published = _config.PublishedProtocols;
             var toResolve = new List<Pool>();
+            var anyPool = false;
 
             // One pass over the raw pool cache (no sort / copy as GetPoolsAsync would do - a forced refresh may run every
             // 5 s under probing). Scam-labelled pools are classified too: their stored swaps still carry the protocol they
@@ -334,6 +337,7 @@ namespace AVMTradeReporter.Services.CoinGecko
                 // that must land in Unresolved (held back) instead of looking like pools the cache never heard of
                 var pool = _poolRepository.GetCachedPool(address);
                 if (pool == null) continue;
+                anyPool = true;
                 if (!published.Contains(pool.Protocol) && pool.Protocol != DEXProtocol.Scam) continue;
                 if (!published.Contains(pool.Protocol) || !IsPublishable(pool))
                 {
@@ -385,7 +389,7 @@ namespace AVMTradeReporter.Services.CoinGecko
                         }
                     }
                 });
-            _snapshot = new PoolSnapshot(pairs, unresolved, assetIds, excluded, now, retryUnresolved ? now : snapshot.FullRefreshAt);
+            _snapshot = new PoolSnapshot(pairs, unresolved, assetIds, excluded, now, retryUnresolved ? now : snapshot.FullRefreshAt, !anyPool);
             return _snapshot;
         }
 

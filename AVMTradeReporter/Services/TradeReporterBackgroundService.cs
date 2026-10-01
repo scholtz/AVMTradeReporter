@@ -612,8 +612,9 @@ namespace AVMTradeReporter.Services
         }
 
         /// <summary>
-        /// Stores every closed pending block (one bulk call per index) and completes exactly the blocks whose documents
-        /// were acknowledged (the repositories answer true for "nothing to persist" - empty batch, no Elasticsearch).
+        /// Stores every closed pending block (one bulk call per index) and completes exactly the blocks whose documents are
+        /// settled - stored, or dropped after Elasticsearch rejected them on every attempt. While Elasticsearch cannot be
+        /// reached nothing is dropped and the watermark waits.
         /// </summary>
         private async Task FlushPendingAsync(CancellationToken cancellationToken)
         {
@@ -621,15 +622,14 @@ namespace AVMTradeReporter.Services
                 trades => _tradeRepository.StoreTradesAsync(trades, cancellationToken),
                 liquidity => _liquidityRepository.StoreLiquidityUpdatesAsync(liquidity, cancellationToken),
                 cancellationToken);
-            if (flush.StoreFailed)
+            if (flush.Unreachable)
             {
-                _logger.LogWarning("Storing pending documents failed; the closed block(s) stay pending and are retried with the next block");
+                _logger.LogWarning("Elasticsearch could not be reached; the closed block(s) stay pending and are retried with the next block");
             }
-            foreach (var (round, timestamp) in flush.Abandoned)
+            foreach (var txId in flush.AbandonedDocuments)
             {
-                // storage rejected the batch for the whole give-up window (see CLAUDE.md, known limits): lost, the watermark moves on
-                _logger.LogError("Documents of block {round} could not be stored for {minutes} minutes - abandoned, its events are lost", round, PendingBlockBatches.DefaultGiveUpAfter.TotalMinutes);
-                _blockTracker?.MarkCompleted(round, timestamp);
+                // see CLAUDE.md, known limits: a document storage rejects for good is lost, the watermark moves on
+                _logger.LogError("Document {txId} was rejected by Elasticsearch {attempts} times - dropped, its event is lost", txId, PendingBlockBatches.DefaultMaxRejections);
             }
             foreach (var (round, timestamp) in flush.Completed) _blockTracker?.MarkCompleted(round, timestamp);
         }

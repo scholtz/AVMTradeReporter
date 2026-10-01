@@ -79,13 +79,14 @@ namespace AVMTradeReporter.Repository
             Console.WriteLine($"Template created: {response.IsValidResponse}");
         }
 
-        public async Task<bool> StoreLiquidityUpdatesAsync(Liquidity[] items, CancellationToken cancellationToken)
+        /// <summary>
+        /// Persists the liquidity events (upsert by tx id) and reports, per document, what happened - see <see cref="StoreResult"/>.
+        /// </summary>
+        public async Task<StoreResult> StoreLiquidityUpdatesAsync(Liquidity[] items, CancellationToken cancellationToken)
         {
-            // Returns whether every given event is now persisted (or needs no persisting): true for an empty batch and
-            // for a deployment without Elasticsearch, so callers can treat false as "retry later" without special cases.
             if (!items.Any())
             {
-                return true;
+                return StoreResult.AllStored;
             }
 
             try
@@ -125,7 +126,7 @@ namespace AVMTradeReporter.Repository
                             await _poolRepository.UpdatePoolFromLiquidity(liquidity, cancellationToken);
                         }
                     }, cancellationToken);
-                    return true; // nothing to persist without Elasticsearch - the events were processed
+                    return StoreResult.AllStored; // nothing to persist without Elasticsearch - the events were processed
                 }
                 else
                 {
@@ -148,21 +149,25 @@ namespace AVMTradeReporter.Repository
                             }
                         }
 
-                        // Update pools for successfully stored liquidity updates
-                        if (successCount > 0)
+                        var successfulLiquidityUpdates = new List<Liquidity>();
+                        var rejectedIds = new List<string>();
+                        var bulkResponseItems = bulkResponse.Items.ToList();
+
+                        for (int i = 0; i < items.Length && i < bulkResponseItems.Count; i++)
                         {
-                            var successfulLiquidityUpdates = new List<Liquidity>();
-                            var bulkResponseItems = bulkResponse.Items.ToList();
-
-                            for (int i = 0; i < items.Length && i < bulkResponseItems.Count; i++)
+                            if (bulkResponseItems[i].IsValid)
                             {
-                                if (bulkResponseItems[i].IsValid)
-                                {
-                                    successfulLiquidityUpdates.Add(items[i]);
-                                }
+                                successfulLiquidityUpdates.Add(items[i]);
                             }
+                            else
+                            {
+                                rejectedIds.Add(items[i].TxId);
+                            }
+                        }
 
-                            // Update pools from confirmed liquidity updates in background
+                        // Update pools from confirmed liquidity updates in background
+                        if (successfulLiquidityUpdates.Count > 0)
+                        {
                             _ = Task.Run(async () =>
                             {
                                 foreach (var liquidity in successfulLiquidityUpdates)
@@ -172,22 +177,20 @@ namespace AVMTradeReporter.Repository
                             }, cancellationToken);
                         }
 
-                        // A partially rejected batch is not stored: the caller retries it (upserts by tx id are idempotent).
-                        return failureCount == 0;
+                        // Per document: the caller retries only the rejected ones (upserts by tx id are idempotent).
+                        return new StoreResult(true, rejectedIds);
                     }
                     else
                     {
                         _logger.LogError("LP Bulk indexing failed: {error}", bulkResponse.DebugInformation);
-                        return false;
+                        return StoreResult.Unreachable;
                     }
                 }
-
-                return false;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to bulk index LP");
-                return false;
+                return StoreResult.Unreachable;
             }
         }
 

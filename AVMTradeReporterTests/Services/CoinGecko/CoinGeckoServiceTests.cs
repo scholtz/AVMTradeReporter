@@ -734,6 +734,17 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         }
 
         [Test]
+        public async Task NoPoolOfAPublishedProtocol_IsAnHonest404_NotATransient503()
+        {
+            // a network with Pact/Tiny pools only: the pool cache is fine, there just is nothing to publish
+            _pools = new MockPoolRepository();
+            await _pools.StorePoolAsync(Pool(777, "PACTADDR", 0, 31566704, DEXProtocol.Pact));
+            var service = Create();
+            Assert.That((await service.GetPairAsync("777", default)).Outcome, Is.EqualTo(CoinGeckoOutcome.NotFound));
+            Assert.That((await service.GetPairAsync("1", default)).Outcome, Is.EqualTo(CoinGeckoOutcome.NotFound));
+        }
+
+        [Test]
         public async Task Events_BisectionFanOutIsBounded()
         {
             for (ulong b = 100; b < 164; b++) _source.Trades.Add(Swap("T" + b, b, 1, 0));

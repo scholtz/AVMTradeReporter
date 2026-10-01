@@ -380,9 +380,10 @@ purpose (CoinGecko's indexer cannot sign ARC-14). Rules that are easy to break:
   only a destroyed-asset tombstone (`IAssetRepository.IsDeletedAsync`) excludes a pool for good.
   `Protocols` is not pre-filled (config binding appends to a default list) - use
   `PublishedProtocols`.
-- More deliberate limits: a bulk store with rejected documents counts as failed and the block's
-  batch is retried with every flush for `PendingBlockBatches.DefaultGiveUpAfter` (10 min), then
-  abandoned (logged, the watermark moves on); `metadata.fees*In` uses the pool's *current* LP fee; synthetic
+- More deliberate limits: stores report per document (`StoreResult`); a document Elasticsearch
+  rejects is retried on the next flushes `PendingBlockBatches.DefaultMaxRejections` (3) times, then
+  dropped (logged, the block completes without it), while an *unreachable* Elasticsearch keeps
+  every batch pending indefinitely - the watermark waits; `metadata.fees*In` uses the pool's *current* LP fee; synthetic
   positions of documents indexed before `TxnIndex` existed are deterministic per block but not
   chronological; the Redis latest-block mirror never lowers a higher value (delete the key after
   an intentional re-index); uncached `/events` ranges are built at most

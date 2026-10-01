@@ -93,13 +93,14 @@ namespace AVMTradeReporter.Repository
 
             Console.WriteLine($"Template created: {response.IsValidResponse}");
         }
-        public async Task<bool> StoreTradesAsync(Trade[] trades, CancellationToken cancellationToken)
+        /// <summary>
+        /// Persists the trades (upsert by tx id) and reports, per document, what happened - see <see cref="StoreResult"/>.
+        /// </summary>
+        public async Task<StoreResult> StoreTradesAsync(Trade[] trades, CancellationToken cancellationToken)
         {
-            // Returns whether every given trade is now persisted (or needs no persisting): true for an empty batch and
-            // for a deployment without Elasticsearch, so callers can treat false as "retry later" without special cases.
             if (!trades.Any())
             {
-                return true;
+                return StoreResult.AllStored;
             }
 
             try
@@ -151,7 +152,7 @@ namespace AVMTradeReporter.Repository
                             await _ohlcRepository.UpdateFromTradeAsync(trade, cancellationToken);
                         }
                     }, cancellationToken);
-                    return true; // nothing to persist without Elasticsearch - the trades were processed
+                    return StoreResult.AllStored; // nothing to persist without Elasticsearch - the trades were processed
                 }
                 else
                 {
@@ -174,26 +175,30 @@ namespace AVMTradeReporter.Repository
                             }
                         }
 
-                        // Update pools for successfully stored trades
-                        if (successCount > 0)
-                        {
-                            var successfulTrades = new List<Trade>();
-                            var newlyCreatedTrades = new List<Trade>();
-                            var bulkResponseItems = bulkResponse.Items.ToList();
+                        var successfulTrades = new List<Trade>();
+                        var newlyCreatedTrades = new List<Trade>();
+                        var rejectedIds = new List<string>();
+                        var bulkResponseItems = bulkResponse.Items.ToList();
 
-                            for (int i = 0; i < trades.Length && i < bulkResponseItems.Count; i++)
+                        for (int i = 0; i < trades.Length && i < bulkResponseItems.Count; i++)
+                        {
+                            if (bulkResponseItems[i].IsValid)
                             {
-                                if (bulkResponseItems[i].IsValid)
+                                successfulTrades.Add(trades[i]);
+                                if (bulkResponseItems[i].Result == "created")
                                 {
-                                    successfulTrades.Add(trades[i]);
-                                    if (bulkResponseItems[i].Result == "created")
-                                    {
-                                        newlyCreatedTrades.Add(trades[i]);
-                                    }
+                                    newlyCreatedTrades.Add(trades[i]);
                                 }
                             }
+                            else
+                            {
+                                rejectedIds.Add(trades[i].TxId);
+                            }
+                        }
 
-                            // Update pools from all confirmed trades in background
+                        // Update pools from all confirmed trades in background
+                        if (successfulTrades.Count > 0)
+                        {
                             _ = Task.Run(async () =>
                             {
                                 foreach (var trade in successfulTrades)
@@ -201,34 +206,34 @@ namespace AVMTradeReporter.Repository
                                     await _poolRepository.UpdatePoolFromTrade(trade, cancellationToken);
                                 }
                             }, cancellationToken);
-
-                            // Update OHLC only for newly created trades to prevent double counting
-                            if (newlyCreatedTrades.Any())
-                            {
-                                _ = Task.Run(async () =>
-                                {
-                                    foreach (var trade in newlyCreatedTrades)
-                                    {
-                                        await _ohlcRepository.UpdateFromTradeAsync(trade, cancellationToken);
-                                    }
-                                }, cancellationToken);
-                            }
                         }
 
-                        // A partially rejected batch is not stored: the caller retries it (upserts by tx id are idempotent).
-                        return failureCount == 0;
+                        // Update OHLC only for newly created trades to prevent double counting
+                        if (newlyCreatedTrades.Any())
+                        {
+                            _ = Task.Run(async () =>
+                            {
+                                foreach (var trade in newlyCreatedTrades)
+                                {
+                                    await _ohlcRepository.UpdateFromTradeAsync(trade, cancellationToken);
+                                }
+                            }, cancellationToken);
+                        }
+
+                        // Per document: the caller retries only the rejected ones (upserts by tx id are idempotent).
+                        return new StoreResult(true, rejectedIds);
                     }
                     else
                     {
                         _logger.LogError("Bulk indexing failed: {error}", bulkResponse.DebugInformation);
-                        return false;
+                        return StoreResult.Unreachable;
                     }
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to bulk index trades");
-                return false;
+                return StoreResult.Unreachable;
             }
         }
 
