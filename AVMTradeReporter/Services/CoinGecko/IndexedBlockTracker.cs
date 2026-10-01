@@ -37,7 +37,7 @@ namespace AVMTradeReporter.Services.CoinGecko
     public sealed class IndexedBlockTracker : IIndexedBlockTracker
     {
         private readonly object _lock = new();
-        private readonly SortedDictionary<ulong, long> _pending = new();
+        private readonly SortedDictionary<ulong, long?> _pending = new();
         private readonly IDatabase? _redis;
         private readonly string _redisKey;
         private readonly TimeSpan _visibilityDelay;
@@ -86,7 +86,7 @@ namespace AVMTradeReporter.Services.CoinGecko
             lock (_lock)
             {
                 if (_watermark == null || round <= _watermark.Round) return; // not seeded (e.g. backward indexer) or already covered
-                _pending[round] = unixTimestamp ?? _watermark.UnixTimestamp;
+                _pending[round] = unixTimestamp; // null: the block's timestamp is unknown (it could not be fetched) - it advances the watermark but is never advertised
             }
             AdvancePending();
         }
@@ -100,8 +100,10 @@ namespace AVMTradeReporter.Services.CoinGecko
                 while (_pending.TryGetValue(_watermark.Round + 1, out var ts))
                 {
                     _pending.Remove(_watermark.Round + 1);
-                    _watermark = new IndexedBlock(_watermark.Round + 1, ts);
-                    advanced.Add(_watermark);
+                    _watermark = new IndexedBlock(_watermark.Round + 1, ts ?? _watermark.UnixTimestamp);
+                    // latest-block must carry the real timestamp of the advertised block: a block whose timestamp is
+                    // unknown is covered but not advertised - the next block with a timestamp is
+                    if (ts != null) advanced.Add(_watermark);
                 }
             }
             // The last advanced block is the new watermark; intermediate ones are obsolete once it is published.

@@ -149,12 +149,11 @@ namespace AVMTradeReporter.Services.CoinGecko
             var reserves = MapReserves(liquidity.A, liquidity.B, pair);
             if (dec0 is null || dec1 is null || reserves is null) return null;
             // Liquidity.A/B come from the global-state DELTA: a reserve that did not change (single-sided CLAMM deposit /
-            // withdrawal) is simply absent and stored as 0, which is indistinguishable from "unknown". Only "both known"
-            // (> 0) or a full withdrawal (exit leaving 0/0) is trustworthy; anything else would report a drained side.
-            // Swaps carry authoritative reserves, so skipping these join/exit events never hides volume.
-            var bothPositive = liquidity.A > 0 && liquidity.B > 0;
-            var drained = liquidity.Direction == LiquidityDirection.WithdrawLiquidity && liquidity.A == 0 && liquidity.B == 0;
-            if (!bothPositive && !drained) return null;
+            // withdrawal) is simply absent and stored as 0, which is indistinguishable from "unknown" - even for a
+            // withdrawal, where 0/0 could be a full drain or a partial exit whose deltas were not parsed. Only "both known"
+            // (> 0) is trustworthy; anything else would report a drained side. Swaps carry authoritative reserves, so
+            // skipping these join/exit events never hides volume.
+            if (liquidity.A == 0 || liquidity.B == 0) return null;
 
             var join = new CoinGeckoJoinExitEvent
             {

@@ -154,7 +154,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         }
 
         [Test]
-        public void Swap_WithBothReservesZero_IsSkipped_ButAnExitMayDrainThePool()
+        public void Swap_WithBothReservesZero_IsSkipped_AndSoIsAnExitWithUnknownReserves()
         {
             // reserves 0/0 after a swap = the processor could not read the pool state, not an empty pool
             var swap = Swap(Algo, Usdc, 1_000_000, 150_000);
@@ -162,7 +162,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             swap.B = 0;
             Assert.That(CoinGeckoMapper.TryMapSwap(swap, BiatecPair, new EventPositionPair(1, 0)), Is.Null);
 
-            // a withdrawal of the last liquidity legitimately leaves 0/0
+            // 0/0 after a withdrawal may be a full drain or a partial exit whose deltas were not parsed - not reportable
             var exit = new Liquidity
             {
                 Direction = LiquidityDirection.WithdrawLiquidity,
@@ -174,7 +174,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
                 Timestamp = Time,
                 LiquidityProvider = "LP",
             };
-            Assert.That(CoinGeckoMapper.TryMapLiquidity(exit, BiatecPair, new EventPositionPair(1, 0))!.Reserves.Asset0, Is.EqualTo("0"));
+            Assert.That(CoinGeckoMapper.TryMapLiquidity(exit, BiatecPair, new EventPositionPair(1, 0)), Is.Null);
         }
 
         [Test]

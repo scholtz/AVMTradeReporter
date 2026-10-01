@@ -421,7 +421,10 @@ namespace AVMTradeReporter.Services
                 // never stored. Indexer.StoredThrough (persisted with every increment and on shutdown) is where the data really
                 // ends: the watermark starts there and the indexer re-processes the gap (stores are idempotent upserts by tx id).
                 // A deliberate forward jump of Round must clear StoredThrough on the indexer document as well.
-                var (seedRound, rewind) = ResolveStartupSeed(Indexer.Round, Indexer.StoredThrough);
+                // The Redis mirror is written only after contiguous completion, so it is as trustworthy as StoredThrough and
+                // may even be ahead of it (blocks that completed after the last increment persisted StoredThrough).
+                var mirrored = await _blockTracker.GetLatestAsync(cancellationToken);
+                var (seedRound, rewind) = ResolveStartupSeed(Indexer.Round, Indexer.StoredThrough, mirrored?.Round);
                 if (rewind)
                 {
                     _logger.LogWarning("Indexer round {round} is ahead of the last fully stored block {storedThrough} (blocks were in flight when the previous run stopped) - re-processing {count} blocks",
@@ -445,16 +448,19 @@ namespace AVMTradeReporter.Services
         }
 
         private const int BlockFetchAttempts = 4;
+        private const int BlockProcessAttempts = 3;
 
         /// <summary>
-        /// Where the latest-block watermark (and, when it has to, the indexer) restarts: the persisted stored-through round
-        /// when it is below the round before the indexer's (the previous run died with blocks in flight), otherwise that round.
+        /// Where the latest-block watermark (and, when it has to, the indexer) restarts. "Stored through" is the better of
+        /// the persisted round and the Redis mirror; when it is below the round before the indexer's, the previous run died
+        /// with blocks in flight and the indexer rewinds. The watermark never starts below what Redis already advertises.
         /// </summary>
-        internal static (ulong SeedRound, bool Rewind) ResolveStartupSeed(ulong indexerRound, ulong? storedThrough)
+        internal static (ulong SeedRound, bool Rewind) ResolveStartupSeed(ulong indexerRound, ulong? storedThrough, ulong? mirroredRound)
         {
             var seedRound = indexerRound - 1;
-            if (storedThrough is { } stored && stored < seedRound) return (stored, true);
-            return (seedRound, false);
+            ulong? stored = storedThrough.HasValue && mirroredRound.HasValue ? Math.Max(storedThrough.Value, mirroredRound.Value) : storedThrough ?? mirroredRound;
+            if (stored is { } known && known < seedRound) return (known, true);
+            return (Math.Max(seedRound, mirroredRound ?? seedRound), false);
         }
 
         private IEnumerable<(string Name, Algorand.Algod.IDefaultApi Api)> Algods()
@@ -509,12 +515,29 @@ namespace AVMTradeReporter.Services
 
                 _pending.Open(blockId, block.Block.Timestamp != null ? Convert.ToInt64(block.Block.Timestamp) : null);
                 _logger.LogInformation("Found transactions: {txCount}", block.Block.Transactions?.Count ?? 0);
-                await _transactionProcessor.ProcessBlock(block, this, this, cancellationToken);
+                // A transaction whose processing threw (asset / pool lookup hiccup) would otherwise be missing from a block
+                // that then counts as completely stored; re-processing is idempotent (registrations are keyed by tx id).
+                var failed = await _transactionProcessor.ProcessBlock(block, this, this, cancellationToken);
+                for (var attempt = 2; failed > 0 && attempt <= BlockProcessAttempts; attempt++)
+                {
+                    _logger.LogWarning("{failed} transaction(s) of block {blockId} failed to process - processing the block again (attempt {attempt})", failed, blockId, attempt);
+                    await Task.Delay(TimeSpan.FromSeconds(attempt), cancellationToken);
+                    failed = await _transactionProcessor.ProcessBlock(block, this, this, cancellationToken);
+                }
+                if (failed > 0)
+                {
+                    _logger.LogError("{failed} transaction(s) of block {blockId} could not be processed after {attempts} attempts - their events are lost (see CLAUDE.md, known limits)", failed, blockId, BlockProcessAttempts);
+                }
                 _pending.Close(blockId);
 
                 await FlushPendingAsync(cancellationToken);
 
                 await _blockRepository.PublishToHub(Model.Data.Block.FromAlgorandBlock(block.Block), cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // shutdown: the block is not closed (it must not complete) - the restart re-processes it from StoredThrough
+                throw;
             }
             catch (Exception ex)
             {
@@ -532,15 +555,15 @@ namespace AVMTradeReporter.Services
         /// </summary>
         private async Task FlushPendingAsync(CancellationToken cancellationToken)
         {
-            var completed = await _pending.FlushAsync(
+            var flush = await _pending.FlushAsync(
                 async trades => await _tradeRepository.StoreTradesAsync(trades, cancellationToken) || !_tradeRepository.HasStorage,
                 async liquidity => await _liquidityRepository.StoreLiquidityUpdatesAsync(liquidity, cancellationToken) || !_liquidityRepository.HasStorage,
                 cancellationToken);
-            if (completed.Count == 0 && _pending.PendingCount > 0)
+            if (flush.StoreFailed)
             {
-                _logger.LogWarning("Storing pending documents failed; {count} block(s) stay pending and are retried with the next block", _pending.PendingCount);
+                _logger.LogWarning("Storing pending documents failed; the closed block(s) stay pending and are retried with the next block");
             }
-            foreach (var (round, timestamp) in completed) _blockTracker?.MarkCompleted(round, timestamp);
+            foreach (var (round, timestamp) in flush.Completed) _blockTracker?.MarkCompleted(round, timestamp);
         }
 
         public override async Task StopAsync(CancellationToken stoppingToken)

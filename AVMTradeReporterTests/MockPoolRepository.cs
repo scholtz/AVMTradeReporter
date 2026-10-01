@@ -20,6 +20,8 @@ namespace AVMTradeReporterTests
             return Task.CompletedTask;
         }
 
+        public AVMTradeReporter.Models.Data.Pool? GetCachedPool(string poolAddress) => pools.FirstOrDefault(p => p.PoolAddress == poolAddress);
+
         public Task<AVMTradeReporter.Models.Data.Pool?> GetPoolAsync(string poolAddress, CancellationToken cancellationToken)
         {
             var pool = pools.FirstOrDefault(p => p.PoolAddress == poolAddress);

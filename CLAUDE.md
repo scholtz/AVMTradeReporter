@@ -354,12 +354,15 @@ purpose (CoinGecko's indexer cannot sign ARC-14). Rules that are easy to break:
   amounts are base units of their asset. `priceNative` = asset1 per asset0; asset0/asset1 = pool
   asset A/B (immutable on-chain order).
 - **Known limits (deliberate, same data the website has):** a block that algod cannot return after
-  4 attempts, or whose per-transaction processing threw, is lost for the indexer itself, so it still
-  counts as processed - freezing `latest-block` for ever would be worse than that gap.
+  4 attempts, or a transaction whose processing still throws after the block was processed 3 times
+  (`ProcessBlock` returns the failure count; re-processing is idempotent), is lost for the indexer
+  itself, so the block still counts as processed - freezing `latest-block` for ever would be worse
+  than that gap (a block without a known timestamp is covered but never advertised).
   `Indexer.Round` is persisted when a block task *starts*, so after a crash it may sit above
   blocks that were never stored: the indexer therefore also persists `Indexer.StoredThrough`
   (the contiguous completed watermark, written with every increment and on graceful shutdown)
-  and on startup **rewinds** `Round` to `StoredThrough + 1` (`ResolveStartupSeed`; stores are
+  and on startup **rewinds** `Round` to `StoredThrough + 1` - or to the Redis mirror + 1 when that
+  is higher, it is written only after contiguous completion (`ResolveStartupSeed`; stores are
   idempotent upserts, so a replay only briefly double-counts pool volume until the next
   recompute and re-publishes those trades to the hub). A deliberate forward jump of `Round`
   must clear `StoredThrough` too. A published pool whose asset decimals cannot be read stays

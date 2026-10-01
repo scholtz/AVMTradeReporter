@@ -364,6 +364,8 @@ namespace AVMTradeReporter.Repository
             Console.WriteLine($"Pool template created: {response.IsValidResponse}");
         }
 
+        public Pool? GetCachedPool(string poolAddress) => _poolsCache.TryGetValue(poolAddress, out var pool) ? pool : null;
+
         public async Task<Pool?> GetPoolAsync(string poolAddress, CancellationToken cancellationToken)
         {
             await EnsureInitialized(cancellationToken);

@@ -70,12 +70,17 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         }
 
         [Test]
-        public async Task MissingTimestamp_CarriesThePreviousOne()
+        public async Task UnknownTimestamp_CoversTheBlock_ButAdvertisesOnlyTheNextKnownOne()
         {
+            // a block that could not be fetched has no timestamp: latest-block must never carry another block's timestamp
             var tracker = Create();
             tracker.Seed(100, 1000);
             tracker.MarkCompleted(101, null);
-            Assert.That(await tracker.GetLatestAsync(), Is.EqualTo(new IndexedBlock(101, 1000)));
+            Assert.That(await tracker.GetLatestAsync(), Is.EqualTo(new IndexedBlock(100, 1000)));
+            Assert.That(tracker.CompletedThrough!.Round, Is.EqualTo(101UL), "covered for the stored-through bookkeeping");
+
+            tracker.MarkCompleted(102, 1006);
+            Assert.That(await tracker.GetLatestAsync(), Is.EqualTo(new IndexedBlock(102, 1006)));
         }
 
         [Test]

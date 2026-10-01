@@ -61,8 +61,13 @@ namespace AVMTradeReporter.Services
             liquidityProcessors.Add(biatecLRem.AppArg.ToLower(), biatecLRem);
         }
 
-        public async Task ProcessBlock(CertifiedBlock block, ITradeService tradeService, ILiquidityService liquidityService, CancellationToken cancellationToken)
+        /// <summary>
+        /// Registers every swap / liquidity event of the block. Returns the number of transactions whose processing threw
+        /// (each is logged); the caller may process the block again - registrations are keyed by tx id, so that is idempotent.
+        /// </summary>
+        public async Task<int> ProcessBlock(CertifiedBlock block, ITradeService tradeService, ILiquidityService liquidityService, CancellationToken cancellationToken)
         {
+            var failed = 0;
             try
             {
                 Algorand.Algod.Model.Transactions.SignedTransaction? prevTx1 = null;
@@ -79,19 +84,30 @@ namespace AVMTradeReporter.Services
                             var txId = currTx.Tx.TxID();
                             await this.ProcessTransaction(currTx, prevTx1, prevTx2, block.Block, currTx.Tx.Group, txId, currTx.Tx.Sender, TxState.Confirmed, tradeService, liquidityService, cancellationToken, currTx.Tx is ApplicationNoopTransaction || currTx.Detail?.InnerTxns?.Count > 0 ? new EventPosition(index) : null); // only app calls (or anything with inner transactions) can emit swap / liquidity events
                         }
+                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                        {
+                            throw;
+                        }
                         catch (Exception exc)
                         {
-                            _logger.LogInformation("Error processing transaction {index} in block {block}: {error}", index, block.Block.Round, exc.Message);
+                            failed++;
+                            _logger.LogWarning(exc, "Error processing transaction {index} in block {block}", index, block.Block.Round);
                         }
                         prevTx2 = prevTx1;
                         prevTx1 = currTx;
                     }
                 }
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to process block {round}", block.Block?.Round);
+                failed++;
             }
+            return failed;
         }
 
         public async Task ProcessTransaction(

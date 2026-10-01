@@ -22,9 +22,10 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             batches.Close(10);
 
             Trade[]? stored = null;
-            var completed = await batches.FlushAsync(t => { stored = t; return Task.FromResult(true); }, Ok, default);
+            var flush = await batches.FlushAsync(t => { stored = t; return Task.FromResult(true); }, Ok, default);
 
-            Assert.That(completed, Is.EqualTo(new[] { (10UL, (long?)1000L) }));
+            Assert.That(flush.Completed, Is.EqualTo(new[] { (10UL, (long?)1000L) }));
+            Assert.That(flush.StoreFailed, Is.False);
             Assert.That(stored!.Select(t => t.TxId), Is.EqualTo(new[] { "A" }), "block 11's documents are not touched");
             Assert.That(batches.PendingCount, Is.EqualTo(1));
         }
@@ -37,17 +38,19 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             batches.Add(Trade(10, "A"));
             batches.Close(10);
 
-            Assert.That(await batches.FlushAsync(Fail, Ok, default), Is.Empty);
+            var failed = await batches.FlushAsync(Fail, Ok, default);
+            Assert.That(failed.Completed, Is.Empty);
+            Assert.That(failed.StoreFailed, Is.True);
             Assert.That(batches.PendingCount, Is.EqualTo(1));
 
             batches.Open(11, 1003);
             batches.Add(Trade(11, "B"));
             batches.Close(11);
             Trade[]? stored = null;
-            var completed = await batches.FlushAsync(t => { stored = t; return Task.FromResult(true); }, Ok, default);
+            var flush = await batches.FlushAsync(t => { stored = t; return Task.FromResult(true); }, Ok, default);
 
             Assert.That(stored!.Select(t => t.TxId).OrderBy(x => x), Is.EqualTo(new[] { "A", "B" }), "the failed batch is retried together with the new one");
-            Assert.That(completed.Select(c => c.Round).OrderBy(r => r), Is.EqualTo(new ulong[] { 10, 11 }));
+            Assert.That(flush.Completed.Select(c => c.Round).OrderBy(r => r), Is.EqualTo(new ulong[] { 10, 11 }));
             Assert.That(batches.PendingCount, Is.Zero);
         }
 
@@ -60,12 +63,12 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             batches.Add(Liq(10, "L"));
             batches.Close(10);
 
-            Assert.That(await batches.FlushAsync(Ok, Fail, default), Is.Empty, "liquidity failed");
+            Assert.That((await batches.FlushAsync(Ok, Fail, default)).StoreFailed, Is.True, "liquidity failed");
 
             var tradeStores = 0;
-            var completed = await batches.FlushAsync(t => { tradeStores++; return Task.FromResult(true); }, Ok, default);
+            var flush = await batches.FlushAsync(t => { tradeStores++; return Task.FromResult(true); }, Ok, default);
             Assert.That(tradeStores, Is.Zero, "trades were already acknowledged - not stored again");
-            Assert.That(completed.Select(c => c.Round), Is.EqualTo(new ulong[] { 10 }));
+            Assert.That(flush.Completed.Select(c => c.Round), Is.EqualTo(new ulong[] { 10 }));
         }
 
         [Test]
@@ -75,9 +78,9 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             batches.Open(10, 1000);
             batches.Close(10);
             var stores = 0;
-            var completed = await batches.FlushAsync(t => { stores++; return Task.FromResult(true); }, l => { stores++; return Task.FromResult(true); }, default);
+            var flush = await batches.FlushAsync(t => { stores++; return Task.FromResult(true); }, l => { stores++; return Task.FromResult(true); }, default);
             Assert.That(stores, Is.Zero);
-            Assert.That(completed, Is.EqualTo(new[] { (10UL, (long?)1000L) }));
+            Assert.That(flush.Completed, Is.EqualTo(new[] { (10UL, (long?)1000L) }));
         }
 
         [Test]
@@ -87,7 +90,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             batches.Open(10, null);
             batches.Drop(10);
             Assert.That(batches.PendingCount, Is.Zero);
-            Assert.That(await batches.FlushAsync(Ok, Ok, default), Is.Empty);
+            Assert.That((await batches.FlushAsync(Ok, Ok, default)).Completed, Is.Empty);
         }
 
         [Test]
@@ -100,10 +103,12 @@ namespace AVMTradeReporterTests.Services.CoinGecko
                 batches.Add(Trade(b, "T" + b));
                 batches.Close(b);
             }
-            var results = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() => batches.FlushAsync(async t => { await Task.Delay(5); return true; }, Ok, default))));
-            var rounds = results.SelectMany(r => r).Select(c => c.Round).ToList();
+            var stored = 0;
+            var results = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() => batches.FlushAsync(async t => { Interlocked.Add(ref stored, t.Length); await Task.Delay(5); return true; }, Ok, default))));
+            var rounds = results.SelectMany(r => r.Completed).Select(c => c.Round).ToList();
             Assert.That(rounds.Count, Is.EqualTo(20));
             Assert.That(rounds.Distinct().Count(), Is.EqualTo(20));
+            Assert.That(stored, Is.EqualTo(20), "serialized flushes never store a document twice");
         }
     }
 }

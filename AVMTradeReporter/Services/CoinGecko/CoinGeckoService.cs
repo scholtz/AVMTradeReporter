@@ -330,7 +330,9 @@ namespace AVMTradeReporter.Services.CoinGecko
             // had before the relabel, and "known but excluded" must not be confused with "not registered yet".
             foreach (var address in _poolRepository.GetAllPoolAddresses())
             {
-                var pool = await _poolRepository.GetPoolAsync(address, CancellationToken.None);
+                // the RAW entry: GetPoolAsync hides pools whose decimals are not enriched yet, which are exactly the ones
+                // that must land in Unresolved (held back) instead of looking like pools the cache never heard of
+                var pool = _poolRepository.GetCachedPool(address);
                 if (pool == null) continue;
                 if (!published.Contains(pool.Protocol) && pool.Protocol != DEXProtocol.Scam) continue;
                 if (!published.Contains(pool.Protocol) || !IsPublishable(pool))

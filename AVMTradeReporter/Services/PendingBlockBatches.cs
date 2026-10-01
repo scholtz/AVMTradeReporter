@@ -20,6 +20,11 @@ namespace AVMTradeReporter.Services
         }
 
         private readonly ConcurrentDictionary<ulong, Batch> _pending = new();
+        private readonly SemaphoreSlim _flushLock = new(1, 1);
+
+        /// <param name="Completed">Blocks whose documents are now all acknowledged.</param>
+        /// <param name="StoreFailed">A store call answered false: the closed batches stay pending for the next flush.</param>
+        public sealed record FlushResult(IReadOnlyList<(ulong Round, long? Timestamp)> Completed, bool StoreFailed);
 
         public void Add(Trade trade) => _pending.GetOrAdd(trade.BlockId, _ => new Batch()).Trades[trade.TxId] = trade;
 
@@ -43,33 +48,43 @@ namespace AVMTradeReporter.Services
         /// <summary>
         /// Stores the documents of every closed batch (one bulk call per index) and returns the blocks that are thereby
         /// completely stored. Each index's documents are forgotten as soon as that index acknowledged them; a block completes
-        /// only when both did. A failed store leaves the batches pending for the next flush.
+        /// only when both did. A failed store leaves the batches pending for the next flush. Flushes are serialized: block
+        /// tasks finish concurrently, and the second flush must only see what the first one left behind, not store (and
+        /// publish to the hub) the same documents twice.
         /// </summary>
-        public async Task<IReadOnlyList<(ulong Round, long? Timestamp)>> FlushAsync(
+        public async Task<FlushResult> FlushAsync(
             Func<Trade[], Task<bool>> storeTrades,
             Func<Liquidity[], Task<bool>> storeLiquidity,
             CancellationToken cancellationToken)
         {
-            var closed = _pending.Where(kv => kv.Value.Closed).ToArray();
-            if (closed.Length == 0) return Array.Empty<(ulong, long?)>();
-
-            var trades = closed.SelectMany(kv => kv.Value.Trades.Values).ToArray();
-            var tradesOk = trades.Length == 0 || await storeTrades(trades);
-            if (tradesOk) foreach (var kv in closed) kv.Value.Trades.Clear();
-
-            var liquidity = closed.SelectMany(kv => kv.Value.Liquidity.Values).ToArray();
-            var liquidityOk = liquidity.Length == 0 || await storeLiquidity(liquidity);
-            if (liquidityOk) foreach (var kv in closed) kv.Value.Liquidity.Clear();
-
-            if (!tradesOk || !liquidityOk || cancellationToken.IsCancellationRequested) return Array.Empty<(ulong, long?)>();
-
-            var completed = new List<(ulong, long?)>(closed.Length);
-            foreach (var kv in closed)
+            await _flushLock.WaitAsync(cancellationToken);
+            try
             {
-                // two flushes may race on the same batches (idempotent stores); each block is reported once
-                if (_pending.TryRemove(kv.Key, out var batch)) completed.Add((kv.Key, batch.Timestamp));
+                var closed = _pending.Where(kv => kv.Value.Closed).ToArray();
+                if (closed.Length == 0) return new FlushResult(Array.Empty<(ulong, long?)>(), false);
+
+                var trades = closed.SelectMany(kv => kv.Value.Trades.Values).ToArray();
+                var tradesOk = trades.Length == 0 || await storeTrades(trades);
+                if (tradesOk) foreach (var kv in closed) kv.Value.Trades.Clear();
+
+                var liquidity = closed.SelectMany(kv => kv.Value.Liquidity.Values).ToArray();
+                var liquidityOk = liquidity.Length == 0 || await storeLiquidity(liquidity);
+                if (liquidityOk) foreach (var kv in closed) kv.Value.Liquidity.Clear();
+
+                if (!tradesOk || !liquidityOk) return new FlushResult(Array.Empty<(ulong, long?)>(), true);
+                if (cancellationToken.IsCancellationRequested) return new FlushResult(Array.Empty<(ulong, long?)>(), false);
+
+                var completed = new List<(ulong, long?)>(closed.Length);
+                foreach (var kv in closed)
+                {
+                    if (_pending.TryRemove(kv.Key, out var batch)) completed.Add((kv.Key, batch.Timestamp));
+                }
+                return new FlushResult(completed, false);
             }
-            return completed;
+            finally
+            {
+                _flushLock.Release();
+            }
         }
     }
 }

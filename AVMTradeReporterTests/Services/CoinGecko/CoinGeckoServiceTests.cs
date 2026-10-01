@@ -154,7 +154,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
                 gate?.Wait(); // blocks only while the test holds the gate closed
                 return new[] { pool.PoolAddress };
             });
-            repo.Setup(p => p.GetPoolAsync(pool.PoolAddress, It.IsAny<CancellationToken>())).ReturnsAsync(pool);
+            repo.Setup(p => p.GetCachedPool(pool.PoolAddress)).Returns(pool);
             return (repo, loads);
         }
 
