@@ -30,8 +30,10 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         {
             // blocks 997..998 completed (and were advertised) after the last increment persisted StoredThrough = 996
             Assert.That(TradeReporterBackgroundService.ResolveStartupSeed(1000, 996, 998), Is.EqualTo((998UL, true, true)));
-            // the mirror alone (old indexer document) is enough
-            Assert.That(TradeReporterBackgroundService.ResolveStartupSeed(1000, null, 998), Is.EqualTo((998UL, true, true)));
+            // the mirror alone never rewinds: an operator who jumped Round forward cleared StoredThrough and the stale
+            // 6-hour mirror must not undo that (an old indexer document crashing in its first run is the price)
+            Assert.That(TradeReporterBackgroundService.ResolveStartupSeed(1000, null, 998), Is.EqualTo((999UL, false, false)));
+            Assert.That(TradeReporterBackgroundService.ResolveStartupSeed(60_000_000, null, 59_000_000), Is.EqualTo((59_999_999UL, false, false)));
             // another pod is ahead: advertise what Redis already advertises, do not rewind
             Assert.That(TradeReporterBackgroundService.ResolveStartupSeed(1000, 999, 1200), Is.EqualTo((1200UL, false, true)));
         }

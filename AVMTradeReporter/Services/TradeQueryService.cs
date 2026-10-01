@@ -126,7 +126,7 @@ namespace AVMTradeReporter.Services
                                             sh => sh.Terms(t => t.Field("poolAddress.keyword").Terms(poolValues))
                                         )
                                         .MinimumShouldMatch(1)),
-                                    m => AddDualKeywordTerm(m, "tradeState", "Confirmed")
+                                    m => ElasticKeywordQuery.DualKeywordTerm(m, "tradeState", "Confirmed")
                                 )
                             )
                         )
@@ -271,7 +271,7 @@ namespace AVMTradeReporter.Services
                         .Bool(b => b
                             .Must(
                                 m => m.Range(r => r.Date(dr => dr.Field(f => f.Timestamp).Gte(from.ToString("o")).Lt(to.ToString("o")))),
-                                m => AddDualKeywordTerm(m, "tradeState", "Confirmed")
+                                m => ElasticKeywordQuery.DualKeywordTerm(m, "tradeState", "Confirmed")
                             )
                         )
                     )
@@ -446,12 +446,12 @@ namespace AVMTradeReporter.Services
 
             if (!string.IsNullOrWhiteSpace(filter.Trader))
             {
-                must.Add(m => AddDualKeywordTerm(m, "trader", filter.Trader!));
+                must.Add(m => ElasticKeywordQuery.DualKeywordTerm(m, "trader", filter.Trader!));
             }
 
             if (!string.IsNullOrWhiteSpace(filter.PoolAddress))
             {
-                must.Add(m => AddDualKeywordTerm(m, "poolAddress", filter.PoolAddress!));
+                must.Add(m => ElasticKeywordQuery.DualKeywordTerm(m, "poolAddress", filter.PoolAddress!));
             }
 
             if (filter.PoolAppId.HasValue)
@@ -461,12 +461,12 @@ namespace AVMTradeReporter.Services
 
             if (filter.Protocol.HasValue)
             {
-                must.Add(m => AddDualKeywordTerm(m, "protocol", filter.Protocol.Value.ToString()));
+                must.Add(m => ElasticKeywordQuery.DualKeywordTerm(m, "protocol", filter.Protocol.Value.ToString()));
             }
 
             if (filter.TradeState.HasValue)
             {
-                must.Add(m => AddDualKeywordTerm(m, "tradeState", filter.TradeState.Value.ToString()));
+                must.Add(m => ElasticKeywordQuery.DualKeywordTerm(m, "tradeState", filter.TradeState.Value.ToString()));
             }
 
             AddUlongRangeClause(must, f => f.BlockId, filter.BlockFrom, filter.BlockTo);
@@ -480,17 +480,6 @@ namespace AVMTradeReporter.Services
                 ? query.MatchAll()
                 : query.Bool(b => b.Must(must.ToArray()));
         }
-
-        /// <summary>
-        /// Exact-match filter that works with both trade index mappings in the wild: production's
-        /// "trades" index predates the index template and was dynamically mapped (string fields are
-        /// text with a ".keyword" subfield), while fresh clusters (stage/testnet) use the template
-        /// (pure keyword fields with NO ".keyword" subfield). Querying only "field.keyword" silently
-        /// matches nothing on template-mapped clusters, so this ORs both variants — a term query on
-        /// an unmapped field is not an error, it just matches nothing.
-        /// </summary>
-        private static void AddDualKeywordTerm(QueryDescriptor<Trade> query, string field, string value)
-            => ElasticKeywordQuery.DualKeywordTerm(query, field, value);
 
         private static void AddEitherAssetClause(List<Action<QueryDescriptor<Trade>>> must, ulong assetId)
         {

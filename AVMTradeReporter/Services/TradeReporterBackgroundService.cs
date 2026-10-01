@@ -8,6 +8,7 @@ using AVMTradeReporter.Model.Configuration;
 using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Model.Valuation;
 using AVMTradeReporter.Models.Data;
+using AVMTradeReporter.Models.Data.Enums;
 using AVMTradeReporter.Repository;
 using AVMTradeReporter.Services.CoinGecko;
 using Microsoft.Extensions.Options;
@@ -188,9 +189,14 @@ namespace AVMTradeReporter.Services
                             _logger.LogWarning(ex, "{algod} failed waiting for round {round}, trying the next one", name, Indexer?.Round);
                         }
                     }
-                    // No algod at all: an outage. Back off (outer catch, one minute) with the round unchanged instead of
-                    // fetching, giving up on and skipping one block per iteration for as long as it lasts.
-                    if (!waited) throw new Exception($"No algod could wait for round {Indexer?.Round}");
+                    if (!waited)
+                    {
+                        // Every algod failed - an outage or a flaky proxy. A short pause with the round unchanged, instead of
+                        // fetching (and possibly giving up on) a block that may not exist yet.
+                        _logger.LogWarning("No algod could wait for round {round}; retrying shortly", Indexer?.Round);
+                        await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+                        continue;
+                    }
 #endif
                     // Clean up completed tasks
                     CleanupCompletedTasks();
@@ -264,7 +270,24 @@ namespace AVMTradeReporter.Services
         public async Task RegisterLiquidity(Liquidity liquidityUpdate, CancellationToken cancellationToken)
         {
             await PopulateLiquidityUsdAsync(liquidityUpdate, cancellationToken);
+            if (liquidityUpdate.Direction == LiquidityDirection.DepositLiquidity && (liquidityUpdate.A == 0 || liquidityUpdate.B == 0))
+            {
+                FillUnchangedReservesOfDeposit(liquidityUpdate, _poolRepository.GetCachedPool(liquidityUpdate.PoolAddress));
+            }
             _pending.Add(liquidityUpdate);
+        }
+
+        /// <summary>
+        /// The processors read the reserves after a liquidity event from the transaction's global-state delta, where a reserve
+        /// the event did not touch is simply absent and ends up as 0 (a single-sided concentrated-liquidity deposit). A
+        /// deposit can never empty a side, so a 0 there is "unchanged": the reserve the pool cache holds from before the
+        /// event. (Withdrawals stay as they are - 0 may be a real drain.)
+        /// </summary>
+        internal static void FillUnchangedReservesOfDeposit(Liquidity liquidity, Pool? poolBefore)
+        {
+            if (liquidity.Direction != LiquidityDirection.DepositLiquidity || poolBefore == null) return;
+            if (liquidity.A == 0 && poolBefore.A is > 0) liquidity.A = poolBefore.A.Value;
+            if (liquidity.B == 0 && poolBefore.B is > 0) liquidity.B = poolBefore.B.Value;
         }
 
         private async Task PopulateTradeUsdAsync(Trade trade, CancellationToken cancellationToken)
@@ -454,18 +477,20 @@ namespace AVMTradeReporter.Services
         private const int BlockProcessAttempts = 3;
 
         /// <summary>
-        /// Where the latest-block watermark (and, when it has to, the indexer) restarts. "Stored through" is the better of
-        /// the persisted round and the Redis mirror; when it is below the round before the indexer's, the previous run died
-        /// with blocks in flight and the indexer rewinds. The watermark never starts below what Redis already advertises.
-        /// <c>Verified</c> is false when neither source exists and the seed is just the unverified round before the
-        /// indexer's (an old indexer document) - such a seed must not be mirrored to Redis as a completion.
+        /// Where the latest-block watermark (and, when it has to, the indexer) restarts. The persisted <c>StoredThrough</c>
+        /// is the truth; the Redis mirror may raise it (blocks that completed after the last increment persisted it) but
+        /// never replaces it: without a persisted value there is no rewind at all - an operator who jumps <c>Round</c>
+        /// forward clears <c>StoredThrough</c>, and a stale mirror must not undo that. Such a seed is <c>Verified = false</c>:
+        /// advertised, but never mirrored to Redis nor persisted as <c>StoredThrough</c> until this run completed a block.
         /// </summary>
         internal static (ulong SeedRound, bool Rewind, bool Verified) ResolveStartupSeed(ulong indexerRound, ulong? storedThrough, ulong? mirroredRound)
         {
             var seedRound = indexerRound - 1;
-            ulong? stored = storedThrough.HasValue && mirroredRound.HasValue ? Math.Max(storedThrough.Value, mirroredRound.Value) : storedThrough ?? mirroredRound;
-            if (stored is { } known && known < seedRound) return (known, true, true);
-            return (Math.Max(seedRound, mirroredRound ?? seedRound), false, stored.HasValue);
+            if (storedThrough is not { } persisted) return (seedRound, false, false);
+            var stored = Math.Min(persisted, seedRound); // never above what this indexer has reached (an edited document)
+            var known = mirroredRound.HasValue ? Math.Max(stored, mirroredRound.Value) : stored;
+            if (known < seedRound) return (known, true, true);
+            return (known, false, true);
         }
 
         private IEnumerable<(string Name, Algorand.Algod.IDefaultApi Api)> Algods()
@@ -494,31 +519,73 @@ namespace AVMTradeReporter.Services
             return null;
         }
 
+        private const int LostBlockRecoveryAttempts = 20;
+        private static readonly TimeSpan LostBlockRecoveryDelay = TimeSpan.FromSeconds(30);
+
         private async Task ProcessBlockWorkAsync(ulong blockId, CancellationToken cancellationToken)
         {
             _pending.Open(blockId, null);
             try
             {
                 _logger.LogInformation("Loading block {blockId}", blockId);
-                // A transient algod outage must not turn into a permanently skipped block (and a latest-block watermark
-                // that moves past it), so the fetch is retried a few times before the block is given up.
                 CertifiedBlock? block = null;
-                for (var attempt = 1; attempt <= BlockFetchAttempts && (block == null || block.Block == null); attempt++)
+                for (var attempt = 1; attempt <= BlockFetchAttempts && block?.Block == null; attempt++)
                 {
                     if (attempt > 1) await Task.Delay(TimeSpan.FromSeconds(attempt), cancellationToken);
                     block = await TryFetchBlockAsync(blockId, headerOnly: false);
                 }
-                if (block == null || block.Block == null)
+                if (block?.Block == null)
                 {
-                    // Lost for the indexer itself as well (see CLAUDE.md, known limits): never retried, so the watermark
-                    // must not wait for it.
-                    _logger.LogError("Block {blockId} not found after {attempts} attempts - its trades are skipped", blockId, BlockFetchAttempts);
-                    _pending.Drop(blockId);
-                    if (!cancellationToken.IsCancellationRequested) _blockTracker?.MarkCompleted(blockId, null);
+                    // A few seconds of algod trouble must not turn into a permanently skipped block: the fetch keeps being
+                    // retried in the background for a bounded time while the latest-block watermark (and StoredThrough)
+                    // wait for the block, so even a restart in between re-processes it.
+                    _logger.LogWarning("Block {blockId} not found after {attempts} attempts - retrying in the background for up to {minutes} minutes",
+                        blockId, BlockFetchAttempts, LostBlockRecoveryAttempts * LostBlockRecoveryDelay.TotalMinutes);
+                    _ = RecoverLostBlockAsync(blockId, cancellationToken);
                     return;
                 }
+                await ProcessFetchedBlockAsync(blockId, block, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // shutdown: the block is not closed (it must not complete) - the restart re-processes it from StoredThrough
+                throw;
+            }
+        }
 
-                _pending.Open(blockId, block.Block.Timestamp != null ? Convert.ToInt64(block.Block.Timestamp) : null);
+        private async Task RecoverLostBlockAsync(ulong blockId, CancellationToken cancellationToken)
+        {
+            try
+            {
+                for (var attempt = 1; attempt <= LostBlockRecoveryAttempts; attempt++)
+                {
+                    await Task.Delay(LostBlockRecoveryDelay, cancellationToken);
+                    var block = await TryFetchBlockAsync(blockId, headerOnly: false);
+                    if (block?.Block == null) continue;
+                    _logger.LogInformation("Block {blockId} recovered on background attempt {attempt}", blockId, attempt);
+                    await ProcessFetchedBlockAsync(blockId, block, cancellationToken);
+                    return;
+                }
+                // Lost for the indexer itself as well (see CLAUDE.md, known limits): the watermark must not wait for ever.
+                _logger.LogError("Block {blockId} could not be fetched for {minutes} minutes - its events are lost", blockId, LostBlockRecoveryAttempts * LostBlockRecoveryDelay.TotalMinutes);
+                _pending.Drop(blockId);
+                _blockTracker?.MarkCompleted(blockId, null);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // shutdown: the restart re-processes the block from StoredThrough
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Recovering block {blockId} failed", blockId);
+            }
+        }
+
+        private async Task ProcessFetchedBlockAsync(ulong blockId, CertifiedBlock block, CancellationToken cancellationToken)
+        {
+            try
+            {
+                _pending.Open(blockId, block.Block!.Timestamp != null ? Convert.ToInt64(block.Block.Timestamp) : null);
                 _logger.LogInformation("Found transactions: {txCount}", block.Block.Transactions?.Count ?? 0);
                 // A transaction whose processing threw (asset / pool lookup hiccup) would otherwise be missing from a block
                 // that then counts as completely stored; re-processing is idempotent (registrations are keyed by tx id).
@@ -542,7 +609,6 @@ namespace AVMTradeReporter.Services
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                // shutdown: the block is not closed (it must not complete) - the restart re-processes it from StoredThrough
                 throw;
             }
             catch (Exception ex)

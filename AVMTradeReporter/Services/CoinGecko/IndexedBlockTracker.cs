@@ -49,6 +49,8 @@ namespace AVMTradeReporter.Services.CoinGecko
         private readonly SemaphoreSlim _persistLock = new(1, 1);
         private long _persistedRound = -1;
         private IndexedBlock? _watermark;
+        private ulong _seedRound;
+        private bool _seedVerified;
         private IndexedBlock? _published;
         private sealed record RedisRead(IndexedBlock? Value, DateTimeOffset At);
         private RedisRead? _redisRead; // one reference, swapped atomically - request threads read it without a lock
@@ -69,7 +71,9 @@ namespace AVMTradeReporter.Services.CoinGecko
 
         public IndexedBlock? CompletedThrough
         {
-            get { lock (_lock) return _watermark; }
+            // An unverified seed (just "the round before the indexer's") must not become the next restart's StoredThrough:
+            // only once this run completed a block beyond it is there a verified round to persist.
+            get { lock (_lock) return _watermark != null && (_seedVerified || _watermark.Round > _seedRound) ? _watermark : null; }
         }
 
         public void Seed(ulong completedRound, long? unixTimestamp, bool verified = true)
@@ -79,6 +83,8 @@ namespace AVMTradeReporter.Services.CoinGecko
             {
                 if (_watermark != null && _watermark.Round >= completedRound) return;
                 _watermark = new IndexedBlock(completedRound, unixTimestamp ?? 0);
+                _seedRound = completedRound;
+                _seedVerified = verified;
                 toPublish = unixTimestamp != null ? _watermark : null;
                 if (toPublish != null) _published = toPublish;
                 foreach (var stale in _pending.Keys.Where(k => k <= completedRound).ToList()) _pending.Remove(stale);

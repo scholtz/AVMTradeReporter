@@ -184,11 +184,13 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             await Task.Delay(100);
             Assert.That(writes, Is.Zero, "a guessed completion must not become the next restart's truth");
             Assert.That((await tracker.GetLatestAsync())!.Round, Is.EqualTo(100UL), "still advertised locally");
+            Assert.That(tracker.CompletedThrough, Is.Null, "nor persisted as StoredThrough");
 
             tracker.MarkCompleted(101, 1003);
             var deadline = DateTime.UtcNow.AddSeconds(5);
             while (writes == 0 && DateTime.UtcNow < deadline) await Task.Delay(20);
             Assert.That(writes, Is.EqualTo(1), "a real completion is mirrored");
+            Assert.That(tracker.CompletedThrough!.Round, Is.EqualTo(101UL), "and is what the indexer persists");
         }
 
         [Test]

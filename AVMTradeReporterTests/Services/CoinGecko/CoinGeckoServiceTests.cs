@@ -71,6 +71,15 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             }
         }
 
+        /// <summary>Every clock the service compares reads this - tests advance it instead of sleeping.</summary>
+        private sealed class FakeTime : TimeProvider
+        {
+            private DateTimeOffset _now = DateTimeOffset.UtcNow;
+            public override DateTimeOffset GetUtcNow() => _now;
+            public void Advance(TimeSpan by) => _now += by;
+        }
+
+        private FakeTime _time = null!;
         private FakeTracker _tracker = null!;
         private FakeSource _source = null!;
         private MockPoolRepository _pools = null!;
@@ -80,6 +89,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         [SetUp]
         public async Task SetUp()
         {
+            _time = new FakeTime();
             _tracker = new FakeTracker { Latest = new IndexedBlock(1000, 1_760_000_100) };
             _source = new FakeSource();
             _pools = new MockPoolRepository();
@@ -117,7 +127,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         private CoinGeckoService Create(Action<CoinGeckoConfiguration>? tweak = null)
         {
             tweak?.Invoke(_config.CoinGecko);
-            return new CoinGeckoService(Options.Create(_config), _tracker, _source, _pools, _assets.Object, new ServiceCollection().BuildServiceProvider(), NullLogger<CoinGeckoService>.Instance);
+            return new CoinGeckoService(Options.Create(_config), _tracker, _source, _pools, _assets.Object, new ServiceCollection().BuildServiceProvider(), NullLogger<CoinGeckoService>.Instance, _time);
         }
 
         private static Trade Swap(string txId, ulong block, ulong? txn = null, uint? ev = null, ulong appId = PoolAppId, ulong amountIn = 10_000_000, ulong amountOut = 1_500_000) => new()
@@ -351,7 +361,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             Assert.That((await service.GetPairAsync(PoolAppId.ToString(), default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Ok));
             await _pools.StorePoolAsync(Pool(900, "NEW", 0, 31566704));
             // snapshot is older than the rate limit for "missing pool" refreshes only after a short while
-            await Task.Delay(TimeSpan.FromSeconds(5.2));
+            _time.Advance(TimeSpan.FromSeconds(6)); // past MissingPoolRefreshInterval
             Assert.That((await service.GetPairAsync("900", default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Ok));
         }
 
@@ -454,7 +464,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             _source.Trades.Add(Swap("OK", 10, 1, 0));
             _source.Trades.Add(Swap("UNKNOWNPOOL", 10, 2, 0, appId: 424242));
             _source.Trades.Add(Swap("ZERO", 10, 3, 0, amountOut: 0));
-            var events = Events(await Create().GetEventsJsonAsync(10, 10, default));
+            var events = Events(await Create(c => c.UnknownPoolLoadAttempts = 0).GetEventsJsonAsync(10, 10, default));
             Assert.That(events, Has.Length.EqualTo(1));
             Assert.That(events[0].GetProperty("txnId").GetString(), Is.EqualTo("TOP-OK"));
         }
@@ -491,7 +501,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
 
             // once the pool can be described the very same range is answered completely (nothing partial was cached)
             assetsOk = true;
-            await Task.Delay(1200);
+            _time.Advance(TimeSpan.FromSeconds(2));
             var events = Events(await service.GetEventsJsonAsync(10, 10, default));
             Assert.That(events, Has.Length.EqualTo(2));
         }
@@ -619,7 +629,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             var service = Create(c => c.PoolSnapshotSeconds = 1);
 
             Assert.That((await service.GetEventsJsonAsync(10, 10, default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
-            await Task.Delay(1200);
+            _time.Advance(TimeSpan.FromSeconds(2));
             Assert.That((await service.GetEventsJsonAsync(10, 10, default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
         }
 
@@ -628,7 +638,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         {
             var failing = new Mock<IPoolRepository>();
             failing.Setup(p => p.GetAllPoolAddresses()).Throws(new InvalidOperationException("pools unavailable"));
-            var service = new CoinGeckoService(Options.Create(_config), _tracker, _source, failing.Object, _assets.Object, new ServiceCollection().BuildServiceProvider(), NullLogger<CoinGeckoService>.Instance);
+            var service = new CoinGeckoService(Options.Create(_config), _tracker, _source, failing.Object, _assets.Object, new ServiceCollection().BuildServiceProvider(), NullLogger<CoinGeckoService>.Instance, _time);
 
             Assert.That((await service.GetPairAsync("1", default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
             Assert.That((await service.GetAssetAsync("0", default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
@@ -659,7 +669,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         {
             // a pool created moments ago may not be registered in the pool cache yet
             var fresh = Swap("FRESH", 10, 1, 0, appId: 424242);
-            fresh.Timestamp = DateTimeOffset.UtcNow;
+            fresh.Timestamp = _time.GetUtcNow();
             _source.Trades.Add(fresh);
             var service = Create();
 
@@ -667,7 +677,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
 
             // the same pool registered a moment later -> the very same range is complete
             await _pools.StorePoolAsync(Pool(424242, "FRESHPOOL", 0, 31566704));
-            await Task.Delay(5200);
+            _time.Advance(TimeSpan.FromSeconds(6));
             Assert.That(Events(await service.GetEventsJsonAsync(10, 10, default)), Has.Length.EqualTo(1));
         }
 
@@ -678,7 +688,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             scam.ScamRating = 95;
             await _pools.StorePoolAsync(scam);
             var trade = Swap("SCAM", 10, 1, 0, appId: 666);
-            trade.Timestamp = DateTimeOffset.UtcNow;
+            trade.Timestamp = _time.GetUtcNow();
             _source.Trades.Add(trade);
             Assert.That(Events(await Create().GetEventsJsonAsync(10, 10, default)), Is.Empty);
         }
@@ -689,7 +699,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             // the pool was relabelled DEXProtocol.Scam after its swaps were stored as Biatec: known to the cache -> skipped, no 503
             await _pools.StorePoolAsync(Pool(667, "RELABELLED", 0, 31566704, DEXProtocol.Scam));
             var trade = Swap("SCAM2", 10, 1, 0, appId: 667);
-            trade.Timestamp = DateTimeOffset.UtcNow;
+            trade.Timestamp = _time.GetUtcNow();
             _source.Trades.Add(trade);
             _source.Trades.Add(Swap("OK", 10, 2, 0));
             var events = Events(await Create().GetEventsJsonAsync(10, 10, default));
@@ -701,7 +711,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         {
             for (var i = 0; i < 50; i++) _source.Trades.Add(Swap("T" + i, 10, (ulong)i + 1, 0));
             var (counting, calls) = CountingPools();
-            var service = new CoinGeckoService(Options.Create(_config), _tracker, _source, counting.Object, _assets.Object, new ServiceCollection().BuildServiceProvider(), NullLogger<CoinGeckoService>.Instance);
+            var service = new CoinGeckoService(Options.Create(_config), _tracker, _source, counting.Object, _assets.Object, new ServiceCollection().BuildServiceProvider(), NullLogger<CoinGeckoService>.Instance, _time);
 
             Assert.That(Events(await service.GetEventsJsonAsync(10, 10, default)), Has.Length.EqualTo(50));
             Assert.That(calls.Value, Is.EqualTo(1), "one snapshot load, not one per event");
@@ -719,7 +729,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             Assert.That((await service.GetPairAsync(PoolAppId.ToString(), default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
 
             await _pools.StorePoolAsync(Pool(PoolAppId, "POOLADDR", 0, 31566704));
-            await Task.Delay(1200);
+            _time.Advance(TimeSpan.FromSeconds(2));
             Assert.That(Events(await service.GetEventsJsonAsync(10, 10, default)), Has.Length.EqualTo(1), "nothing partial was cached");
         }
 
@@ -749,7 +759,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             var lookups = _assets.Invocations.Count(i => i.Method.Name == nameof(IAssetRepository.GetAssetAsync) && (ulong)i.Arguments[0] == 12345);
             Assert.That(lookups, Is.GreaterThan(0));
 
-            await Task.Delay(5200); // past MissingPoolRefreshInterval
+            _time.Advance(TimeSpan.FromSeconds(6)); // past MissingPoolRefreshInterval
             Assert.That((await service.GetPairAsync("777777", default)).Outcome, Is.EqualTo(CoinGeckoOutcome.NotFound));
 
             Assert.That(_assets.Invocations.Count(i => i.Method.Name == nameof(IAssetRepository.GetAssetAsync) && (ulong)i.Arguments[0] == 12345), Is.EqualTo(lookups));
@@ -759,7 +769,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         public async Task WarmUp_BuildsTheSnapshot_SoTheFirstRequestDoesNotLoadPools()
         {
             var (counting, calls) = CountingPools();
-            var service = new CoinGeckoService(Options.Create(_config), _tracker, _source, counting.Object, _assets.Object, new ServiceCollection().BuildServiceProvider(), NullLogger<CoinGeckoService>.Instance);
+            var service = new CoinGeckoService(Options.Create(_config), _tracker, _source, counting.Object, _assets.Object, new ServiceCollection().BuildServiceProvider(), NullLogger<CoinGeckoService>.Instance, _time);
 
             await service.WarmUpAsync(default);
             Assert.That(calls.Value, Is.EqualTo(1));
@@ -773,10 +783,10 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             using var gate = new ManualResetEventSlim(initialState: true);
             var (repo, loads) = CountingPools(gate);
             _config.CoinGecko.PoolSnapshotSeconds = 1;
-            var service = new CoinGeckoService(Options.Create(_config), _tracker, _source, repo.Object, _assets.Object, new ServiceCollection().BuildServiceProvider(), NullLogger<CoinGeckoService>.Instance);
+            var service = new CoinGeckoService(Options.Create(_config), _tracker, _source, repo.Object, _assets.Object, new ServiceCollection().BuildServiceProvider(), NullLogger<CoinGeckoService>.Instance, _time);
             await service.WarmUpAsync(default);
             gate.Reset(); // the next rebuild blocks inside the pool cache walk
-            await Task.Delay(1200);
+            _time.Advance(TimeSpan.FromSeconds(2));
 
             var watch = System.Diagnostics.Stopwatch.StartNew();
             var answers = await Task.WhenAll(Enumerable.Range(0, 5).Select(_ => service.GetPairAsync(PoolAppId.ToString(), default)));
@@ -805,7 +815,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             Assert.That((await service.GetPairAsync("901", default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
 
             assetsOk = true;
-            await Task.Delay(1200);
+            _time.Advance(TimeSpan.FromSeconds(2));
             Assert.That((await service.GetPairAsync("777777", default)).Outcome, Is.EqualTo(CoinGeckoOutcome.NotFound), "an unknown id forces the rebuild");
             Assert.That((await service.GetPairAsync("901", default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Ok));
         }
@@ -816,6 +826,64 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             for (var i = 0; i < 10_000; i++) _source.Trades.Add(Swap("T" + i, 10, (ulong)i + 1, 0));
             var result = await Create(c => c.MaxEventsPerRequest = 100_000).GetEventsJsonAsync(10, 10, default);
             Assert.That(result.Outcome, Is.EqualTo(CoinGeckoOutcome.BadRequest), "retrying can never help - a 503 would stall the consumer for ever");
+        }
+
+        private sealed class RegisteringPools : IPoolRepository
+        {
+            private readonly List<PoolModel> _pools = new();
+            public PoolModel? OnChain { get; set; }
+            public int Loads;
+
+            public RegisteringPools(PoolModel initial) => _pools.Add(initial);
+
+            public Task InitializeAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+            public Task<PoolModel?> GetPoolAsync(string poolAddress, CancellationToken cancellationToken) => Task.FromResult(GetCachedPool(poolAddress));
+            public PoolModel? GetCachedPool(string poolAddress) => _pools.FirstOrDefault(p => p.PoolAddress == poolAddress);
+            public Task<bool> StorePoolAsync(PoolModel pool, bool updateAggregated = true, CancellationToken? cancellationToken = null) { _pools.Add(pool); return Task.FromResult(true); }
+            public Task UpdatePoolFromTrade(Trade trade, CancellationToken cancellationToken) => Task.CompletedTask;
+            public Task UpdatePoolFromLiquidity(Liquidity liquidity, CancellationToken cancellationToken) => Task.CompletedTask;
+            public Task<List<PoolModel>> GetPoolsAsync(ulong? assetIdA, ulong? assetIdB, string? address, DEXProtocol? protocol = null, int size = 100, PoolOrderBy? orderBy = null, SortDirection direction = SortDirection.Desc, CancellationToken cancellationToken = default) => Task.FromResult(_pools.ToList());
+            public Task<int> GetPoolCountAsync(CancellationToken cancellationToken = default) => Task.FromResult(_pools.Count);
+            public Task UpdateAggregatedPool(ulong aId, ulong bId, CancellationToken cancellationToken) => Task.CompletedTask;
+            public IEnumerable<string> GetAllPoolAddresses() => _pools.Select(p => p.PoolAddress).ToList();
+
+            public AVMTradeReporter.Processors.Pool.IPoolProcessor? GetPoolProcessor(DEXProtocol protocol)
+            {
+                var processor = new Mock<AVMTradeReporter.Processors.Pool.IPoolProcessor>();
+                processor.Setup(p => p.LoadPoolAsync(It.IsAny<string>(), It.IsAny<ulong>())).Returns(() => { Loads++; return Task.FromResult(OnChain!); });
+                return processor.Object;
+            }
+        }
+
+        [Test]
+        public async Task Events_OldEventOfAPoolTheCacheMissed_RegistersThePoolFromChain()
+        {
+            var pools = new RegisteringPools(Pool(PoolAppId, "POOLADDR", 0, 31566704)) { OnChain = Pool(424242, "MISSED", 0, 31566704) };
+            var trade = Swap("MISSED", 10, 1, 0, appId: 424242);
+            trade.PoolAddress = "MISSED";
+            _source.Trades.Add(trade); // older than the grace period
+            var service = new CoinGeckoService(Options.Create(_config), _tracker, _source, pools, _assets.Object, new ServiceCollection().BuildServiceProvider(), NullLogger<CoinGeckoService>.Instance, _time);
+
+            var events = Events(await service.GetEventsJsonAsync(10, 10, default));
+
+            Assert.That(events, Has.Length.EqualTo(1));
+            Assert.That(events[0].GetProperty("pairId").GetString(), Is.EqualTo("424242"));
+            Assert.That(pools.Loads, Is.EqualTo(1));
+            Assert.That((await service.GetPairAsync("424242", default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Ok), "registered for good");
+        }
+
+        [Test]
+        public async Task Events_PoolThatCannotBeLoadedFromChain_IsRetryable503_UntilTheAttemptsAreUsedUp()
+        {
+            var pools = new RegisteringPools(Pool(PoolAppId, "POOLADDR", 0, 31566704)) { OnChain = null };
+            _source.Trades.Add(Swap("GONE", 10, 1, 0, appId: 424242));
+            _source.Trades.Add(Swap("OK", 10, 2, 0));
+            _config.CoinGecko.UnknownPoolLoadAttempts = 1;
+            var service = new CoinGeckoService(Options.Create(_config), _tracker, _source, pools, _assets.Object, new ServiceCollection().BuildServiceProvider(), NullLogger<CoinGeckoService>.Instance, _time);
+
+            Assert.That((await service.GetEventsJsonAsync(10, 10, default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable), "one load attempt, failed");
+            var events = Events(await service.GetEventsJsonAsync(10, 10, default));
+            Assert.That(events.Select(e => e.GetProperty("txnId").GetString()), Is.EqualTo(new[] { "TOP-OK" }), "attempts used up: the pool's events are skipped, the rest is served");
         }
 
         [Test]

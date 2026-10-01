@@ -348,9 +348,10 @@ namespace AVMTradeReporter.Services.CoinGecko
                     pairs[pool.PoolAppId] = known with { LpFee = pool.LPFee };
                     continue;
                 }
-                if (!retryUnresolved && snapshot.Unresolved.TryGetValue(pool.PoolAppId, out var seenAt))
+                var decimalsOnPool = pool.AssetADecimals.HasValue && pool.AssetBDecimals.HasValue;
+                if (!retryUnresolved && !decimalsOnPool && snapshot.Unresolved.TryGetValue(pool.PoolAppId, out var seenAt))
                 {
-                    unresolved[pool.PoolAppId] = seenAt;
+                    unresolved[pool.PoolAppId] = seenAt; // would need the asset repository - regular cadence only
                     continue;
                 }
                 toResolve.Add(pool);
@@ -565,6 +566,17 @@ namespace AVMTradeReporter.Services.CoinGecko
                     var eventTime = isTrade ? trades[i].Timestamp : liquidity[i - trades.Count].Timestamp;
                     if (eventTime != null && _time.GetUtcNow() - eventTime.Value < TimeSpan.FromSeconds(Math.Max(0, _config.UnknownPoolGraceSeconds)))
                         throw new TransientDataException($"pool {appId} is not registered yet");
+                    // Older and still unknown: the pool cache missed it (its registration threw at the time). The event documents
+                    // were written by our own processors, so the pool is real - load it from chain and register it.
+                    var (address, protocol) = isTrade ? (trades[i].PoolAddress, trades[i].Protocol) : (liquidity[i - trades.Count].PoolAddress, liquidity[i - trades.Count].Protocol);
+                    if (await TryRegisterUnknownPoolAsync(appId, address, protocol, cancellationToken))
+                    {
+                        await GetSnapshotAsync(TimeSpan.Zero, cancellationToken);
+                        lookup = await GetPairInfoAsync(appId, cancellationToken);
+                        lookups[appId] = lookup;
+                        if (lookup.Transient) throw new TransientDataException($"pool {appId} cannot be described right now");
+                        pair = lookup.Pair;
+                    }
                 }
                 CoinGeckoEvent? mapped = pair == null ? null
                     : isTrade ? CoinGeckoMapper.TryMapSwap(trades[i], pair, positions[i])
@@ -589,6 +601,38 @@ namespace AVMTradeReporter.Services.CoinGecko
                 return c != 0 ? c : a.EventIndex.CompareTo(b.EventIndex);
             });
             return events;
+        }
+
+        /// <summary>
+        /// Loads a pool that has stored events but is missing from the pool cache from chain and registers it. True once it
+        /// is registered; throws <see cref="TransientDataException"/> (503) while attempts remain - at most one attempt per
+        /// <see cref="CoinGeckoConfiguration.PoolSnapshotSeconds"/>; false once <see cref="CoinGeckoConfiguration.UnknownPoolLoadAttempts"/>
+        /// are used up, after which the pool's events are skipped.
+        /// </summary>
+        private async Task<bool> TryRegisterUnknownPoolAsync(ulong appId, string address, DEXProtocol protocol, CancellationToken cancellationToken)
+        {
+            var attemptsKey = "unknown-pool-attempts:" + appId;
+            var attempts = _eventsCache.TryGetValue(attemptsKey, out int made) ? made : 0;
+            if (attempts >= Math.Max(0, _config.UnknownPoolLoadAttempts)) return false;
+            var triedKey = "unknown-pool-tried:" + appId;
+            if (_eventsCache.TryGetValue(triedKey, out _)) throw new TransientDataException($"pool {appId} is not registered yet - a load from chain was attempted recently");
+            _eventsCache.Set(triedKey, true, new MemoryCacheEntryOptions { Size = 1, AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(Math.Max(1, _config.PoolSnapshotSeconds)) });
+            _eventsCache.Set(attemptsKey, attempts + 1, new MemoryCacheEntryOptions { Size = 1, AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(6) });
+            try
+            {
+                var processor = _poolRepository.GetPoolProcessor(protocol);
+                var pool = processor == null || string.IsNullOrEmpty(address) ? null : await processor.LoadPoolAsync(address, appId);
+                if (pool != null && await _poolRepository.StorePoolAsync(pool, true, cancellationToken))
+                {
+                    _logger.LogWarning("CoinGecko: pool {appId} had stored events but was missing from the pool cache - registered it from chain", appId);
+                    return true;
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "CoinGecko: loading pool {appId} from chain failed (attempt {attempt} of {max})", appId, attempts + 1, _config.UnknownPoolLoadAttempts);
+            }
+            throw new TransientDataException($"pool {appId} is not registered and could not be loaded from chain (attempt {attempts + 1} of {_config.UnknownPoolLoadAttempts})");
         }
 
         private sealed class EventBudget : IDisposable

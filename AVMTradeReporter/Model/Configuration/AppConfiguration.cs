@@ -513,6 +513,13 @@ namespace AVMTradeReporter.Model.Configuration
         public int UnknownPoolGraceSeconds { get; set; } = 120;
 
         /// <summary>
+        /// How many times (one per <see cref="PoolSnapshotSeconds"/>) a pool that has stored events but is missing from the
+        /// pool cache (its registration threw) is loaded from chain and registered on demand before its events are given up.
+        /// Ranges touching it answer 503 meanwhile.
+        /// </summary>
+        public int UnknownPoolLoadAttempts { get; set; } = 10;
+
+        /// <summary>
         /// How many uncached <c>/events</c> ranges may be built (Elasticsearch queries) at the same time; further ones wait a
         /// few seconds and then fail with a retryable 503. Cached ranges are not limited.
         /// </summary>
