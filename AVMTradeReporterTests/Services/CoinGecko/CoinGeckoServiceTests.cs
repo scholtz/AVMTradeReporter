@@ -564,6 +564,19 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         }
 
         [Test]
+        public async Task Events_OversizeRange_StopsFanningOut_AndIsRememberedBriefly()
+        {
+            for (var i = 0; i < 60; i++) _source.Trades.Add(Swap("T" + i, (ulong)(100 + i), 1, 0));
+            _tracker.Latest = new IndexedBlock(5000, 1);
+            var service = Create(c => { c.MaxEventsPerRequest = 10; c.ElasticPageSize = 5; });
+
+            Assert.That((await service.GetEventsJsonAsync(100, 159, default)).Outcome, Is.EqualTo(CoinGeckoOutcome.BadRequest));
+            var queriesAfterFirst = _source.TradeCalls;
+            Assert.That((await service.GetEventsJsonAsync(100, 159, default)).Outcome, Is.EqualTo(CoinGeckoOutcome.BadRequest));
+            Assert.That(_source.TradeCalls, Is.EqualTo(queriesAfterFirst), "the oversize answer is remembered - no second fan-out against storage");
+        }
+
+        [Test]
         public async Task Events_OutputIsPlainJsonWithEventsArray()
         {
             var json = System.Text.Encoding.UTF8.GetString((await Create().GetEventsJsonAsync(1, 1, default)).Value!);

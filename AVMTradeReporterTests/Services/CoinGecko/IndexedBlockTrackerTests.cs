@@ -129,6 +129,30 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         }
 
         [Test]
+        public async Task RedisMirror_IsNotMovedBackwardsByARestartingPodThatSeedsLower()
+        {
+            var writes = new List<ulong>();
+            var db = new Mock<StackExchange.Redis.IDatabase>();
+            db.Setup(d => d.StringGetAsync(It.IsAny<StackExchange.Redis.RedisKey>(), It.IsAny<StackExchange.Redis.CommandFlags>()))
+                .ReturnsAsync((StackExchange.Redis.RedisValue)System.Text.Json.JsonSerializer.Serialize(new IndexedBlock(500, 5000)));
+            db.Setup(d => d.StringSetAsync(It.IsAny<StackExchange.Redis.RedisKey>(), It.IsAny<StackExchange.Redis.RedisValue>(), It.IsAny<StackExchange.Redis.Expiration>(), It.IsAny<StackExchange.Redis.ValueCondition>(), It.IsAny<StackExchange.Redis.CommandFlags>()))
+                .Returns((StackExchange.Redis.RedisKey _, StackExchange.Redis.RedisValue value, StackExchange.Redis.Expiration _, StackExchange.Redis.ValueCondition _, StackExchange.Redis.CommandFlags _) =>
+                {
+                    lock (writes) writes.Add(System.Text.Json.JsonSerializer.Deserialize<IndexedBlock>(value.ToString())!.Round);
+                    return Task.FromResult(true);
+                });
+            var config = new AppConfiguration();
+            config.Redis.Enabled = true;
+            config.CoinGecko.LatestBlockVisibilityDelaySeconds = 0;
+            var tracker = new IndexedBlockTracker(Options.Create(config), NullLogger<IndexedBlockTracker>.Instance, new ServiceCollection().AddSingleton(db.Object).BuildServiceProvider());
+
+            tracker.Seed(100, 1000); // another pod already mirrored 500
+            await Task.Delay(100);
+            lock (writes) Assert.That(writes, Is.Empty);
+            Assert.That((await tracker.GetLatestAsync())!.Round, Is.EqualTo(100UL), "the local value is still this pod's own");
+        }
+
+        [Test]
         public async Task Seed_DoesNotMoveTheWatermarkBackwards()
         {
             var tracker = Create();

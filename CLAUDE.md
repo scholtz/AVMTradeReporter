@@ -351,3 +351,11 @@ purpose (CoinGecko's indexer cannot sign ARC-14). Rules that are easy to break:
 - Biatec pool reserves (`Trade.A/B`) are 1e9-scaled whatever the asset decimals; swap/liquidity
   amounts are base units of their asset. `priceNative` = asset1 per asset0; asset0/asset1 = pool
   asset A/B (immutable on-chain order).
+- **Known limits (deliberate, same data the website has):** a block that algod cannot return after
+  4 attempts, or whose per-transaction processing threw, is lost for the indexer itself, so it still
+  counts as processed - freezing `latest-block` for ever would be worse than that gap. Likewise
+  `Indexer.Round` is persisted when a block task *starts*, so a crash can lose up to
+  `MaxConcurrentTasks` in-flight blocks before the watermark seed. A published pool whose asset
+  decimals stay unresolvable for `UnresolvedPoolGraceMinutes` is skipped (logged) instead of
+  failing every `/events` range that touches it. `Protocols` is not pre-filled (config binding
+  appends to a default list) - use `PublishedProtocols`.

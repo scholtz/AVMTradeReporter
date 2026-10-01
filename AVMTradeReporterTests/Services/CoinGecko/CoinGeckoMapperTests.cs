@@ -154,6 +154,30 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         }
 
         [Test]
+        public void Swap_WithBothReservesZero_IsSkipped_ButAnExitMayDrainThePool()
+        {
+            // reserves 0/0 after a swap = the processor could not read the pool state, not an empty pool
+            var swap = Swap(Algo, Usdc, 1_000_000, 150_000);
+            swap.A = 0;
+            swap.B = 0;
+            Assert.That(CoinGeckoMapper.TryMapSwap(swap, BiatecPair, new EventPositionPair(1, 0)), Is.Null);
+
+            // a withdrawal of the last liquidity legitimately leaves 0/0
+            var exit = new Liquidity
+            {
+                Direction = LiquidityDirection.WithdrawLiquidity,
+                AssetIdA = Algo,
+                AssetIdB = Usdc,
+                AssetAmountA = 1_000_000,
+                AssetAmountB = 150_000,
+                TxId = "L",
+                Timestamp = Time,
+                LiquidityProvider = "LP",
+            };
+            Assert.That(CoinGeckoMapper.TryMapLiquidity(exit, BiatecPair, new EventPositionPair(1, 0))!.Reserves.Asset0, Is.EqualTo("0"));
+        }
+
+        [Test]
         public void Swap_PriceNeverZero_EvenForDustAgainstHugeAmount()
         {
             // 1 base unit of asset1 (6 decimals) for a huge amount of asset0 with 19 decimals -> price below decimal precision

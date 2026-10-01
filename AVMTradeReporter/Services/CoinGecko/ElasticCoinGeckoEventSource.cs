@@ -37,7 +37,7 @@ namespace AVMTradeReporter.Services.CoinGecko
         public ElasticCoinGeckoEventSource(IServiceProvider services, IOptions<AppConfiguration> options)
         {
             _elastic = services.GetService<ElasticsearchClient>();
-            _protocols = options.Value.CoinGecko.Protocols;
+            _protocols = options.Value.CoinGecko.PublishedProtocols;
         }
 
         public bool IsAvailable => _elastic != null;

@@ -447,7 +447,15 @@ namespace AVMTradeReporter.Model.Configuration
         /// DEX protocols published to GeckoTerminal. Only the Biatec DEX by default - the service also
         /// indexes Pact/Tiny pools which belong to other DEXes.
         /// </summary>
-        public List<Models.Data.Enums.DEXProtocol> Protocols { get; set; } = new() { Models.Data.Enums.DEXProtocol.Biatec };
+        public List<Models.Data.Enums.DEXProtocol> Protocols { get; set; } = new();
+
+        /// <summary>
+        /// The protocols actually published: <see cref="Protocols"/>, or Biatec when none is configured. (The default is
+        /// not put into the list itself because configuration binding appends to a pre-filled list, which would make
+        /// Biatec impossible to remove and duplicate it when it is configured explicitly.)
+        /// </summary>
+        public IReadOnlyList<Models.Data.Enums.DEXProtocol> PublishedProtocols =>
+            Protocols.Count == 0 ? new[] { Models.Data.Enums.DEXProtocol.Biatec } : Protocols.Distinct().ToList();
 
         /// <summary>
         /// Maximum <c>toBlock - fromBlock + 1</c> accepted by <c>/events</c> (400 above).

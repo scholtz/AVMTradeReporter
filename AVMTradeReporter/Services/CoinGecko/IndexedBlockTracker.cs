@@ -127,6 +127,13 @@ namespace AVMTradeReporter.Services.CoinGecko
             try
             {
                 if ((long)block.Round <= _persistedRound) return;
+                // A restarting / second indexing pod may seed below what another pod already published: never regress it.
+                var current = await _redis.StringGetAsync(_redisKey);
+                if (current.HasValue && JsonSerializer.Deserialize<IndexedBlock>(current.ToString()) is { } existing && existing.Round >= block.Round)
+                {
+                    _persistedRound = (long)existing.Round;
+                    return;
+                }
                 await _redis.StringSetAsync(_redisKey, JsonSerializer.Serialize(block), TimeSpan.FromHours(6));
                 _persistedRound = (long)block.Round;
             }

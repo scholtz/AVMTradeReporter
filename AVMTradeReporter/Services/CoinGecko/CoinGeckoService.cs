@@ -262,7 +262,7 @@ namespace AVMTradeReporter.Services.CoinGecko
                 var unresolved = new Dictionary<ulong, DateTimeOffset>();
                 var assetIds = new HashSet<ulong>();
                 var now = _time.GetUtcNow();
-                foreach (var protocol in _config.Protocols)
+                foreach (var protocol in _config.PublishedProtocols)
                 {
                     var pools = await _poolRepository.GetPoolsAsync(null, null, null, protocol, int.MaxValue, null, SortDirection.Desc, cancellationToken);
                     foreach (var pool in pools)
@@ -395,10 +395,21 @@ namespace AVMTradeReporter.Services.CoinGecko
 
         internal async Task<List<CoinGeckoEvent>> BuildEventsAsync(ulong fromBlock, ulong toBlock, CancellationToken cancellationToken)
         {
+            var tooMany = _eventsCache.TryGetValue("too-many:" + fromBlock + ":" + toBlock, out string? knownTooMany) ? knownTooMany : null;
+            if (tooMany != null) throw new TooManyEventsException(tooMany);
             var budget = new EventBudget(_config.MaxEventsPerRequest);
             var tradesTask = FetchBisectingAsync((lo, hi, size) => _source.GetTradesAsync(lo, hi, size, cancellationToken), fromBlock, toBlock, budget);
             var liquidityTask = FetchBisectingAsync((lo, hi, size) => _source.GetLiquidityAsync(lo, hi, size, cancellationToken), fromBlock, toBlock, budget);
-            await Task.WhenAll(tradesTask, liquidityTask);
+            try
+            {
+                await Task.WhenAll(tradesTask, liquidityTask);
+            }
+            catch (TooManyEventsException ex)
+            {
+                // remembered briefly so a client repeating the same oversize request does not re-run the whole fan-out
+                _eventsCache.Set("too-many:" + fromBlock + ":" + toBlock, ex.Message, new MemoryCacheEntryOptions { Size = 1, AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(60) });
+                throw;
+            }
             var trades = tradesTask.Result.DistinctBy(t => t.TxId).ToList();
             var liquidity = liquidityTask.Result.DistinctBy(l => l.TxId).ToList();
 
@@ -450,7 +461,13 @@ namespace AVMTradeReporter.Services.CoinGecko
             public EventBudget(int limit) { _limit = limit; _remaining = limit; }
             public void Consume(int count)
             {
-                if (Interlocked.Add(ref _remaining, -count) < 0)
+                if (Interlocked.Add(ref _remaining, -count) < 0) ThrowIfExceeded();
+            }
+
+            /// <summary>Checked before every query so a range that is already too big stops spawning more queries.</summary>
+            public void ThrowIfExceeded()
+            {
+                if (Volatile.Read(ref _remaining) < 0)
                     throw new TooManyEventsException($"The range contains more than {_limit} events, request fewer blocks");
             }
         }
@@ -466,6 +483,7 @@ namespace AVMTradeReporter.Services.CoinGecko
         /// </summary>
         private async Task<List<T>> FetchBisectingAsync<T>(Func<ulong, ulong, int, Task<IReadOnlyList<T>>> query, ulong lo, ulong hi, EventBudget budget)
         {
+            budget.ThrowIfExceeded();
             var pageSize = Math.Clamp(_config.ElasticPageSize, 1, 10000);
             var singleBlockSize = 10000; // index.max_result_window default; one block never holds this many DEX events
             var size = lo == hi ? singleBlockSize : pageSize;
