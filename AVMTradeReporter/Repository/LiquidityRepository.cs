@@ -1,6 +1,7 @@
 ﻿using AVMTradeReporter.Hubs;
 using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Models.Data;
+using AVMTradeReporter.Models.Data.Enums;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Core.Bulk;
 using Elastic.Clients.Elasticsearch.IndexManagement;
@@ -119,10 +120,16 @@ namespace AVMTradeReporter.Repository
 
                 foreach (var item in items)
                 {
-                    bulkRequest.Operations.Add(new BulkIndexOperation<Liquidity>(item)
+                    // A mempool preview (TxPool) is create-only: it must never overwrite the confirmed document the block
+                    // processor may have stored meanwhile (Elasticsearch then answers 409 = exists already, not a rejection).
+                    if (item.TxState == TxState.TxPool)
                     {
-                        Id = item.TxId
-                    });
+                        bulkRequest.Operations.Add(new BulkCreateOperation<Liquidity>(item) { Id = item.TxId });
+                    }
+                    else
+                    {
+                        bulkRequest.Operations.Add(new BulkIndexOperation<Liquidity>(item) { Id = item.TxId });
+                    }
                 }
                 if (_elasticClient == null)
                 {
@@ -150,7 +157,7 @@ namespace AVMTradeReporter.Repository
 
                         if (failureCount > 0)
                         {
-                            foreach (var failedItem in bulkResponse.Items.Where(item => !item.IsValid))
+                            foreach (var failedItem in bulkResponse.Items.Where(item => !item.IsValid && item.Status != 409))
                             {
                                 _logger.LogWarning("Failed to index liquidity {id}: {error}",
                                     failedItem.Id, failedItem.Error?.Reason ?? "Unknown error");
@@ -166,6 +173,10 @@ namespace AVMTradeReporter.Repository
                             if (bulkResponseItems[i].IsValid)
                             {
                                 successfulLiquidityUpdates.Add(items[i]);
+                            }
+                            else if (bulkResponseItems[i].Status == 409)
+                            {
+                                // create-only preview of a document that exists already (confirmed, or an earlier preview): settled
                             }
                             else
                             {

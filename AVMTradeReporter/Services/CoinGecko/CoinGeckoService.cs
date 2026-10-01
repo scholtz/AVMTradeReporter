@@ -174,7 +174,12 @@ namespace AVMTradeReporter.Services.CoinGecko
                 _logger.LogError(ex, "CoinGecko asset {id} lookup failed", id);
                 return CoinGeckoResult<CoinGeckoAssetResponse>.Fail(CoinGeckoOutcome.Unavailable, "The asset cannot be loaded right now, try again");
             }
-            if (!snapshot.AssetIds.Contains(assetId)) return CoinGeckoResult<CoinGeckoAssetResponse>.Fail(CoinGeckoOutcome.NotFound, "Asset not found");
+            if (!snapshot.AssetIds.Contains(assetId))
+            {
+                // same rule as /pair: with no pool cache at all nothing can be said about any asset yet
+                if (snapshot.PoolCacheEmpty) return CoinGeckoResult<CoinGeckoAssetResponse>.Fail(CoinGeckoOutcome.Unavailable, "The pool cache is not available right now, try again");
+                return CoinGeckoResult<CoinGeckoAssetResponse>.Fail(CoinGeckoOutcome.NotFound, "Asset not found");
+            }
 
             var now = _time.GetUtcNow();
             if (_assets.TryGetValue(assetId, out var cached) && cached.Expires > now)
@@ -293,11 +298,12 @@ namespace AVMTradeReporter.Services.CoinGecko
         {
             var regular = TimeSpan.FromSeconds(Math.Max(1, _config.PoolSnapshotSeconds));
             var maxAge = forceIfOlderThan ?? regular;
-            var snapshot = _snapshot;
+            PoolSnapshot snapshot;
             var now = _time.GetUtcNow();
             Task<PoolSnapshot>? rebuild;
             lock (_rebuildLock)
             {
+                snapshot = _snapshot; // read under the lock: a rebuild that just finished must not trigger another one
                 rebuild = _rebuild is { IsCompleted: false } running ? running : null;
                 if (rebuild == null && now - snapshot.LoadedAt >= maxAge)
                 {

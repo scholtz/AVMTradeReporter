@@ -144,7 +144,9 @@ namespace AVMTradeReporterTests.Services.CoinGecko
                 batches.Open(11 + (ulong)i, 1003);
                 batches.Add(Trade(11 + (ulong)i, "B" + i));
                 batches.Close(11 + (ulong)i);
-                Assert.That((await batches.FlushAsync(down, Ok, default)).Unreachable, Is.True);
+                var outcome = await batches.FlushAsync(down, Ok, default);
+                Assert.That(outcome.Unreachable || outcome.BackingOff, Is.True);
+                Assert.That(outcome.Completed, Is.Empty);
             }
             Assert.That(attempts, Is.EqualTo(1), "one attempt per retry interval, not one per block");
         }

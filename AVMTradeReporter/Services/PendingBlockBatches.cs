@@ -49,7 +49,8 @@ namespace AVMTradeReporter.Services
         /// <param name="Completed">Blocks whose documents are now all settled (stored, or dropped after repeated rejection).</param>
         /// <param name="Unreachable">A store could not reach Elasticsearch: those documents stay pending for the next flush.</param>
         /// <param name="AbandonedDocuments">Tx ids Elasticsearch rejected on every attempt: dropped, their events are lost (logged by the caller).</param>
-        public sealed record FlushResult(IReadOnlyList<(ulong Round, long? Timestamp)> Completed, bool Unreachable, IReadOnlyList<string> AbandonedDocuments);
+        /// <param name="BackingOff">No attempt was made: Elasticsearch was unreachable a moment ago and the backlog is re-tried only every <see cref="DefaultUnreachableRetryInterval"/>.</param>
+        public sealed record FlushResult(IReadOnlyList<(ulong Round, long? Timestamp)> Completed, bool Unreachable, IReadOnlyList<string> AbandonedDocuments, bool BackingOff = false);
 
         public void Add(Trade trade) => _pending.GetOrAdd(trade.BlockId, _ => new Batch()).Trades[trade.TxId] = trade;
 
@@ -94,7 +95,7 @@ namespace AVMTradeReporter.Services
                 if (_unreachableSince != DateTimeOffset.MinValue && now - _lastAttemptAt < _unreachableRetryInterval)
                 {
                     // Elasticsearch was unreachable a moment ago: do not re-send the whole backlog with every block
-                    return new FlushResult(none, true, abandoned);
+                    return new FlushResult(none, false, abandoned, BackingOff: true);
                 }
                 _lastAttemptAt = now;
                 var unreachable = false;
@@ -130,7 +131,8 @@ namespace AVMTradeReporter.Services
             var all = closed.SelectMany(kv => documents(kv.Value).Values).ToArray();
             if (all.Length == 0) return true;
             var reached = true;
-            foreach (var (group, publish) in new[] { (all.Where(d => !_sent.Contains(idOf(d))).ToArray(), true), (all.Where(d => _sent.Contains(idOf(d))).ToArray(), false) })
+            var (fresh, resent) = FirstSend.Split(all, idOf, _sent);
+            foreach (var (group, publish) in new[] { (fresh, true), (resent, false) })
             {
                 foreach (var docs in group.Chunk(BulkChunkSize))
                 {

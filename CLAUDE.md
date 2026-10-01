@@ -384,7 +384,10 @@ purpose (CoinGecko's indexer cannot sign ARC-14). Rules that are easy to break:
   rejects is retried on the next flushes `PendingBlockBatches.DefaultMaxRejections` (3) times, then
   dropped (logged, the block completes without it), while an *unreachable* Elasticsearch keeps
   every batch pending indefinitely - the watermark waits (re-sends pass `publish: false`, so the
-  live feed sees a document once; the backlog is re-tried every 10 s in 2000-document slices and
+  live feed sees a document once - `FirstSend.Split`, also used by the gossip preview buffer, whose
+  TxPool previews are create-only bulk ops so a late re-send never overwrites a confirmed
+  document; a graceful stop cancels only the fetch loop and lets in-flight blocks finish on
+  `_processingCts`); the backlog is re-tried every 10 s in 2000-document slices and
   the loop stops fetching at `MaxPendingBlocks` = 500 waiting blocks); a forward jump of `Round`
   is done with `CoinGecko.ClearStoredThroughOnStartup` for one start; an indexer document without
   `StoredThrough` re-processes the last `MaxConcurrentTasks` blocks just in case. Follow-up (#23):

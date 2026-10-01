@@ -48,8 +48,10 @@ namespace AVMTradeReporter.Services
             _appConfig = appConfig;
         }
 
-        // previews already announced to the live feed (hub, recent queue) - a re-send after an unreachable store must not announce them again
+        // previews already announced to the live feed (hub, recent queue) - a re-send after an unreachable store must not
+        // announce them again; guarded by _finalizeLock
         readonly HashSet<string> _announced = new(StringComparer.Ordinal);
+        readonly SemaphoreSlim _finalizeLock = new(1, 1);
         ConcurrentDictionary<string, Trade> _trades = new ConcurrentDictionary<string, Trade>();
         ConcurrentDictionary<string, Liquidity> _liquidityUpdates = new ConcurrentDictionary<string, Liquidity>();
         public Task RegisterTrade(Trade trade, CancellationToken cancellationToken)
@@ -66,13 +68,27 @@ namespace AVMTradeReporter.Services
 
         private async Task FinalizeAsync(CancellationToken cancellationToken)
         {
+            // several relay receive loops finalize concurrently: the buffers and the announced-set are settled one at a time
+            await _finalizeLock.WaitAsync(cancellationToken);
+            try
+            {
+                await FinalizeCoreAsync(cancellationToken);
+            }
+            finally
+            {
+                _finalizeLock.Release();
+            }
+        }
+
+        private async Task FinalizeCoreAsync(CancellationToken cancellationToken)
+        {
             try
             {
                 // Mempool previews: once Elasticsearch was reached the buffer is cleared, rejected documents included (they are
                 // written again, confirmed, by the block processor; nothing here is worth re-sending for ever).
-                var trades = _trades.Values.ToArray();
                 var reached = true;
-                foreach (var (batch, publish) in new[] { (trades.Where(t => !_announced.Contains(t.TxId)).ToArray(), true), (trades.Where(t => _announced.Contains(t.TxId)).ToArray(), false) })
+                var (freshTrades, resentTrades) = FirstSend.Split(_trades.Values.ToArray(), t => t.TxId, _announced);
+                foreach (var (batch, publish) in new[] { (freshTrades, true), (resentTrades, false) })
                 {
                     if (batch.Length == 0) continue;
                     var result = await _tradeRepository.StoreTradesAsync(batch, cancellationToken, publish);
@@ -89,8 +105,8 @@ namespace AVMTradeReporter.Services
                         _announced.Remove(sent.TxId);
                     }
                 }
-                var liquidity = _liquidityUpdates.Values.ToArray();
-                foreach (var (batch, publish) in new[] { (liquidity.Where(l => !_announced.Contains(l.TxId)).ToArray(), true), (liquidity.Where(l => _announced.Contains(l.TxId)).ToArray(), false) })
+                var (freshLiquidity, resentLiquidity) = FirstSend.Split(_liquidityUpdates.Values.ToArray(), l => l.TxId, _announced);
+                foreach (var (batch, publish) in new[] { (freshLiquidity, true), (resentLiquidity, false) })
                 {
                     if (batch.Length == 0) continue;
                     var result = await _liquidityRepository.StoreLiquidityUpdatesAsync(batch, cancellationToken, publish);

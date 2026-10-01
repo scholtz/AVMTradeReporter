@@ -728,6 +728,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
 
             Assert.That((await service.GetEventsJsonAsync(10, 10, default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
             Assert.That((await service.GetPairAsync(PoolAppId.ToString(), default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
+            Assert.That((await service.GetAssetAsync("0", default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable), "an asset is not 'unknown' while the pool cache is empty");
 
             await _pools.StorePoolAsync(Pool(PoolAppId, "POOLADDR", 0, 31566704));
             _time.Advance(TimeSpan.FromSeconds(2));

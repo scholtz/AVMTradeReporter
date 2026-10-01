@@ -39,6 +39,10 @@ namespace AVMTradeReporter.Services
         // are acknowledged by Elasticsearch - see PendingBlockBatches.
         private readonly PendingBlockBatches _pending = new();
 
+        // Block tasks run on their own token: a graceful stop cancels the fetch loop (the host's stopping token) but lets the
+        // in-flight blocks finish, so they are not replayed on every rollout; only stragglers are cancelled at the end.
+        private readonly CancellationTokenSource _processingCts = new();
+
         // Async processing support
         private readonly SemaphoreSlim _concurrentTasksSemaphore;
         private readonly List<Task> _runningTasks = new List<Task>();
@@ -230,7 +234,7 @@ namespace AVMTradeReporter.Services
                         if (_concurrentTasksSemaphore.CurrentCount > 0)
                         {
                             // Start async processing
-                            var blockTask = ProcessBlockAsyncWrapper(Indexer.Round, stoppingToken);
+                            var blockTask = ProcessBlockAsyncWrapper(Indexer.Round, _processingCts.Token);
                             lock (_tasksLock)
                             {
                                 _runningTasks.Add(blockTask);
@@ -241,14 +245,14 @@ namespace AVMTradeReporter.Services
                         else
                         {
                             _logger.LogDebug("Max concurrent tasks reached, processing block {blockId} synchronously", Indexer.Round);
-                            await ProcessBlockWorkAsync(Indexer.Round, stoppingToken);
+                            await ProcessBlockWorkAsync(Indexer.Round, _processingCts.Token);
                         }
                     }
                     else
                     {
                         // Process synchronously
                         _logger.LogDebug("Processing block {blockId} synchronously (async disabled or memory pressure)", Indexer.Round);
-                        await ProcessBlockWorkAsync(Indexer.Round, stoppingToken);
+                        await ProcessBlockWorkAsync(Indexer.Round, _processingCts.Token);
                     }
 
                     await IncrementIndexer(stoppingToken);
@@ -680,8 +684,9 @@ namespace AVMTradeReporter.Services
             _logger.LogInformation("Trade Reporter Background Service is stopping...");
 
             // First stop the loop: base.StopAsync cancels the stopping token and awaits ExecuteAsync, so no new block is
-            // started while the in-flight ones drain below. Otherwise the final StoredThrough would be written while the
-            // indexer still moved on, and the next start would replay half-processed blocks.
+            // started while the in-flight ones drain below (they run on _processingCts, which is not cancelled yet).
+            // Otherwise the final StoredThrough would be written while the indexer still moved on, and the next start would
+            // replay half-processed blocks.
             try
             {
                 await base.StopAsync(stoppingToken);
@@ -726,6 +731,9 @@ namespace AVMTradeReporter.Services
                 _logger.LogError(ex, "Error while stopping background service");
             }
 
+            // Whatever did not finish in the drain window is abandoned now (the restart re-processes it from StoredThrough).
+            _processingCts.Cancel();
+
             // Closed batches (a block whose task finished but whose flush failed or threw) get one more chance - for every
             // indexer, the backfill one included, which has no StoredThrough to replay them from.
             try
@@ -752,6 +760,7 @@ namespace AVMTradeReporter.Services
             }
 
             _concurrentTasksSemaphore?.Dispose();
+            _processingCts.Dispose();
         }
 
         private async Task ProcessBlockAsyncWrapper(ulong blockId, CancellationToken cancellationToken)

@@ -1,6 +1,7 @@
 ﻿using AVMTradeReporter.Hubs;
 using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Models.Data;
+using AVMTradeReporter.Models.Data.Enums;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Core.Bulk;
 using Elastic.Clients.Elasticsearch.IndexManagement;
@@ -144,10 +145,16 @@ namespace AVMTradeReporter.Repository
                     // confirmed, or a block replayed after restart) overwrites the same doc instead of
                     // duplicating it. Requires "trades" to be a plain index, not a data stream - see the
                     // comment in CreateTradeIndexTemplateAsync.
-                    bulkRequest.Operations.Add(new BulkIndexOperation<Trade>(trade)
+                    // A mempool preview (TxPool) is create-only: it must never overwrite the confirmed document the block
+                    // processor may have stored meanwhile (Elasticsearch then answers 409 = exists already, not a rejection).
+                    if (trade.TradeState == TxState.TxPool)
                     {
-                        Id = trade.TxId
-                    });
+                        bulkRequest.Operations.Add(new BulkCreateOperation<Trade>(trade) { Id = trade.TxId });
+                    }
+                    else
+                    {
+                        bulkRequest.Operations.Add(new BulkIndexOperation<Trade>(trade) { Id = trade.TxId });
+                    }
                 }
                 if (_elasticClient == null)
                 {
@@ -176,7 +183,7 @@ namespace AVMTradeReporter.Repository
 
                         if (failureCount > 0)
                         {
-                            foreach (var failedItem in bulkResponse.Items.Where(item => !item.IsValid))
+                            foreach (var failedItem in bulkResponse.Items.Where(item => !item.IsValid && item.Status != 409))
                             {
                                 _logger.LogWarning("Failed to index trade {id}: {error}",
                                     failedItem.Id, failedItem.Error?.Reason ?? "Unknown error");
@@ -197,6 +204,10 @@ namespace AVMTradeReporter.Repository
                                 {
                                     newlyCreatedTrades.Add(trades[i]);
                                 }
+                            }
+                            else if (bulkResponseItems[i].Status == 409)
+                            {
+                                // create-only preview of a document that exists already (confirmed, or an earlier preview): settled
                             }
                             else
                             {
