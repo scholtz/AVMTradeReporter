@@ -354,7 +354,7 @@ purpose (CoinGecko's indexer cannot sign ARC-14). Rules that are easy to break:
   amounts are base units of their asset. `priceNative` = asset1 per asset0; asset0/asset1 = pool
   asset A/B (immutable on-chain order).
 - **Known limits (deliberate, same data the website has):** a block that algod cannot return
-  within 4 quick attempts is retried in the background for 10 minutes (`RecoverLostBlockAsync`,
+  within 4 quick attempts is retried in the background for 30 minutes (`RecoverLostBlockAsync`,
   the watermark and `StoredThrough` wait for it, so a restart re-processes it too) and only then
   given up; a transaction whose processing still throws after 3 attempts (`ProcessBlock`
   returns the failed positions and re-processes only those; idempotent), is lost for the indexer
@@ -384,8 +384,13 @@ purpose (CoinGecko's indexer cannot sign ARC-14). Rules that are easy to break:
   rejects is retried on the next flushes `PendingBlockBatches.DefaultMaxRejections` (3) times, then
   dropped (logged, the block completes without it), while an *unreachable* Elasticsearch keeps
   every batch pending indefinitely - the watermark waits (re-sends pass `publish: false`, so the
-  live feed sees a document once); a forward jump of `Round` is done with
-  `CoinGecko.ClearStoredThroughOnStartup` for one start; `metadata.fees*In` uses the pool's *current* LP fee; synthetic
+  live feed sees a document once; the backlog is re-tried every 10 s in 2000-document slices and
+  the loop stops fetching at `MaxPendingBlocks` = 500 waiting blocks); a forward jump of `Round`
+  is done with `CoinGecko.ClearStoredThroughOnStartup` for one start; an indexer document without
+  `StoredThrough` re-processes the last `MaxConcurrentTasks` blocks just in case. Follow-up (#23):
+  persisting the resume point as the contiguous watermark itself would make `StoredThrough`, the
+  mirror rules and the flag unnecessary - `Indexer.Round` is read by other tooling, so not done
+  here; `metadata.fees*In` uses the pool's *current* LP fee; synthetic
   positions of documents indexed before `TxnIndex` existed are deterministic per block but not
   chronological; the Redis latest-block mirror never lowers a higher value (delete the key after
   an intentional re-index); uncached `/events` ranges are built at most

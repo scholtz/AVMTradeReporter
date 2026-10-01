@@ -162,6 +162,15 @@ namespace AVMTradeReporter.Services
                             continue;
                         }
                     }
+                    if (_pending.PendingCount >= MaxPendingBlocks)
+                    {
+                        // Backpressure: Elasticsearch has not accepted the last MaxPendingBlocks blocks (an outage) - fetching
+                        // and processing further blocks would only grow the in-memory backlog without bound.
+                        _logger.LogWarning("{count} blocks are waiting for Elasticsearch - pausing block processing", _pending.PendingCount);
+                        await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+                        await FlushPendingAsync(stoppingToken);
+                        continue;
+                    }
                     //await ProcessBlockWorkAsync(52243617, stoppingToken);// pact
                     //await ProcessBlockWorkAsync(52279620, stoppingToken);// biatec
                     //await ProcessBlockWorkAsync(52335125, stoppingToken);//tiny
@@ -453,7 +462,7 @@ namespace AVMTradeReporter.Services
                 // The Redis mirror is written only after contiguous completion, so it is as trustworthy as StoredThrough and
                 // may even be ahead of it (blocks that completed after the last increment persisted StoredThrough).
                 var mirrored = await _blockTracker.GetLatestAsync(cancellationToken);
-                var (seedRound, rewind, verified) = ResolveStartupSeed(Indexer.Round, Indexer.StoredThrough, mirrored?.Round);
+                var (seedRound, rewind, verified) = ResolveStartupSeed(Indexer.Round, Indexer.StoredThrough, mirrored?.Round, (ulong)Math.Max(0, _appConfig.Value.BlockProcessing.MaxConcurrentTasks));
                 if (rewind)
                 {
                     _logger.LogWarning("Indexer round {round} is ahead of the last fully stored block {storedThrough} (blocks were in flight when the previous run stopped) - re-processing {count} blocks",
@@ -489,12 +498,18 @@ namespace AVMTradeReporter.Services
         /// forward clears <c>StoredThrough</c>, and a stale mirror must not undo that. Such a seed is <c>Verified = false</c>:
         /// advertised, but never mirrored to Redis nor persisted as <c>StoredThrough</c> until this run completed a block.
         /// Neither source may seed above the round before the indexer's: an operator who moves <c>Round</c> back for a
-        /// re-index must not have the stale mirror advertise blocks that are being rewritten.
+        /// re-index must not have the stale mirror advertise blocks that are being rewritten. Without any persisted
+        /// value the previous run may still have died with <paramref name="inFlightAllowance"/> blocks in flight (an
+        /// indexer document from before StoredThrough existed): those few blocks are re-processed just in case.
         /// </summary>
-        internal static (ulong SeedRound, bool Rewind, bool Verified) ResolveStartupSeed(ulong indexerRound, ulong? storedThrough, ulong? mirroredRound)
+        internal static (ulong SeedRound, bool Rewind, bool Verified) ResolveStartupSeed(ulong indexerRound, ulong? storedThrough, ulong? mirroredRound, ulong inFlightAllowance = 0)
         {
             var seedRound = indexerRound - 1;
-            if (storedThrough is not { } persisted) return (seedRound, false, false);
+            if (storedThrough is not { } persisted)
+            {
+                var cautious = seedRound - Math.Min(seedRound, inFlightAllowance);
+                return (cautious, cautious < seedRound, false);
+            }
             var known = Math.Min(mirroredRound.HasValue ? Math.Max(persisted, mirroredRound.Value) : persisted, seedRound);
             return known < seedRound ? (known, true, true) : (seedRound, false, true);
         }
@@ -525,8 +540,11 @@ namespace AVMTradeReporter.Services
             return null;
         }
 
-        private const int LostBlockRecoveryAttempts = 20;
+        private const int LostBlockRecoveryAttempts = 60; // 30 minutes at the delay below
         private static readonly TimeSpan LostBlockRecoveryDelay = TimeSpan.FromSeconds(30);
+
+        /// <summary>Blocks that may wait for Elasticsearch in memory before the indexer stops fetching new ones.</summary>
+        private const int MaxPendingBlocks = 500;
 
         private async Task ProcessBlockWorkAsync(ulong blockId, CancellationToken cancellationToken)
         {
@@ -573,7 +591,7 @@ namespace AVMTradeReporter.Services
                     return;
                 }
                 // Lost for the indexer itself as well (see CLAUDE.md, known limits): the watermark must not wait for ever.
-                _logger.LogError("Block {blockId} could not be fetched for {minutes} minutes - its events are lost", blockId, LostBlockRecoveryAttempts * LostBlockRecoveryDelay.TotalMinutes);
+                _logger.LogError("Block {blockId} could not be fetched for {minutes} minutes - its events are lost (an operator may re-process it with Round + ClearStoredThroughOnStartup)", blockId, LostBlockRecoveryAttempts * LostBlockRecoveryDelay.TotalMinutes);
                 _pending.Drop(blockId);
                 _blockTracker?.MarkCompleted(blockId, null);
             }
@@ -708,13 +726,22 @@ namespace AVMTradeReporter.Services
                 _logger.LogError(ex, "Error while stopping background service");
             }
 
-            // Persist where the stored data really ends, so a graceful restart neither loses nor replays blocks. Closed batches
-            // (a block whose task finished but whose flush failed or threw) get one more chance first.
+            // Closed batches (a block whose task finished but whose flush failed or threw) get one more chance - for every
+            // indexer, the backfill one included, which has no StoredThrough to replay them from.
+            try
+            {
+                await FlushPendingAsync(CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not flush the pending documents on shutdown");
+            }
+
+            // Persist where the stored data really ends, so a graceful restart neither loses nor replays blocks.
             if (Indexer != null && _blockTracker?.CompletedThrough != null && _indexerRepository != null)
             {
                 try
                 {
-                    await FlushPendingAsync(CancellationToken.None);
                     RecordStoredThrough();
                     await _indexerRepository.StoreIndexerAsync(Indexer, CancellationToken.None);
                 }

@@ -48,6 +48,8 @@ namespace AVMTradeReporter.Services
             _appConfig = appConfig;
         }
 
+        // previews already announced to the live feed (hub, recent queue) - a re-send after an unreachable store must not announce them again
+        readonly HashSet<string> _announced = new(StringComparer.Ordinal);
         ConcurrentDictionary<string, Trade> _trades = new ConcurrentDictionary<string, Trade>();
         ConcurrentDictionary<string, Liquidity> _liquidityUpdates = new ConcurrentDictionary<string, Liquidity>();
         public Task RegisterTrade(Trade trade, CancellationToken cancellationToken)
@@ -69,18 +71,42 @@ namespace AVMTradeReporter.Services
                 // Mempool previews: once Elasticsearch was reached the buffer is cleared, rejected documents included (they are
                 // written again, confirmed, by the block processor; nothing here is worth re-sending for ever).
                 var trades = _trades.Values.ToArray();
-                var result = await _tradeRepository.StoreTradesAsync(trades, cancellationToken);
-                if (result.Reached)
+                var reached = true;
+                foreach (var (batch, publish) in new[] { (trades.Where(t => !_announced.Contains(t.TxId)).ToArray(), true), (trades.Where(t => _announced.Contains(t.TxId)).ToArray(), false) })
                 {
+                    if (batch.Length == 0) continue;
+                    var result = await _tradeRepository.StoreTradesAsync(batch, cancellationToken, publish);
+                    foreach (var sent in batch) _announced.Add(sent.TxId);
+                    if (!result.Reached)
+                    {
+                        reached = false;
+                        continue;
+                    }
                     // exactly what was sent - a preview registered meanwhile goes out with the next batch
-                    foreach (var sent in trades) _trades.TryRemove(new KeyValuePair<string, Trade>(sent.TxId, sent));
+                    foreach (var sent in batch)
+                    {
+                        _trades.TryRemove(new KeyValuePair<string, Trade>(sent.TxId, sent));
+                        _announced.Remove(sent.TxId);
+                    }
                 }
                 var liquidity = _liquidityUpdates.Values.ToArray();
-                result = await _liquidityRepository.StoreLiquidityUpdatesAsync(liquidity, cancellationToken);
-                if (result.Reached)
+                foreach (var (batch, publish) in new[] { (liquidity.Where(l => !_announced.Contains(l.TxId)).ToArray(), true), (liquidity.Where(l => _announced.Contains(l.TxId)).ToArray(), false) })
                 {
-                    foreach (var sent in liquidity) _liquidityUpdates.TryRemove(new KeyValuePair<string, Liquidity>(sent.TxId, sent));
+                    if (batch.Length == 0) continue;
+                    var result = await _liquidityRepository.StoreLiquidityUpdatesAsync(batch, cancellationToken, publish);
+                    foreach (var sent in batch) _announced.Add(sent.TxId);
+                    if (!result.Reached)
+                    {
+                        reached = false;
+                        continue;
+                    }
+                    foreach (var sent in batch)
+                    {
+                        _liquidityUpdates.TryRemove(new KeyValuePair<string, Liquidity>(sent.TxId, sent));
+                        _announced.Remove(sent.TxId);
+                    }
                 }
+                if (!reached) _logger.LogWarning("Elasticsearch could not be reached; {trades} trade and {liquidity} liquidity previews stay buffered", _trades.Count, _liquidityUpdates.Count);
                 await Task.CompletedTask; // Placeholder for actual work
             }
             catch (Exception ex)

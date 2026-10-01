@@ -25,6 +25,22 @@ namespace AVMTradeReporter.Services
 
         public const int DefaultMaxRejections = 3;
 
+        /// <summary>Documents per bulk request: a backlog that grew during an outage is sent in slices Elasticsearch accepts.</summary>
+        public const int BulkChunkSize = 2000;
+
+        /// <summary>While Elasticsearch is unreachable the (growing) backlog is re-tried this often, not with every block.</summary>
+        public static readonly TimeSpan DefaultUnreachableRetryInterval = TimeSpan.FromSeconds(10);
+
+        private readonly TimeSpan _unreachableRetryInterval;
+
+        public PendingBlockBatches(TimeSpan? unreachableRetryInterval = null)
+        {
+            _unreachableRetryInterval = unreachableRetryInterval ?? DefaultUnreachableRetryInterval;
+        }
+
+        private DateTimeOffset _unreachableSince = DateTimeOffset.MinValue;
+        private DateTimeOffset _lastAttemptAt = DateTimeOffset.MinValue;
+
         private readonly ConcurrentDictionary<ulong, Batch> _pending = new();
         private readonly ConcurrentDictionary<string, int> _rejections = new();
         private readonly HashSet<string> _sent = new(StringComparer.Ordinal); // guarded by _flushLock
@@ -74,9 +90,17 @@ namespace AVMTradeReporter.Services
                 if (closed.Length == 0) return new FlushResult(none, false, Array.Empty<string>());
 
                 var abandoned = new List<string>();
+                var now = DateTimeOffset.UtcNow;
+                if (_unreachableSince != DateTimeOffset.MinValue && now - _lastAttemptAt < _unreachableRetryInterval)
+                {
+                    // Elasticsearch was unreachable a moment ago: do not re-send the whole backlog with every block
+                    return new FlushResult(none, true, abandoned);
+                }
+                _lastAttemptAt = now;
                 var unreachable = false;
                 unreachable |= !await StoreAsync(closed, b => b.Trades, t => t.TxId, storeTrades, maxRejections, abandoned);
                 unreachable |= !await StoreAsync(closed, b => b.Liquidity, l => l.TxId, storeLiquidity, maxRejections, abandoned);
+                _unreachableSince = unreachable ? (_unreachableSince == DateTimeOffset.MinValue ? now : _unreachableSince) : DateTimeOffset.MinValue;
 
                 if (cancellationToken.IsCancellationRequested) return new FlushResult(none, unreachable, abandoned);
 
@@ -106,18 +130,21 @@ namespace AVMTradeReporter.Services
             var all = closed.SelectMany(kv => documents(kv.Value).Values).ToArray();
             if (all.Length == 0) return true;
             var reached = true;
-            foreach (var (docs, publish) in new[] { (all.Where(d => !_sent.Contains(idOf(d))).ToArray(), true), (all.Where(d => _sent.Contains(idOf(d))).ToArray(), false) })
+            foreach (var (group, publish) in new[] { (all.Where(d => !_sent.Contains(idOf(d))).ToArray(), true), (all.Where(d => _sent.Contains(idOf(d))).ToArray(), false) })
             {
-                if (docs.Length == 0) continue;
-                var result = await store(docs, publish);
-                foreach (var d in docs) _sent.Add(idOf(d));
-                if (!result.Reached)
+                foreach (var docs in group.Chunk(BulkChunkSize))
                 {
-                    reached = false;
-                    continue;
+                    if (!reached) break; // the store is down: no point sending the remaining slices now
+                    var result = await store(docs, publish);
+                    foreach (var d in docs) _sent.Add(idOf(d));
+                    if (!result.Reached)
+                    {
+                        reached = false;
+                        continue;
+                    }
+                    var covered = docs.Select(idOf).ToHashSet(StringComparer.Ordinal);
+                    Settle(closed, documents, covered, result.RejectedIds, maxRejections, abandoned);
                 }
-                var covered = docs.Select(idOf).ToHashSet(StringComparer.Ordinal);
-                Settle(closed, documents, covered, result.RejectedIds, maxRejections, abandoned);
             }
             return reached;
         }

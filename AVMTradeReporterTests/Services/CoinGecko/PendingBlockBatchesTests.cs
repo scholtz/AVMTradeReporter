@@ -35,7 +35,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         [Test]
         public async Task UnreachableStore_KeepsEverything_HoweverLong_AndCompletesWithTheNextSuccessfulFlush()
         {
-            var batches = new PendingBlockBatches();
+            var batches = new PendingBlockBatches(unreachableRetryInterval: TimeSpan.Zero); // the cooldown is tested on its own
             batches.Open(10, 1000);
             batches.Add(Trade(10, "A"));
             batches.Close(10);
@@ -96,7 +96,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         [Test]
         public async Task PartialReach_SettlesTheReachedIndex_AndCompletesOnlyWhenBothDid()
         {
-            var batches = new PendingBlockBatches();
+            var batches = new PendingBlockBatches(unreachableRetryInterval: TimeSpan.Zero); // the cooldown is tested on its own
             batches.Open(10, 1000);
             batches.Add(Trade(10, "A"));
             batches.Add(Liq(10, "L"));
@@ -110,6 +110,43 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             var flush = await batches.FlushAsync((t, _) => { tradeStores++; return Task.FromResult(StoreResult.AllStored); }, Ok, default);
             Assert.That(tradeStores, Is.Zero, "trades were already accepted - not stored again");
             Assert.That(flush.Completed.Select(c => c.Round), Is.EqualTo(new ulong[] { 10 }));
+        }
+
+        [Test]
+        public async Task LargeBacklog_IsSentInSlices()
+        {
+            var batches = new PendingBlockBatches();
+            for (ulong b = 1; b <= 5; b++)
+            {
+                batches.Open(b, (long)b);
+                for (var i = 0; i < 1000; i++) batches.Add(Trade(b, $"T{b}-{i}"));
+                batches.Close(b);
+            }
+            var sizes = new List<int>();
+            var flush = await batches.FlushAsync((t, _) => { sizes.Add(t.Length); return Task.FromResult(StoreResult.AllStored); }, Ok, default);
+            Assert.That(sizes.Max(), Is.LessThanOrEqualTo(PendingBlockBatches.BulkChunkSize));
+            Assert.That(sizes.Sum(), Is.EqualTo(5000));
+            Assert.That(flush.Completed.Count, Is.EqualTo(5));
+        }
+
+        [Test]
+        public async Task WhileUnreachable_TheBacklogIsNotResentWithEveryFlush()
+        {
+            var batches = new PendingBlockBatches();
+            batches.Open(10, 1000);
+            batches.Add(Trade(10, "A"));
+            batches.Close(10);
+            var attempts = 0;
+            Func<Trade[], bool, Task<StoreResult>> down = (t, _) => { attempts++; return Task.FromResult(StoreResult.Unreachable); };
+
+            for (var i = 0; i < 20; i++)
+            {
+                batches.Open(11 + (ulong)i, 1003);
+                batches.Add(Trade(11 + (ulong)i, "B" + i));
+                batches.Close(11 + (ulong)i);
+                Assert.That((await batches.FlushAsync(down, Ok, default)).Unreachable, Is.True);
+            }
+            Assert.That(attempts, Is.EqualTo(1), "one attempt per retry interval, not one per block");
         }
 
         [Test]

@@ -17,6 +17,15 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         }
 
         [Test]
+        public void NothingKnown_WithConcurrentProcessing_ReprocessesTheBlocksThatMayHaveBeenInFlight()
+        {
+            // the previous (pre-StoredThrough) run may have died with up to MaxConcurrentTasks blocks unstored
+            Assert.That(TradeReporterBackgroundService.ResolveStartupSeed(1000, null, null, inFlightAllowance: 3), Is.EqualTo((996UL, true, false)));
+            Assert.That(TradeReporterBackgroundService.ResolveStartupSeed(2, null, null, inFlightAllowance: 3), Is.EqualTo((0UL, true, false)), "never below round 0");
+            Assert.That(TradeReporterBackgroundService.ResolveStartupSeed(1000, 999, null, inFlightAllowance: 3), Is.EqualTo((999UL, false, true)), "a persisted value needs no guessing");
+        }
+
+        [Test]
         public void StoredThroughBehindTheIndexer_RewindsToIt()
         {
             // crashed with blocks 997..999 in flight

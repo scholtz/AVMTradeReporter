@@ -78,9 +78,11 @@ namespace AVMTradeReporter.Services.CoinGecko
             var amountOut = Decimalize(trade.AssetAmountOut, decOut);
             var reserves = MapReserves(trade.A, trade.B, pair);
             if (amountIn is null || amountOut is null || reserves is null) return null;
-            // Reserves come from the transaction's global-state delta (absent = 0): a swap always touches both sides, so a 0
-            // on either means the processor could not read that side - reporting an empty pool side would be wrong.
-            if (trade.A == 0 || trade.B == 0) return null;
+            // Reserves come from the transaction's global-state delta (absent = 0). A swap always changes BOTH reserves, so
+            // both keys are present and a lone 0 is a real state (a concentrated-liquidity pool pushed to its price bound
+            // holds nothing of one asset) that must be reported; only 0/0 - a pool that would hold nothing at all after a
+            // swap - means the state could not be read. (Liquidity events touch one side at a time, hence their stricter rule.)
+            if (trade.A == 0 && trade.B == 0) return null;
 
             // asset0 quoted in asset1 = (asset1 amount) / (asset0 amount) of this swap
             decimal price;

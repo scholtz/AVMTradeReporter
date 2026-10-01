@@ -777,9 +777,8 @@ namespace AVMTradeReporter.Services.CoinGecko
         private static bool TryParseId(string? id, out ulong value)
         {
             value = 0;
-            return !string.IsNullOrWhiteSpace(id)
-                && id.All(char.IsAsciiDigit)
-                && ulong.TryParse(id, NumberStyles.None, CultureInfo.InvariantCulture, out value);
+            // NumberStyles.None: digits only - no sign, whitespace, separators or exponent
+            return !string.IsNullOrWhiteSpace(id) && ulong.TryParse(id, NumberStyles.None, CultureInfo.InvariantCulture, out value);
         }
     }
 }

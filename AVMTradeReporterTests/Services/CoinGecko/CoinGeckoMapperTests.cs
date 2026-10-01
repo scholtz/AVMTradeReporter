@@ -161,8 +161,8 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             swap.A = 0;
             swap.B = 0;
             Assert.That(CoinGeckoMapper.TryMapSwap(swap, BiatecPair, new EventPositionPair(1, 0)), Is.Null);
-            swap.A = 5_000_000_000; // one side unreadable is just as unreportable - a swap touches both sides
-            Assert.That(CoinGeckoMapper.TryMapSwap(swap, BiatecPair, new EventPositionPair(1, 0)), Is.Null);
+            swap.A = 5_000_000_000; // a lone 0 is a real state: a range pool pushed to its bound holds nothing of one asset
+            Assert.That(CoinGeckoMapper.TryMapSwap(swap, BiatecPair, new EventPositionPair(1, 0))!.Reserves.Asset1, Is.EqualTo("0"));
 
             // 0/0 after a withdrawal may be a full drain or a partial exit whose deltas were not parsed - not reportable
             var exit = new Liquidity
