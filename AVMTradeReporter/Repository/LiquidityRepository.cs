@@ -172,7 +172,8 @@ namespace AVMTradeReporter.Repository
                             }, cancellationToken);
                         }
 
-                        return true;
+                        // A partially rejected batch is not stored: the caller retries it (upserts by tx id are idempotent).
+                        return failureCount == 0;
                     }
                     else
                     {

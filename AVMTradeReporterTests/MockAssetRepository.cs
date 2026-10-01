@@ -49,6 +49,8 @@ namespace AVMTradeReporterTests
             return Task.CompletedTask;
         }
 
+        public Task<bool> IsDeletedAsync(ulong assetId, CancellationToken cancellationToken = default) => Task.FromResult(false);
+
         public Task<IEnumerable<BiatecAsset>> GetAssetsAsync(IEnumerable<ulong>? ids, string? search, int offset, int size, CancellationToken cancellationToken)
         {
             IEnumerable<BiatecAsset> query = _assets.Values;

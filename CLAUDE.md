@@ -372,16 +372,17 @@ purpose (CoinGecko's indexer cannot sign ARC-14). Rules that are easy to break:
   is *unverified*: advertised, but neither mirrored nor persisted until this run completed a
   block; a seed whose block header cannot be read is covered but not advertised. A pool that
   has stored events but is missing from the pool cache is loaded from chain and registered on
-  demand (`TryRegisterUnknownPoolAsync`, `UnknownPoolLoadAttempts`); single-sided deposits get
-  their untouched reserve from the pool cache (`FillUnchangedReservesOfDeposit`) - withdrawals
-  with a 0 reserve stay unreportable. A published pool whose asset decimals cannot be read stays
+  demand (`TryRegisterUnknownPoolAsync`, `UnknownPoolLoadAttempts`). Single-sided join/exit
+  events (one reserve absent from the state delta, stored as 0) are not reported - the live pool
+  cache is not "the reserve before the event" under concurrent block processing, so it cannot
+  fill the gap; swaps carry authoritative reserves. A published pool whose asset decimals cannot be read stays
   *transient* (503 for ranges touching it) until they resolve - the assets of a live pool exist;
   only a destroyed-asset tombstone (`IAssetRepository.IsDeletedAsync`) excludes a pool for good.
   `Protocols` is not pre-filled (config binding appends to a default list) - use
   `PublishedProtocols`.
-- More deliberate limits: `TradeRepository.StoreTradesAsync` reports success when the bulk call
-  itself succeeded even if single documents were rejected (they are logged; unchanged
-  behaviour, tracked with #23); `metadata.fees*In` uses the pool's *current* LP fee; synthetic
+- More deliberate limits: a bulk store with rejected documents counts as failed and the block's
+  batch is retried with every flush for `PendingBlockBatches.DefaultGiveUpAfter` (10 min), then
+  abandoned (logged, the watermark moves on); `metadata.fees*In` uses the pool's *current* LP fee; synthetic
   positions of documents indexed before `TxnIndex` existed are deterministic per block but not
   chronological; the Redis latest-block mirror never lowers a higher value (delete the key after
   an intentional re-index); uncached `/events` ranges are built at most

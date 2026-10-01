@@ -38,6 +38,8 @@ namespace AVMTradeReporterTests.Repository
             public Task SetAssetAsync(BiatecAsset asset, CancellationToken cancellationToken = default) =>
                 _inner.SetAssetAsync(asset, cancellationToken);
 
+            public Task<bool> IsDeletedAsync(ulong assetId, CancellationToken cancellationToken = default) => Task.FromResult(false);
+
             public Task<IEnumerable<BiatecAsset>> GetAssetsAsync(IEnumerable<ulong>? ids, string? search, int offset, int size, CancellationToken cancellationToken) =>
                 _inner.GetAssetsAsync(ids, search, offset, size, cancellationToken);
         }

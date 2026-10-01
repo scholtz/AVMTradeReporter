@@ -270,24 +270,7 @@ namespace AVMTradeReporter.Services
         public async Task RegisterLiquidity(Liquidity liquidityUpdate, CancellationToken cancellationToken)
         {
             await PopulateLiquidityUsdAsync(liquidityUpdate, cancellationToken);
-            if (liquidityUpdate.Direction == LiquidityDirection.DepositLiquidity && (liquidityUpdate.A == 0 || liquidityUpdate.B == 0))
-            {
-                FillUnchangedReservesOfDeposit(liquidityUpdate, _poolRepository.GetCachedPool(liquidityUpdate.PoolAddress));
-            }
             _pending.Add(liquidityUpdate);
-        }
-
-        /// <summary>
-        /// The processors read the reserves after a liquidity event from the transaction's global-state delta, where a reserve
-        /// the event did not touch is simply absent and ends up as 0 (a single-sided concentrated-liquidity deposit). A
-        /// deposit can never empty a side, so a 0 there is "unchanged": the reserve the pool cache holds from before the
-        /// event. (Withdrawals stay as they are - 0 may be a real drain.)
-        /// </summary>
-        internal static void FillUnchangedReservesOfDeposit(Liquidity liquidity, Pool? poolBefore)
-        {
-            if (liquidity.Direction != LiquidityDirection.DepositLiquidity || poolBefore == null) return;
-            if (liquidity.A == 0 && poolBefore.A is > 0) liquidity.A = poolBefore.A.Value;
-            if (liquidity.B == 0 && poolBefore.B is > 0) liquidity.B = poolBefore.B.Value;
         }
 
         private async Task PopulateTradeUsdAsync(Trade trade, CancellationToken cancellationToken)
@@ -482,15 +465,15 @@ namespace AVMTradeReporter.Services
         /// never replaces it: without a persisted value there is no rewind at all - an operator who jumps <c>Round</c>
         /// forward clears <c>StoredThrough</c>, and a stale mirror must not undo that. Such a seed is <c>Verified = false</c>:
         /// advertised, but never mirrored to Redis nor persisted as <c>StoredThrough</c> until this run completed a block.
+        /// Neither source may seed above the round before the indexer's: an operator who moves <c>Round</c> back for a
+        /// re-index must not have the stale mirror advertise blocks that are being rewritten.
         /// </summary>
         internal static (ulong SeedRound, bool Rewind, bool Verified) ResolveStartupSeed(ulong indexerRound, ulong? storedThrough, ulong? mirroredRound)
         {
             var seedRound = indexerRound - 1;
             if (storedThrough is not { } persisted) return (seedRound, false, false);
-            var stored = Math.Min(persisted, seedRound); // never above what this indexer has reached (an edited document)
-            var known = mirroredRound.HasValue ? Math.Max(stored, mirroredRound.Value) : stored;
-            if (known < seedRound) return (known, true, true);
-            return (known, false, true);
+            var known = Math.Min(mirroredRound.HasValue ? Math.Max(persisted, mirroredRound.Value) : persisted, seedRound);
+            return known < seedRound ? (known, true, true) : (seedRound, false, true);
         }
 
         private IEnumerable<(string Name, Algorand.Algod.IDefaultApi Api)> Algods()
@@ -641,6 +624,12 @@ namespace AVMTradeReporter.Services
             if (flush.StoreFailed)
             {
                 _logger.LogWarning("Storing pending documents failed; the closed block(s) stay pending and are retried with the next block");
+            }
+            foreach (var (round, timestamp) in flush.Abandoned)
+            {
+                // storage rejected the batch for the whole give-up window (see CLAUDE.md, known limits): lost, the watermark moves on
+                _logger.LogError("Documents of block {round} could not be stored for {minutes} minutes - abandoned, its events are lost", round, PendingBlockBatches.DefaultGiveUpAfter.TotalMinutes);
+                _blockTracker?.MarkCompleted(round, timestamp);
             }
             foreach (var (round, timestamp) in flush.Completed) _blockTracker?.MarkCompleted(round, timestamp);
         }

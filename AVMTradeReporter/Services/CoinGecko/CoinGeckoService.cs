@@ -574,7 +574,9 @@ namespace AVMTradeReporter.Services.CoinGecko
                         await GetSnapshotAsync(TimeSpan.Zero, cancellationToken);
                         lookup = await GetPairInfoAsync(appId, cancellationToken);
                         lookups[appId] = lookup;
-                        if (lookup.Transient) throw new TransientDataException($"pool {appId} cannot be described right now");
+                        // still unknown: a rebuild that was already running read the pool list before the registration -
+                        // the next request sees it; skipping now would cache the range without the pool's events
+                        if (lookup.Transient || (lookup.Pair == null && !lookup.Excluded)) throw new TransientDataException($"pool {appId} was just registered - the pair snapshot is catching up");
                         pair = lookup.Pair;
                     }
                 }

@@ -13,6 +13,6 @@ namespace AVMTradeReporter.Repository
         /// True when the asset is known to be destroyed / non-existent on chain (a cached tombstone). <see cref="GetAssetAsync"/>
         /// returns null for that AND for a transient failure (algod timeout); callers that must tell the two apart ask here.
         /// </summary>
-        Task<bool> IsDeletedAsync(ulong assetId, CancellationToken cancellationToken = default) => Task.FromResult(false);
+        Task<bool> IsDeletedAsync(ulong assetId, CancellationToken cancellationToken = default);
     }
 }

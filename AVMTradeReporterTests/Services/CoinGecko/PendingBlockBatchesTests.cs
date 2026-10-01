@@ -72,6 +72,24 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         }
 
         [Test]
+        public async Task BatchRejectedForLongerThanTheGiveUpTime_IsAbandoned_SoTheWatermarkMovesOn()
+        {
+            var batches = new PendingBlockBatches();
+            batches.Open(10, 1000);
+            batches.Add(Trade(10, "A"));
+            batches.Close(10);
+
+            var first = await batches.FlushAsync(Fail, Ok, default, giveUpAfter: TimeSpan.FromMinutes(10));
+            Assert.That(first.Abandoned, Is.Empty, "still within the window");
+            Assert.That(batches.PendingCount, Is.EqualTo(1));
+
+            var later = await batches.FlushAsync(Fail, Ok, default, giveUpAfter: TimeSpan.Zero);
+            Assert.That(later.StoreFailed, Is.True);
+            Assert.That(later.Abandoned, Is.EqualTo(new[] { (10UL, (long?)1000L) }));
+            Assert.That(batches.PendingCount, Is.Zero);
+        }
+
+        [Test]
         public async Task EmptyBlock_CompletesWithoutAnyStore()
         {
             var batches = new PendingBlockBatches();

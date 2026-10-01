@@ -17,6 +17,7 @@ namespace AVMTradeReporter.Services
             public readonly ConcurrentDictionary<string, Liquidity> Liquidity = new();
             public long? Timestamp;
             public volatile bool Closed;
+            public DateTimeOffset ClosedAt;
         }
 
         private readonly ConcurrentDictionary<ulong, Batch> _pending = new();
@@ -24,7 +25,11 @@ namespace AVMTradeReporter.Services
 
         /// <param name="Completed">Blocks whose documents are now all acknowledged.</param>
         /// <param name="StoreFailed">A store call answered false: the closed batches stay pending for the next flush.</param>
-        public sealed record FlushResult(IReadOnlyList<(ulong Round, long? Timestamp)> Completed, bool StoreFailed);
+        /// <param name="Abandoned">Blocks whose documents storage kept rejecting for longer than the give-up time: dropped, so the
+        /// watermark can move on; their events are lost (logged by the caller).</param>
+        public sealed record FlushResult(IReadOnlyList<(ulong Round, long? Timestamp)> Completed, bool StoreFailed, IReadOnlyList<(ulong Round, long? Timestamp)> Abandoned);
+
+        public static readonly TimeSpan DefaultGiveUpAfter = TimeSpan.FromMinutes(10);
 
         public void Add(Trade trade) => _pending.GetOrAdd(trade.BlockId, _ => new Batch()).Trades[trade.TxId] = trade;
 
@@ -38,7 +43,13 @@ namespace AVMTradeReporter.Services
         }
 
         /// <summary>All transactions of the block were registered (or processing gave up): the batch may be flushed.</summary>
-        public void Close(ulong round) => _pending.GetOrAdd(round, _ => new Batch()).Closed = true;
+        public void Close(ulong round)
+        {
+            var batch = _pending.GetOrAdd(round, _ => new Batch());
+            if (batch.Closed) return;
+            batch.ClosedAt = DateTimeOffset.UtcNow;
+            batch.Closed = true;
+        }
 
         /// <summary>Forgets a block that will never be stored (it could not be fetched at all).</summary>
         public void Drop(ulong round) => _pending.TryRemove(round, out _);
@@ -48,20 +59,24 @@ namespace AVMTradeReporter.Services
         /// <summary>
         /// Stores the documents of every closed batch (one bulk call per index) and returns the blocks that are thereby
         /// completely stored. Each index's documents are forgotten as soon as that index acknowledged them; a block completes
-        /// only when both did. A failed store leaves the batches pending for the next flush. Flushes are serialized: block
+        /// only when both did. A failed store leaves the batches pending for the next flush - for at most <paramref name="giveUpAfter"/>
+        /// (default <see cref="DefaultGiveUpAfter"/>) after they were closed: a document storage rejects for good (a mapping
+        /// conflict) must not hold the watermark for ever, so such batches are then abandoned. Flushes are serialized: block
         /// tasks finish concurrently, and the second flush must only see what the first one left behind, not store (and
         /// publish to the hub) the same documents twice.
         /// </summary>
         public async Task<FlushResult> FlushAsync(
             Func<Trade[], Task<bool>> storeTrades,
             Func<Liquidity[], Task<bool>> storeLiquidity,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            TimeSpan? giveUpAfter = null)
         {
             await _flushLock.WaitAsync(cancellationToken);
             try
             {
+                var none = Array.Empty<(ulong, long?)>();
                 var closed = _pending.Where(kv => kv.Value.Closed).ToArray();
-                if (closed.Length == 0) return new FlushResult(Array.Empty<(ulong, long?)>(), false);
+                if (closed.Length == 0) return new FlushResult(none, false, none);
 
                 var trades = closed.SelectMany(kv => kv.Value.Trades.Values).ToArray();
                 var tradesOk = trades.Length == 0 || await storeTrades(trades);
@@ -71,15 +86,24 @@ namespace AVMTradeReporter.Services
                 var liquidityOk = liquidity.Length == 0 || await storeLiquidity(liquidity);
                 if (liquidityOk) foreach (var kv in closed) kv.Value.Liquidity.Clear();
 
-                if (!tradesOk || !liquidityOk) return new FlushResult(Array.Empty<(ulong, long?)>(), true);
-                if (cancellationToken.IsCancellationRequested) return new FlushResult(Array.Empty<(ulong, long?)>(), false);
+                if (!tradesOk || !liquidityOk)
+                {
+                    var abandoned = new List<(ulong, long?)>();
+                    var limit = DateTimeOffset.UtcNow - (giveUpAfter ?? DefaultGiveUpAfter);
+                    foreach (var kv in closed)
+                    {
+                        if (kv.Value.ClosedAt <= limit && _pending.TryRemove(kv.Key, out var batch)) abandoned.Add((kv.Key, batch.Timestamp));
+                    }
+                    return new FlushResult(none, true, abandoned);
+                }
+                if (cancellationToken.IsCancellationRequested) return new FlushResult(none, false, none);
 
                 var completed = new List<(ulong, long?)>(closed.Length);
                 foreach (var kv in closed)
                 {
                     if (_pending.TryRemove(kv.Key, out var batch)) completed.Add((kv.Key, batch.Timestamp));
                 }
-                return new FlushResult(completed, false);
+                return new FlushResult(completed, false, none);
             }
             finally
             {

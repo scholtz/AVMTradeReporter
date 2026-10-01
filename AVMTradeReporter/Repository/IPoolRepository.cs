@@ -16,7 +16,7 @@ namespace AVMTradeReporter.Repository
         /// neither enriches the pool nor hides one whose asset decimals are not resolved yet - callers that resolve
         /// decimals themselves (the CoinGecko pair snapshot) need the raw entry to tell "unresolved" from "unknown".
         /// </summary>
-        Pool? GetCachedPool(string poolAddress) => null;
+        Pool? GetCachedPool(string poolAddress);
         Task<bool> StorePoolAsync(Pool pool, bool updateAggregated = true, CancellationToken? cancellationToken = null);
         Task UpdatePoolFromTrade(Trade trade, CancellationToken cancellationToken);
         Task UpdatePoolFromLiquidity(Liquidity liquidity, CancellationToken cancellationToken);

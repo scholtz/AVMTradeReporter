@@ -34,8 +34,10 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             // 6-hour mirror must not undo that (an old indexer document crashing in its first run is the price)
             Assert.That(TradeReporterBackgroundService.ResolveStartupSeed(1000, null, 998), Is.EqualTo((999UL, false, false)));
             Assert.That(TradeReporterBackgroundService.ResolveStartupSeed(60_000_000, null, 59_000_000), Is.EqualTo((59_999_999UL, false, false)));
-            // another pod is ahead: advertise what Redis already advertises, do not rewind
-            Assert.That(TradeReporterBackgroundService.ResolveStartupSeed(1000, 999, 1200), Is.EqualTo((1200UL, false, true)));
+            // the mirror is ahead of the indexer (another pod, or an operator moved Round back for a re-index): never seed
+            // above the round before the indexer's - blocks being rewritten must not be advertised as complete
+            Assert.That(TradeReporterBackgroundService.ResolveStartupSeed(1000, 999, 1200), Is.EqualTo((999UL, false, true)));
+            Assert.That(TradeReporterBackgroundService.ResolveStartupSeed(900_000, 899_999, 999_990), Is.EqualTo((899_999UL, false, true)));
         }
 
         [Test]
