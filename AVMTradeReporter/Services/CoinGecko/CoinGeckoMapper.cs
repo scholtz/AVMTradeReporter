@@ -82,6 +82,8 @@ namespace AVMTradeReporter.Services.CoinGecko
             // both keys are present and a lone 0 is a real state (a concentrated-liquidity pool pushed to its price bound
             // holds nothing of one asset) that must be reported; only 0/0 - a pool that would hold nothing at all after a
             // swap - means the state could not be read. (Liquidity events touch one side at a time, hence their stricter rule.)
+            // (Pact CLAMM swaps are stored with A = B = 0 by construction - their reserves are not tracked, so they are not
+            // reportable either; only the Biatec DEX is published by default.)
             if (trade.A == 0 && trade.B == 0) return null;
 
             // asset0 quoted in asset1 = (asset1 amount) / (asset0 amount) of this swap

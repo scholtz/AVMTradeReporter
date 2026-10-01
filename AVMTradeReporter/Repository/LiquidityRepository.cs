@@ -115,7 +115,9 @@ namespace AVMTradeReporter.Repository
 
                 var bulkRequest = new BulkRequest("liquidity")
                 {
-                    Operations = new BulkOperationsCollection()
+                    Operations = new BulkOperationsCollection(),
+                    // searchable before the block counts as indexed (latest-block): no timer guessing the refresh interval
+                    Refresh = Elastic.Clients.Elasticsearch.Refresh.WaitFor,
                 };
 
                 foreach (var item in items)

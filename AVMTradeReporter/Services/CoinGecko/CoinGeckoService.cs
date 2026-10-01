@@ -291,7 +291,7 @@ namespace AVMTradeReporter.Services.CoinGecko
             // An undescribable pool (asset decimals not readable right now) stays transient until it resolves: its events exist
             // and must not be cached away. The permanent case - a destroyed asset - is a tombstone and is in Excluded instead.
             // "Known" = the pool cache has the pool; only a pool the cache has never heard of can be a brand new one.
-            return new PairLookup(null, snapshot.Unresolved.ContainsKey(appId), snapshot.Excluded.Contains(appId));
+            return new PairLookup(null, snapshot.Unresolved.ContainsKey(appId), false); // excluded pools returned above, before the refresh
         }
 
         private async Task<PoolSnapshot> GetSnapshotAsync(TimeSpan? forceIfOlderThan, CancellationToken cancellationToken)
@@ -359,6 +359,11 @@ namespace AVMTradeReporter.Services.CoinGecko
                     continue;
                 }
                 var decimalsOnPool = pool.AssetADecimals.HasValue && pool.AssetBDecimals.HasValue;
+                if (snapshot.Excluded.Contains(pool.PoolAppId) && !decimalsOnPool && !retryUnresolved)
+                {
+                    excluded.Add(pool.PoolAppId); // destroyed asset found earlier: stays excluded between regular refreshes
+                    continue;
+                }
                 if (!retryUnresolved && !decimalsOnPool)
                 {
                     // would need the asset repository (algod): on the regular cadence only, never on a probe-triggered rebuild

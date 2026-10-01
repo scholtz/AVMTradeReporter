@@ -123,7 +123,6 @@ namespace AVMTradeReporter.Services
                     }
                 }
                 if (!reached) _logger.LogWarning("Elasticsearch could not be reached; {trades} trade and {liquidity} liquidity previews stay buffered", _trades.Count, _liquidityUpdates.Count);
-                await Task.CompletedTask; // Placeholder for actual work
             }
             catch (Exception ex)
             {

@@ -452,6 +452,11 @@ namespace AVMTradeReporter.Services
             }
             try
             {
+                var clearedStoredThrough = false;
+                if (_appConfig.Value.CoinGecko.ClearStoredThroughOnStartup)
+                {
+                    clearedStoredThrough = true;
+                }
                 if (_appConfig.Value.CoinGecko.ClearStoredThroughOnStartup && Indexer.StoredThrough != null)
                 {
                     // the explicit way to move Round forward on purpose (see CoinGeckoConfiguration.ClearStoredThroughOnStartup)
@@ -466,7 +471,9 @@ namespace AVMTradeReporter.Services
                 // The Redis mirror is written only after contiguous completion, so it is as trustworthy as StoredThrough and
                 // may even be ahead of it (blocks that completed after the last increment persisted StoredThrough).
                 var mirrored = await _blockTracker.GetLatestAsync(cancellationToken);
-                var (seedRound, rewind, verified) = ResolveStartupSeed(Indexer.Round, Indexer.StoredThrough, mirrored?.Round, (ulong)Math.Max(0, _appConfig.Value.BlockProcessing.MaxConcurrentTasks));
+                // after an explicit forward jump (StoredThrough just cleared) nothing below Round may be re-processed
+                var allowance = clearedStoredThrough ? 0UL : (ulong)Math.Max(0, _appConfig.Value.BlockProcessing.MaxConcurrentTasks);
+                var (seedRound, rewind, verified) = ResolveStartupSeed(Indexer.Round, Indexer.StoredThrough, mirrored?.Round, allowance);
                 if (rewind)
                 {
                     _logger.LogWarning("Indexer round {round} is ahead of the last fully stored block {storedThrough} (blocks were in flight when the previous run stopped) - re-processing {count} blocks",
