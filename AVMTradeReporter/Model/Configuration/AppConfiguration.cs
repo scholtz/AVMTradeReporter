@@ -518,5 +518,11 @@ namespace AVMTradeReporter.Model.Configuration
         /// created moments ago is registered with a short delay, and its first events must not be dropped for good.
         /// </summary>
         public int UnknownPoolGraceSeconds { get; set; } = 120;
+
+        /// <summary>
+        /// How many uncached <c>/events</c> ranges may be built (Elasticsearch queries) at the same time; further ones wait a
+        /// few seconds and then fail with a retryable 503. Cached ranges are not limited.
+        /// </summary>
+        public int MaxConcurrentEventQueries { get; set; } = 4;
     }
 }

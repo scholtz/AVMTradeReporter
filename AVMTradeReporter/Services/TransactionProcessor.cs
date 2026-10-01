@@ -77,7 +77,7 @@ namespace AVMTradeReporter.Services
                         {
                             currTx.Tx.FillInParamsFromBlockHeader(block.Block);
                             var txId = currTx.Tx.TxID();
-                            await this.ProcessTransaction(currTx, prevTx1, prevTx2, block.Block, currTx.Tx.Group, txId, currTx.Tx.Sender, TxState.Confirmed, tradeService, liquidityService, cancellationToken, currTx.Tx is ApplicationNoopTransaction ? new EventPosition(index) : null); // only app calls can emit swap / liquidity events
+                            await this.ProcessTransaction(currTx, prevTx1, prevTx2, block.Block, currTx.Tx.Group, txId, currTx.Tx.Sender, TxState.Confirmed, tradeService, liquidityService, cancellationToken, currTx.Tx is ApplicationNoopTransaction || currTx.Detail?.InnerTxns?.Count > 0 ? new EventPosition(index) : null); // only app calls (or anything with inner transactions) can emit swap / liquidity events
                         }
                         catch (Exception exc)
                         {

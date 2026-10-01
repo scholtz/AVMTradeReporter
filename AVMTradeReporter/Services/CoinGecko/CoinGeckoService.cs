@@ -74,6 +74,7 @@ namespace AVMTradeReporter.Services.CoinGecko
         private readonly ConcurrentDictionary<string, Lazy<Task<byte[]>>> _inFlight = new();
         private readonly ConcurrentDictionary<ulong, (CoinGeckoAsset? Asset, DateTimeOffset Expires)> _assets = new();
         private readonly SemaphoreSlim _snapshotLock = new(1, 1);
+        private readonly SemaphoreSlim _computeGate;
         private volatile PoolSnapshot _snapshot = new(new Dictionary<ulong, PairInfo>(), new Dictionary<ulong, DateTimeOffset>(), new HashSet<ulong>(), new HashSet<ulong>(), DateTimeOffset.MinValue);
 
         /// <param name="Pairs">Published pairs by pool application id.</param>
@@ -111,6 +112,7 @@ namespace AVMTradeReporter.Services.CoinGecko
             _redis = _redisConfig.Enabled ? services.GetService<IDatabase>() : null;
             _logger = logger;
             _time = timeProvider ?? TimeProvider.System;
+            _computeGate = new SemaphoreSlim(Math.Max(1, _config.MaxConcurrentEventQueries));
             _eventsCache = new MemoryCache(new MemoryCacheOptions { SizeLimit = Math.Max(1, _config.EventsMemoryCacheMegabytes) * 1024L * 1024L });
         }
 
@@ -249,7 +251,9 @@ namespace AVMTradeReporter.Services.CoinGecko
             // is then skipped instead of stalling the whole integration at its first block for ever.
             var transient = snapshot.Unresolved.TryGetValue(appId, out var since)
                 && _time.GetUtcNow() - since < TimeSpan.FromMinutes(Math.Max(0, _config.UnresolvedPoolGraceMinutes));
-            return new PairLookup(null, transient, snapshot.Excluded.Contains(appId));
+            // "Known" = the pool cache has the pool: relabelled scam pools, malformed pools and pools that stayed undescribable
+            // for the whole grace period are skipped for good. Only a pool the cache has never heard of can be a brand new one.
+            return new PairLookup(null, transient, snapshot.Excluded.Contains(appId) || snapshot.Unresolved.ContainsKey(appId));
         }
 
         private async Task<PoolSnapshot> GetSnapshotAsync(TimeSpan? forceIfOlderThan, CancellationToken cancellationToken)
@@ -269,12 +273,14 @@ namespace AVMTradeReporter.Services.CoinGecko
                 var assetIds = new HashSet<ulong>();
                 var excluded = new HashSet<ulong>();
                 var now = _time.GetUtcNow();
-                foreach (var protocol in _config.PublishedProtocols)
+                // Scam-labelled pools are listed too (never published): their stored swaps still carry the protocol they had
+                // before the relabel, and "known but excluded" must not be confused with "not registered yet".
+                foreach (var protocol in _config.PublishedProtocols.Append(DEXProtocol.Scam).Distinct())
                 {
                     var pools = await _poolRepository.GetPoolsAsync(null, null, null, protocol, int.MaxValue, null, SortDirection.Desc, cancellationToken);
                     foreach (var pool in pools)
                     {
-                        if (!IsPublishable(pool))
+                        if (protocol == DEXProtocol.Scam && !_config.PublishedProtocols.Contains(DEXProtocol.Scam) || !IsPublishable(pool))
                         {
                             excluded.Add(pool.PoolAppId);
                             continue;
@@ -388,8 +394,13 @@ namespace AVMTradeReporter.Services.CoinGecko
 
         private async Task<byte[]> ComputeAndCacheAsync(ulong fromBlock, ulong toBlock, string key, string redisKey)
         {
+            var gated = false;
             try
             {
+                // At most MaxConcurrentEventQueries uncached ranges are built at a time: distinct ranges are the one thing a caller
+                // can multiply, and each costs Elasticsearch queries. Waiting longer than a few seconds is a retryable 503.
+                gated = await _computeGate.WaitAsync(TimeSpan.FromSeconds(5));
+                if (!gated) throw new TransientDataException("too many events requests are being built right now");
                 // CancellationToken.None: the shared computation must not be killed by whichever caller cancels first.
                 var json = JsonSerializer.SerializeToUtf8Bytes(new CoinGeckoEventsResponse { Events = await BuildEventsAsync(fromBlock, toBlock, CancellationToken.None) }, JsonOptions);
                 RememberInMemory(key, json);
@@ -398,6 +409,7 @@ namespace AVMTradeReporter.Services.CoinGecko
             }
             finally
             {
+                if (gated) _computeGate.Release();
                 // Removed by the computation itself (not by a waiting caller, who may have been cancelled): a finished
                 // entry must never be reused by a later request - the caches above are the only place results live.
                 _inFlight.TryRemove(key, out _);
@@ -431,11 +443,16 @@ namespace AVMTradeReporter.Services.CoinGecko
 
             var events = new List<CoinGeckoEvent>(keys.Count);
             var skipped = 0;
+            var lookups = new Dictionary<ulong, PairLookup>(); // each pool is resolved once per request, not once per event
             for (var i = 0; i < keys.Count; i++)
             {
                 var isTrade = i < trades.Count;
                 var appId = isTrade ? trades[i].PoolAppId : liquidity[i - trades.Count].PoolAppId;
-                var lookup = await GetPairInfoAsync(appId, cancellationToken);
+                if (!lookups.TryGetValue(appId, out var lookup))
+                {
+                    lookup = await GetPairInfoAsync(appId, cancellationToken);
+                    lookups[appId] = lookup;
+                }
                 // A published pool that cannot be described right now is not "unknown": skipping its events would be cached
                 // as the final answer for an immutable range and GeckoTerminal would never see them.
                 if (lookup.Transient) throw new TransientDataException($"pool {appId} cannot be described right now");

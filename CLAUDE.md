@@ -359,3 +359,11 @@ purpose (CoinGecko's indexer cannot sign ARC-14). Rules that are easy to break:
   decimals stay unresolvable for `UnresolvedPoolGraceMinutes` is skipped (logged) instead of
   failing every `/events` range that touches it. `Protocols` is not pre-filled (config binding
   appends to a default list) - use `PublishedProtocols`.
+- More deliberate limits: `TradeRepository.StoreTradesAsync` reports success when the bulk call
+  itself succeeded even if single documents were rejected (they are logged; unchanged
+  behaviour, tracked with #23); `metadata.fees*In` uses the pool's *current* LP fee; synthetic
+  positions of documents indexed before `TxnIndex` existed are deterministic per block but not
+  chronological; the Redis latest-block mirror never lowers a higher value (delete the key after
+  an intentional re-index); uncached `/events` ranges are built at most
+  `MaxConcurrentEventQueries` at a time and an event of a pool the cache has never heard of is
+  held back (503) for `UnknownPoolGraceSeconds` so a brand new pool's first events are not lost.

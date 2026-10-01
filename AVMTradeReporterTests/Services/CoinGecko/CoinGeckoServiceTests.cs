@@ -617,6 +617,37 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         }
 
         [Test]
+        public async Task Events_RecentEventOfARelabelledScamPool_DoesNotStallTheFeed()
+        {
+            // the pool was relabelled DEXProtocol.Scam after its swaps were stored as Biatec: known to the cache -> skipped, no 503
+            await _pools.StorePoolAsync(Pool(667, "RELABELLED", 0, 31566704, DEXProtocol.Scam));
+            var trade = Swap("SCAM2", 10, 1, 0, appId: 667);
+            trade.Timestamp = DateTimeOffset.UtcNow;
+            _source.Trades.Add(trade);
+            _source.Trades.Add(Swap("OK", 10, 2, 0));
+            var events = Events(await Create().GetEventsJsonAsync(10, 10, default));
+            Assert.That(events, Has.Length.EqualTo(1));
+        }
+
+        [Test]
+        public async Task Events_EachPoolIsResolvedOncePerRequest()
+        {
+            for (var i = 0; i < 50; i++) _source.Trades.Add(Swap("T" + i, 10, (ulong)i + 1, 0));
+            var counting = new Mock<IPoolRepository>();
+            var calls = 0;
+            counting.Setup(p => p.GetPoolsAsync(It.IsAny<ulong?>(), It.IsAny<ulong?>(), It.IsAny<string?>(), It.IsAny<DEXProtocol?>(), It.IsAny<int>(), It.IsAny<PoolOrderBy?>(), It.IsAny<SortDirection>(), It.IsAny<CancellationToken>()))
+                .Returns((ulong? _, ulong? _, string? _, DEXProtocol? protocol, int _, PoolOrderBy? _, SortDirection _, CancellationToken _) =>
+                {
+                    Interlocked.Increment(ref calls);
+                    return Task.FromResult(protocol == DEXProtocol.Biatec ? new List<PoolModel> { Pool(PoolAppId, "POOLADDR", 0, 31566704) } : new List<PoolModel>());
+                });
+            var service = new CoinGeckoService(Options.Create(_config), _tracker, _source, counting.Object, _assets.Object, new ServiceCollection().BuildServiceProvider(), NullLogger<CoinGeckoService>.Instance);
+
+            Assert.That(Events(await service.GetEventsJsonAsync(10, 10, default)), Has.Length.EqualTo(50));
+            Assert.That(calls, Is.LessThanOrEqualTo(2), "one snapshot load (published protocol + scam list), not one per event");
+        }
+
+        [Test]
         public async Task Events_OutputIsPlainJsonWithEventsArray()
         {
             var json = System.Text.Encoding.UTF8.GetString((await Create().GetEventsJsonAsync(1, 1, default)).Value!);
