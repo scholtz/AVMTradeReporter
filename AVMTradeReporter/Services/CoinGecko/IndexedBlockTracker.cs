@@ -37,6 +37,8 @@ namespace AVMTradeReporter.Services.CoinGecko
         private readonly TimeSpan _visibilityDelay;
         private readonly ILogger<IndexedBlockTracker> _logger;
         private readonly TimeProvider _time;
+        private readonly SemaphoreSlim _persistLock = new(1, 1);
+        private long _persistedRound = -1;
         private IndexedBlock? _watermark;
         private IndexedBlock? _published;
         private (IndexedBlock? Value, DateTimeOffset At)? _redisRead;
@@ -118,13 +120,23 @@ namespace AVMTradeReporter.Services.CoinGecko
         private async Task PersistAsync(IndexedBlock block)
         {
             if (_redis == null) return;
+            // One write at a time and never an older block than the last one written: two overlapping publish tasks
+            // (blocks come every ~2.8 s, the visibility delay is ~3 s) must not leave Redis - which other replicas
+            // read - on the older value.
+            await _persistLock.WaitAsync();
             try
             {
+                if ((long)block.Round <= _persistedRound) return;
                 await _redis.StringSetAsync(_redisKey, JsonSerializer.Serialize(block), TimeSpan.FromHours(6));
+                _persistedRound = (long)block.Round;
             }
             catch (Exception ex)
             {
                 _logger.LogDebug(ex, "Could not mirror latest indexed block to Redis");
+            }
+            finally
+            {
+                _persistLock.Release();
             }
         }
 

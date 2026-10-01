@@ -487,14 +487,17 @@ namespace AVMTradeReporter.Services
                 var result = await _tradeRepository.StoreTradesAsync(tradeBatch, cancellationToken);
                 if (result)
                 {
-                    _trades.Clear();
+                    // Remove exactly what was stored. Clear() would also drop trades a concurrently processed block
+                    // registered after the snapshot above - they would never be stored and the block that owns them
+                    // would still count as indexed.
+                    foreach (var done in tradeBatch) _trades.TryRemove(new KeyValuePair<string, Trade>(done.TxId, done));
                 }
                 var tradesStored = result || tradeBatch.Length == 0;
                 var liquidityBatch = _liquidityUpdates.Values.ToArray();
                 result = await _liquidityRepository.StoreLiquidityUpdatesAsync(liquidityBatch, cancellationToken);
                 if (result)
                 {
-                    _liquidityUpdates.Clear();
+                    foreach (var done in liquidityBatch) _liquidityUpdates.TryRemove(new KeyValuePair<string, Liquidity>(done.TxId, done));
                 }
                 stored = tradesStored && (result || liquidityBatch.Length == 0);
                 if (stored)

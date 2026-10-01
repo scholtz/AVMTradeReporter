@@ -31,6 +31,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             public List<Trade> Trades { get; } = new();
             public List<Liquidity> Liquidity { get; } = new();
             public bool IsAvailable { get; set; } = true;
+            public Exception? Failure { get; set; }
             public int TradeCalls;
             public int LiquidityCalls;
             public List<(ulong Lo, ulong Hi, int Size)> TradeQueries { get; } = new();
@@ -38,6 +39,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             public Task<IReadOnlyList<Trade>> GetTradesAsync(ulong lo, ulong hi, int size, CancellationToken cancellationToken)
             {
                 Interlocked.Increment(ref TradeCalls);
+                if (Failure != null) throw Failure;
                 lock (TradeQueries) TradeQueries.Add((lo, hi, size));
                 IReadOnlyList<Trade> result = Trades.Where(t => t.BlockId >= lo && t.BlockId <= hi).OrderBy(t => t.BlockId).Take(size).ToList();
                 return Task.FromResult(result);
@@ -174,8 +176,18 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         }
 
         [Test]
-        public async Task Asset_Unknown_IsNotFound_AndNotAskedAgainWithinTheCacheWindow()
+        public async Task Asset_NotInAnyPublishedPool_IsNotFound_WithoutTouchingTheAssetRepository()
         {
+            // an anonymous caller must not be able to make the service look up (and cache) arbitrary asset ids
+            var service = Create();
+            for (ulong id = 5000; id < 5050; id++) Assert.That((await service.GetAssetAsync(id.ToString(), default)).Outcome, Is.EqualTo(CoinGeckoOutcome.NotFound));
+            _assets.Verify(a => a.GetAssetAsync(It.Is<ulong>(id => id >= 5000 && id < 5050), It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [Test]
+        public async Task Asset_DestroyedAssetOfAPublishedPool_IsNotFound_AndNotAskedAgainWithinTheCacheWindow()
+        {
+            await _pools.StorePoolAsync(Pool(902, "DESTROYED", 0, 12345));
             var service = Create();
             Assert.That((await service.GetAssetAsync("12345", default)).Outcome, Is.EqualTo(CoinGeckoOutcome.NotFound));
             Assert.That((await service.GetAssetAsync("12345", default)).Outcome, Is.EqualTo(CoinGeckoOutcome.NotFound));
@@ -186,9 +198,9 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         public async Task Asset_IsCached()
         {
             var service = Create();
-            await service.GetAssetAsync("7", default);
-            await service.GetAssetAsync("7", default);
-            _assets.Verify(a => a.GetAssetAsync(7, It.IsAny<CancellationToken>()), Times.Once);
+            await service.GetAssetAsync("0", default);
+            await service.GetAssetAsync("0", default);
+            _assets.Verify(a => a.GetAssetAsync(0, It.IsAny<CancellationToken>()), Times.Once);
         }
 
         [Test]
@@ -260,6 +272,17 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             pool.AssetBDecimals = null;
             await _pools.StorePoolAsync(pool);
             Assert.That((await Create().GetPairAsync("780", default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Ok));
+        }
+
+        [Test]
+        public async Task Pair_ExistingPoolThatCannotBeDescribedRightNow_IsRetryable503_NotNotFound()
+        {
+            // decimals unknown on the pool and the asset repository cannot answer (id 12345) -> transient, not "unknown"
+            var pool = Pool(901, "TRANSIENT", 0, 12345);
+            pool.AssetADecimals = null;
+            pool.AssetBDecimals = null;
+            await _pools.StorePoolAsync(pool);
+            Assert.That((await Create().GetPairAsync("901", default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
         }
 
         [Test]
@@ -385,6 +408,58 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             var positions = events.Select(e => (e.GetProperty("txnIndex").GetUInt64(), e.GetProperty("eventIndex").GetUInt32())).ToList();
             Assert.That(events, Has.Length.EqualTo(6));
             Assert.That(positions.Distinct().Count(), Is.EqualTo(6));
+        }
+
+        [Test]
+        public async Task Events_PoolThatCannotBeDescribedRightNow_FailsTheRequest_InsteadOfCachingAnIncompleteAnswer()
+        {
+            var assetsOk = false;
+            _assets.Setup(a => a.GetAssetAsync(12345, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => assetsOk ? Asset(12345, "Late", "LATE", 6, 1000) : null);
+            var pool = Pool(901, "TRANSIENT", 0, 12345);
+            pool.AssetADecimals = null;
+            pool.AssetBDecimals = null;
+            await _pools.StorePoolAsync(pool);
+            var trade = Swap("T", 10, 1, 0, appId: 901);
+            trade.AssetIdOut = 12345;
+            _source.Trades.Add(trade);
+            _source.Trades.Add(Swap("OK", 10, 2, 0));
+            var service = Create(c => c.PoolSnapshotSeconds = 1);
+
+            var failed = await service.GetEventsJsonAsync(10, 10, default);
+            Assert.That(failed.Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable), "a retryable 503 - GeckoTerminal keeps its position");
+
+            // once the pool can be described the very same range is answered completely (nothing partial was cached)
+            assetsOk = true;
+            await Task.Delay(1200);
+            var events = Events(await service.GetEventsJsonAsync(10, 10, default));
+            Assert.That(events, Has.Length.EqualTo(2));
+        }
+
+        [Test]
+        public async Task Events_StorageFailure_IsRetryable503_AndNotCached()
+        {
+            _source.Trades.Add(Swap("S", 10, 1, 0));
+            _source.Failure = new InvalidOperationException("Elasticsearch trades query failed");
+            var service = Create();
+
+            Assert.That((await service.GetEventsJsonAsync(10, 10, default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
+
+            _source.Failure = null;
+            Assert.That(Events(await service.GetEventsJsonAsync(10, 10, default)), Has.Length.EqualTo(1), "recovers once storage is back, the failure was not remembered");
+        }
+
+        [Test]
+        public async Task Events_CancelledCaller_DoesNotPoisonTheSharedComputation()
+        {
+            _source.Trades.Add(Swap("S", 10, 1, 0));
+            var service = Create();
+            using var cts = new CancellationTokenSource();
+            cts.Cancel();
+            Assert.CatchAsync<OperationCanceledException>(async () => await service.GetEventsJsonAsync(10, 10, cts.Token));
+
+            // a later request still gets the right answer, not a stale entry of the cancelled one
+            Assert.That(Events(await service.GetEventsJsonAsync(10, 10, default)), Has.Length.EqualTo(1));
         }
 
         [Test]

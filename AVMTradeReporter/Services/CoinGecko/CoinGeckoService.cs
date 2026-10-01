@@ -74,9 +74,21 @@ namespace AVMTradeReporter.Services.CoinGecko
         private readonly ConcurrentDictionary<string, Lazy<Task<byte[]>>> _inFlight = new();
         private readonly ConcurrentDictionary<ulong, (CoinGeckoAsset? Asset, DateTimeOffset Expires)> _assets = new();
         private readonly SemaphoreSlim _snapshotLock = new(1, 1);
-        private volatile PoolSnapshot _snapshot = new(new Dictionary<ulong, PairInfo>(), DateTimeOffset.MinValue);
+        private volatile PoolSnapshot _snapshot = new(new Dictionary<ulong, PairInfo>(), new HashSet<ulong>(), new HashSet<ulong>(), DateTimeOffset.MinValue);
 
-        private sealed record PoolSnapshot(Dictionary<ulong, PairInfo> Pairs, DateTimeOffset LoadedAt);
+        /// <param name="Pairs">Published pairs by pool application id.</param>
+        /// <param name="Unresolved">Published pools whose asset decimals could not be resolved right now (transient - never "unknown").</param>
+        /// <param name="AssetIds">Every asset of a published pool: the only assets <c>/asset</c> answers for.</param>
+        private sealed record PoolSnapshot(Dictionary<ulong, PairInfo> Pairs, HashSet<ulong> Unresolved, HashSet<ulong> AssetIds, DateTimeOffset LoadedAt);
+
+        /// <summary>Pair lookup result: <see cref="Transient"/> means "exists but cannot be described right now - try again", not "unknown".</summary>
+        private readonly record struct PairLookup(PairInfo? Pair, bool Transient);
+
+        /// <summary>Data that is expected to exist could not be read right now; the request must fail (503) instead of answering incompletely.</summary>
+        private sealed class TransientDataException : Exception
+        {
+            public TransientDataException(string message) : base(message) { }
+        }
 
         public CoinGeckoService(
             IOptions<AppConfiguration> options,
@@ -120,6 +132,12 @@ namespace AVMTradeReporter.Services.CoinGecko
             if (!_config.Enabled) return CoinGeckoResult<CoinGeckoAssetResponse>.Fail(CoinGeckoOutcome.Unavailable, "disabled");
             if (!TryParseId(id, out var assetId)) return CoinGeckoResult<CoinGeckoAssetResponse>.Fail(CoinGeckoOutcome.BadRequest, "Query parameter 'id' must be an asset id (unsigned integer, ALGO = 0)");
 
+            // Only assets of published pools are answered: bounds the cache and keeps an anonymous caller from making
+            // the service look up arbitrary asset ids at algod.
+            var snapshot = await GetSnapshotAsync(forceIfOlderThan: null, cancellationToken);
+            if (!snapshot.AssetIds.Contains(assetId)) snapshot = await GetSnapshotAsync(MissingPoolRefreshInterval, cancellationToken);
+            if (!snapshot.AssetIds.Contains(assetId)) return CoinGeckoResult<CoinGeckoAssetResponse>.Fail(CoinGeckoOutcome.NotFound, "Asset not found");
+
             var now = _time.GetUtcNow();
             if (_assets.TryGetValue(assetId, out var cached) && cached.Expires > now)
             {
@@ -129,7 +147,7 @@ namespace AVMTradeReporter.Services.CoinGecko
             }
 
             var asset = MapAsset(assetId, await _assetRepository.GetAssetAsync(assetId, cancellationToken));
-            // unknown assets are cached briefly so a flood of lookups for a bad id does not hit algod each time
+            // a destroyed / unreadable asset of a published pool is cached briefly so repeated lookups do not hit algod each time
             var ttl = asset == null ? TimeSpan.FromSeconds(Math.Min(30, _config.AssetCacheSeconds)) : TimeSpan.FromSeconds(_config.AssetCacheSeconds);
             _assets[assetId] = (asset, now + ttl);
             return asset == null
@@ -169,9 +187,10 @@ namespace AVMTradeReporter.Services.CoinGecko
             if (!_config.Enabled) return CoinGeckoResult<CoinGeckoPairResponse>.Fail(CoinGeckoOutcome.Unavailable, "disabled");
             if (!TryParseId(id, out var appId)) return CoinGeckoResult<CoinGeckoPairResponse>.Fail(CoinGeckoOutcome.BadRequest, "Query parameter 'id' must be a pool application id (unsigned integer)");
 
-            var pair = await GetPairInfoAsync(appId, cancellationToken);
-            if (pair == null) return CoinGeckoResult<CoinGeckoPairResponse>.Fail(CoinGeckoOutcome.NotFound, "Pair not found");
-            return CoinGeckoResult<CoinGeckoPairResponse>.Ok(new CoinGeckoPairResponse { Pair = ToPairDto(pair) });
+            var lookup = await GetPairInfoAsync(appId, cancellationToken);
+            if (lookup.Transient) return CoinGeckoResult<CoinGeckoPairResponse>.Fail(CoinGeckoOutcome.Unavailable, "The pair cannot be described right now, try again");
+            if (lookup.Pair == null) return CoinGeckoResult<CoinGeckoPairResponse>.Fail(CoinGeckoOutcome.NotFound, "Pair not found");
+            return CoinGeckoResult<CoinGeckoPairResponse>.Ok(new CoinGeckoPairResponse { Pair = ToPairDto(lookup.Pair) });
         }
 
         private static CoinGeckoPair ToPairDto(PairInfo pair) => new()
@@ -180,17 +199,19 @@ namespace AVMTradeReporter.Services.CoinGecko
             DexKey = pair.Protocol.ToString().ToLowerInvariant(),
             Asset0Id = pair.Asset0Id.ToString(CultureInfo.InvariantCulture),
             Asset1Id = pair.Asset1Id.ToString(CultureInfo.InvariantCulture),
-            FeeBps = pair.LpFee is >= 0 and < 1 ? decimal.Round(pair.LpFee.Value * 10000m, 4) / 1.0000000000000000000000000000m : null, // x / 1.000... strips trailing zeros: 30.0000 -> 30
+            FeeBps = pair.LpFee is >= 0 and < 1 ? CoinGeckoMapper.Normalize(decimal.Round(pair.LpFee.Value * 10000m, 4)) : null,
         };
 
-        private async Task<PairInfo?> GetPairInfoAsync(ulong appId, CancellationToken cancellationToken)
+        private async Task<PairLookup> GetPairInfoAsync(ulong appId, CancellationToken cancellationToken)
         {
             var snapshot = await GetSnapshotAsync(forceIfOlderThan: null, cancellationToken);
-            if (snapshot.Pairs.TryGetValue(appId, out var pair)) return pair;
+            if (snapshot.Pairs.TryGetValue(appId, out var pair)) return new PairLookup(pair, false);
 
-            // A pool created after the snapshot was taken: refresh once (rate limited) before answering "unknown".
+            // A pool created after the snapshot was taken (or one whose decimals could not be read): refresh once
+            // (rate limited) before answering "unknown".
             snapshot = await GetSnapshotAsync(MissingPoolRefreshInterval, cancellationToken);
-            return snapshot.Pairs.TryGetValue(appId, out pair) ? pair : null;
+            if (snapshot.Pairs.TryGetValue(appId, out pair)) return new PairLookup(pair, false);
+            return new PairLookup(null, snapshot.Unresolved.Contains(appId));
         }
 
         private async Task<PoolSnapshot> GetSnapshotAsync(TimeSpan? forceIfOlderThan, CancellationToken cancellationToken)
@@ -206,16 +227,22 @@ namespace AVMTradeReporter.Services.CoinGecko
                 if (_time.GetUtcNow() - snapshot.LoadedAt < maxAge) return snapshot;
 
                 var pairs = new Dictionary<ulong, PairInfo>();
+                var unresolved = new HashSet<ulong>();
+                var assetIds = new HashSet<ulong>();
                 foreach (var protocol in _config.Protocols)
                 {
                     var pools = await _poolRepository.GetPoolsAsync(null, null, null, protocol, int.MaxValue, null, SortDirection.Desc, cancellationToken);
                     foreach (var pool in pools)
                     {
+                        if (!IsPublishable(pool)) continue;
+                        assetIds.Add(pool.AssetIdA!.Value);
+                        assetIds.Add(pool.AssetIdB!.Value);
                         var pair = await ToPairInfoAsync(pool, cancellationToken);
                         if (pair != null) pairs[pair.AppId] = pair;
+                        else unresolved.Add(pool.PoolAppId);
                     }
                 }
-                _snapshot = new PoolSnapshot(pairs, _time.GetUtcNow());
+                _snapshot = new PoolSnapshot(pairs, unresolved, assetIds, _time.GetUtcNow());
                 return _snapshot;
             }
             finally
@@ -224,12 +251,19 @@ namespace AVMTradeReporter.Services.CoinGecko
             }
         }
 
+        /// <summary>
+        /// A pool GeckoTerminal may see. A permanent "no" (scam, malformed): such pools are skipped silently, unlike a
+        /// publishable pool that is only temporarily undescribable (see <see cref="PoolSnapshot.Unresolved"/>).
+        /// </summary>
+        private static bool IsPublishable(Pool pool)
+        {
+            // scam pools are relabelled DEXProtocol.Scam (and never listed for a published protocol); belt and braces for stale cache entries
+            if (pool.PoolAppId == 0 || pool.AssetIdA == null || pool.AssetIdB == null || pool.ScamRating > 80) return false;
+            return pool.AssetIdA != pool.AssetIdB;
+        }
+
         private async Task<PairInfo?> ToPairInfoAsync(Pool pool, CancellationToken cancellationToken)
         {
-            // scam pools are relabelled DEXProtocol.Scam (and filtered out above); belt and braces for stale cache entries
-            if (pool.PoolAppId == 0 || pool.AssetIdA == null || pool.AssetIdB == null || pool.ScamRating > 80) return null;
-            if (pool.AssetIdA == pool.AssetIdB) return null;
-
             var decimals0 = await ResolveDecimalsAsync(pool.AssetADecimals, pool.AssetIdA.Value, cancellationToken);
             var decimals1 = await ResolveDecimalsAsync(pool.AssetBDecimals, pool.AssetIdB.Value, cancellationToken);
             if (decimals0 == null || decimals1 == null) return null;
@@ -280,19 +314,35 @@ namespace AVMTradeReporter.Services.CoinGecko
             {
                 return CoinGeckoResult<byte[]>.Fail(CoinGeckoOutcome.BadRequest, ex.Message);
             }
-            finally
+            catch (TransientDataException ex)
             {
-                if (lazy.IsValueCreated && lazy.Value.IsCompleted) _inFlight.TryRemove(new KeyValuePair<string, Lazy<Task<byte[]>>>(key, lazy));
+                _logger.LogWarning("CoinGecko events {from}-{to} cannot be answered completely right now: {reason}", fromBlock, toBlock, ex.Message);
+                return CoinGeckoResult<byte[]>.Fail(CoinGeckoOutcome.Unavailable, ex.Message);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Elasticsearch / Redis / algod trouble: a retryable 503 (the consumer keeps its position), never a partial answer.
+                _logger.LogError(ex, "CoinGecko events {from}-{to} failed", fromBlock, toBlock);
+                return CoinGeckoResult<byte[]>.Fail(CoinGeckoOutcome.Unavailable, "Events cannot be loaded right now, try again");
             }
         }
 
         private async Task<byte[]> ComputeAndCacheAsync(ulong fromBlock, ulong toBlock, string key, string redisKey)
         {
-            // CancellationToken.None: the shared computation must not be killed by whichever caller cancels first.
-            var json = JsonSerializer.SerializeToUtf8Bytes(new CoinGeckoEventsResponse { Events = await BuildEventsAsync(fromBlock, toBlock, CancellationToken.None) }, JsonOptions);
-            RememberInMemory(key, json);
-            await TryWriteRedisAsync(redisKey, json);
-            return json;
+            try
+            {
+                // CancellationToken.None: the shared computation must not be killed by whichever caller cancels first.
+                var json = JsonSerializer.SerializeToUtf8Bytes(new CoinGeckoEventsResponse { Events = await BuildEventsAsync(fromBlock, toBlock, CancellationToken.None) }, JsonOptions);
+                RememberInMemory(key, json);
+                await TryWriteRedisAsync(redisKey, json);
+                return json;
+            }
+            finally
+            {
+                // Removed by the computation itself (not by a waiting caller, who may have been cancelled): a finished
+                // entry must never be reused by a later request - the caches above are the only place results live.
+                _inFlight.TryRemove(key, out _);
+            }
         }
 
         internal async Task<List<CoinGeckoEvent>> BuildEventsAsync(ulong fromBlock, ulong toBlock, CancellationToken cancellationToken)
@@ -301,8 +351,8 @@ namespace AVMTradeReporter.Services.CoinGecko
             var tradesTask = FetchBisectingAsync((lo, hi, size) => _source.GetTradesAsync(lo, hi, size, cancellationToken), fromBlock, toBlock, budget);
             var liquidityTask = FetchBisectingAsync((lo, hi, size) => _source.GetLiquidityAsync(lo, hi, size, cancellationToken), fromBlock, toBlock, budget);
             await Task.WhenAll(tradesTask, liquidityTask);
-            var trades = DistinctBy(tradesTask.Result, t => t.TxId);
-            var liquidity = DistinctBy(liquidityTask.Result, l => l.TxId);
+            var trades = tradesTask.Result.DistinctBy(t => t.TxId).ToList();
+            var liquidity = liquidityTask.Result.DistinctBy(l => l.TxId).ToList();
 
             var keys = new List<EventOrderKey>(trades.Count + liquidity.Count);
             foreach (var t in trades) keys.Add(new EventOrderKey(t.BlockId, t.TxnIndex, t.EventIndex, string.IsNullOrEmpty(t.TopTxId) ? t.TxId : t.TopTxId, t.TxId, 0));
@@ -315,7 +365,11 @@ namespace AVMTradeReporter.Services.CoinGecko
             {
                 var isTrade = i < trades.Count;
                 var appId = isTrade ? trades[i].PoolAppId : liquidity[i - trades.Count].PoolAppId;
-                var pair = await GetPairInfoAsync(appId, cancellationToken);
+                var lookup = await GetPairInfoAsync(appId, cancellationToken);
+                // A published pool that cannot be described right now is not "unknown": skipping its events would be cached
+                // as the final answer for an immutable range and GeckoTerminal would never see them.
+                if (lookup.Transient) throw new TransientDataException($"pool {appId} cannot be described right now");
+                var pair = lookup.Pair;
                 CoinGeckoEvent? mapped = pair == null ? null
                     : isTrade ? CoinGeckoMapper.TryMapSwap(trades[i], pair, positions[i])
                     : CoinGeckoMapper.TryMapLiquidity(liquidity[i - trades.Count], pair, positions[i]);
@@ -339,12 +393,6 @@ namespace AVMTradeReporter.Services.CoinGecko
                 return c != 0 ? c : a.EventIndex.CompareTo(b.EventIndex);
             });
             return events;
-        }
-
-        private static List<T> DistinctBy<T>(IEnumerable<T> items, Func<T, string> key)
-        {
-            var seen = new HashSet<string>(StringComparer.Ordinal);
-            return items.Where(i => seen.Add(key(i))).ToList();
         }
 
         private sealed class EventBudget

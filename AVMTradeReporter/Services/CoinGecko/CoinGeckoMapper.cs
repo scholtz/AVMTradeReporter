@@ -60,6 +60,9 @@ namespace AVMTradeReporter.Services.CoinGecko
             return text == "-0" ? "0" : text;
         }
 
+        /// <summary>Strips trailing zeros of the decimal's scale (30.0000 -> 30) so it serializes as a plain JSON number.</summary>
+        public static decimal Normalize(decimal value) => value / 1.0000000000000000000000000000m;
+
         public static CoinGeckoSwapEvent? TryMapSwap(Trade trade, PairInfo pair, EventPositionPair position)
         {
             if (trade.Timestamp == null || trade.AssetAmountIn == 0 || trade.AssetAmountOut == 0) return null;

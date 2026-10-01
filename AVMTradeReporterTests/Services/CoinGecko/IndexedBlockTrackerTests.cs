@@ -3,6 +3,7 @@ using AVMTradeReporter.Services.CoinGecko;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Moq;
 
 namespace AVMTradeReporterTests.Services.CoinGecko
 {
@@ -89,6 +90,42 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             var deadline = DateTime.UtcNow.AddSeconds(5);
             while ((await tracker.GetLatestAsync())!.Round < 101 && DateTime.UtcNow < deadline) await Task.Delay(50);
             Assert.That(await tracker.GetLatestAsync(), Is.EqualTo(new IndexedBlock(101, 1003)));
+        }
+
+        [Test]
+        public async Task RedisMirror_IsWrittenOneAtATime_InOrder_AndNeverGoesBackwards()
+        {
+            var written = new List<ulong>();
+            var firstWriteGate = new TaskCompletionSource();
+            var db = new Mock<StackExchange.Redis.IDatabase>();
+            db.Setup(d => d.StringSetAsync(It.IsAny<StackExchange.Redis.RedisKey>(), It.IsAny<StackExchange.Redis.RedisValue>(), It.IsAny<StackExchange.Redis.Expiration>(), It.IsAny<StackExchange.Redis.ValueCondition>(), It.IsAny<StackExchange.Redis.CommandFlags>()))
+                .Returns(async (StackExchange.Redis.RedisKey _, StackExchange.Redis.RedisValue value, StackExchange.Redis.Expiration _, StackExchange.Redis.ValueCondition _, StackExchange.Redis.CommandFlags _) =>
+                {
+                    lock (written) written.Add(System.Text.Json.JsonSerializer.Deserialize<IndexedBlock>(value.ToString())!.Round);
+                    if (written.Count == 1) await firstWriteGate.Task; // the Seed write is slow while newer blocks complete
+                    return true;
+                });
+            var config = new AppConfiguration();
+            config.Redis.Enabled = true;
+            config.CoinGecko.LatestBlockVisibilityDelaySeconds = 0;
+            var services = new ServiceCollection().AddSingleton(db.Object).BuildServiceProvider();
+            var tracker = new IndexedBlockTracker(Options.Create(config), NullLogger<IndexedBlockTracker>.Instance, services);
+
+            tracker.Seed(100, 1000);
+            tracker.MarkCompleted(101, 1003);
+            tracker.MarkCompleted(102, 1006);
+            await Task.Delay(100);
+            lock (written) Assert.That(written, Is.EqualTo(new ulong[] { 100 }), "later writes wait for the slow one - no overlap");
+
+            firstWriteGate.SetResult();
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            while (DateTime.UtcNow < deadline) { lock (written) if (written.Count >= 3) break; await Task.Delay(20); }
+
+            lock (written)
+            {
+                Assert.That(written, Is.Ordered, "Redis must never be left on an older block than the one before it");
+                Assert.That(written.Last(), Is.EqualTo(102UL));
+            }
         }
 
         [Test]

@@ -491,5 +491,11 @@ namespace AVMTradeReporter.Model.Configuration
         /// Seconds the pool snapshot used for <c>/pair</c> and event mapping is reused before it is refreshed.
         /// </summary>
         public int PoolSnapshotSeconds { get; set; } = 60;
+
+        /// <summary>
+        /// Requests per minute and client IP accepted by <c>/api/coingecko/*</c> (own rate limit bucket, separate from
+        /// the 60/min anonymous budget of the rest of the API).
+        /// </summary>
+        public int RateLimitPerMinute { get; set; } = 1200;
     }
 }

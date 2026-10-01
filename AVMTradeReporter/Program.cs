@@ -335,6 +335,22 @@ namespace AVMTradeReporter
                     }
 
                     var clientIp = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+                    // CoinGecko's indexer polls latest-block and events about every 2 s (and walks every asset / pair
+                    // once on its first sync) - that alone exhausts the 60/min anonymous budget, so the GeckoTerminal
+                    // endpoints get their own, larger bucket per client that is not shared with the rest of the API.
+                    if (httpContext.Request.Path.StartsWithSegments("/api/coingecko"))
+                    {
+                        var coinGeckoLimit = Math.Max(1, appConfig?.CoinGecko?.RateLimitPerMinute ?? 1200);
+                        return RateLimitPartition.GetFixedWindowLimiter($"coingecko:{clientIp}", _ => new FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = coinGeckoLimit,
+                            Window = TimeSpan.FromMinutes(1),
+                            QueueLimit = 0,
+                            AutoReplenishment = true,
+                        });
+                    }
+
                     return RateLimitPartition.GetFixedWindowLimiter($"anon:{clientIp}", _ => new FixedWindowRateLimiterOptions
                     {
                         PermitLimit = 60,
