@@ -22,7 +22,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         {
             public IndexedBlock? Latest { get; set; }
             public IndexedBlock? CompletedThrough => Latest;
-            public void Seed(ulong completedRound, long unixTimestamp) => Latest = new IndexedBlock(completedRound, unixTimestamp);
+            public void Seed(ulong completedRound, long? unixTimestamp, bool verified = true) => Latest = new IndexedBlock(completedRound, unixTimestamp ?? 0);
             public void MarkCompleted(ulong round, long? unixTimestamp) => Latest = new IndexedBlock(round, unixTimestamp ?? 0);
             public Task<IndexedBlock?> GetLatestAsync(CancellationToken cancellationToken = default) => Task.FromResult(Latest);
         }
@@ -784,6 +784,8 @@ namespace AVMTradeReporterTests.Services.CoinGecko
 
             Assert.That(answers.All(a => a.Outcome == CoinGeckoOutcome.Ok));
             Assert.That(watch.ElapsedMilliseconds, Is.LessThan(500), "answered from the previous snapshot, not after the stuck rebuild");
+            var deadline = DateTime.UtcNow.AddSeconds(2);
+            while (loads.Value < 2 && DateTime.UtcNow < deadline) await Task.Delay(10); // the background rebuild is scheduled, not awaited
             Assert.That(loads.Value, Is.EqualTo(2), "exactly one rebuild was started");
             gate.Set();
         }

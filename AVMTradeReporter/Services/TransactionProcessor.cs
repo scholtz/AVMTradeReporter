@@ -62,12 +62,13 @@ namespace AVMTradeReporter.Services
         }
 
         /// <summary>
-        /// Registers every swap / liquidity event of the block. Returns the number of transactions whose processing threw
-        /// (each is logged); the caller may process the block again - registrations are keyed by tx id, so that is idempotent.
+        /// Registers every swap / liquidity event of the block (or only of the top-level transactions at the given 1-based
+        /// positions). Returns the positions of the transactions whose processing threw (each is logged); the caller may
+        /// process just those again - registrations are keyed by tx id, so that is idempotent.
         /// </summary>
-        public async Task<int> ProcessBlock(CertifiedBlock block, ITradeService tradeService, ILiquidityService liquidityService, CancellationToken cancellationToken)
+        public async Task<IReadOnlyList<ulong>> ProcessBlock(CertifiedBlock block, ITradeService tradeService, ILiquidityService liquidityService, CancellationToken cancellationToken, IReadOnlySet<ulong>? onlyPositions = null)
         {
-            var failed = 0;
+            var failed = new List<ulong>();
             try
             {
                 Algorand.Algod.Model.Transactions.SignedTransaction? prevTx1 = null;
@@ -78,6 +79,13 @@ namespace AVMTradeReporter.Services
                     foreach (var currTx in block.Block.Transactions)
                     {
                         index++;
+                        if (onlyPositions != null && !onlyPositions.Contains(index))
+                        {
+                            // skipped, but it still is the previous transaction of the next one
+                            prevTx2 = prevTx1;
+                            prevTx1 = currTx;
+                            continue;
+                        }
                         try
                         {
                             currTx.Tx.FillInParamsFromBlockHeader(block.Block);
@@ -90,7 +98,7 @@ namespace AVMTradeReporter.Services
                         }
                         catch (Exception exc)
                         {
-                            failed++;
+                            failed.Add(index);
                             _logger.LogWarning(exc, "Error processing transaction {index} in block {block}", index, block.Block.Round);
                         }
                         prevTx2 = prevTx1;
@@ -105,7 +113,7 @@ namespace AVMTradeReporter.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to process block {round}", block.Block?.Round);
-                failed++;
+                failed.Add(0); // position 0 = the block as a whole
             }
             return failed;
         }

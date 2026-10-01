@@ -79,15 +79,13 @@ namespace AVMTradeReporter.Repository
             Console.WriteLine($"Template created: {response.IsValidResponse}");
         }
 
-        /// <summary>False when no Elasticsearch is configured: liquidity events are processed but never persisted.</summary>
-        public bool HasStorage => _elasticClient != null;
-
         public async Task<bool> StoreLiquidityUpdatesAsync(Liquidity[] items, CancellationToken cancellationToken)
         {
+            // Returns whether every given event is now persisted (or needs no persisting): true for an empty batch and
+            // for a deployment without Elasticsearch, so callers can treat false as "retry later" without special cases.
             if (!items.Any())
             {
-                //_logger.LogDebug("No items to store");
-                return false;
+                return true;
             }
 
             try
@@ -127,6 +125,7 @@ namespace AVMTradeReporter.Repository
                             await _poolRepository.UpdatePoolFromLiquidity(liquidity, cancellationToken);
                         }
                     }, cancellationToken);
+                    return true; // nothing to persist without Elasticsearch - the events were processed
                 }
                 else
                 {

@@ -178,8 +178,9 @@ namespace AVMTradeReporter.Services
                             waited = true;
                             break;
                         }
-                        catch (OperationCanceledException)
+                        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                         {
+                            // only a real stop; an HttpClient timeout is a TaskCanceledException too and must fall through
                             throw;
                         }
                         catch (Exception ex)
@@ -424,7 +425,7 @@ namespace AVMTradeReporter.Services
                 // The Redis mirror is written only after contiguous completion, so it is as trustworthy as StoredThrough and
                 // may even be ahead of it (blocks that completed after the last increment persisted StoredThrough).
                 var mirrored = await _blockTracker.GetLatestAsync(cancellationToken);
-                var (seedRound, rewind) = ResolveStartupSeed(Indexer.Round, Indexer.StoredThrough, mirrored?.Round);
+                var (seedRound, rewind, verified) = ResolveStartupSeed(Indexer.Round, Indexer.StoredThrough, mirrored?.Round);
                 if (rewind)
                 {
                     _logger.LogWarning("Indexer round {round} is ahead of the last fully stored block {storedThrough} (blocks were in flight when the previous run stopped) - re-processing {count} blocks",
@@ -434,11 +435,13 @@ namespace AVMTradeReporter.Services
                     await _indexerRepository.StoreIndexerAsync(Indexer, cancellationToken);
                 }
 
-                long timestamp = Indexer.Updated.ToUnixTimeSeconds(); // fallback: close to the block time, corrected by the next block
+                // Without the real block time the seed is covered but not advertised (latest-block must never carry a made-up
+                // timestamp); the next completed block advertises itself. An unverified seed (an old indexer document without
+                // StoredThrough and no Redis mirror) is never mirrored either: it would be trusted on the next restart.
                 var header = await TryFetchBlockAsync(seedRound, headerOnly: true);
-                if (header?.Block?.Timestamp != null) timestamp = Convert.ToInt64(header.Block.Timestamp);
-                else _logger.LogWarning("Could not read the header of block {round} for the latest-block watermark, using the indexer update time", seedRound);
-                _blockTracker.Seed(seedRound, timestamp);
+                long? timestamp = header?.Block?.Timestamp != null ? Convert.ToInt64(header.Block.Timestamp) : null;
+                if (timestamp == null) _logger.LogWarning("Could not read the header of block {round}: the latest-block watermark starts unadvertised until the next block completes", seedRound);
+                _blockTracker.Seed(seedRound, timestamp, verified);
                 _logger.LogInformation("Latest indexed block watermark starts at {round}", seedRound);
             }
             catch (Exception ex)
@@ -454,13 +457,15 @@ namespace AVMTradeReporter.Services
         /// Where the latest-block watermark (and, when it has to, the indexer) restarts. "Stored through" is the better of
         /// the persisted round and the Redis mirror; when it is below the round before the indexer's, the previous run died
         /// with blocks in flight and the indexer rewinds. The watermark never starts below what Redis already advertises.
+        /// <c>Verified</c> is false when neither source exists and the seed is just the unverified round before the
+        /// indexer's (an old indexer document) - such a seed must not be mirrored to Redis as a completion.
         /// </summary>
-        internal static (ulong SeedRound, bool Rewind) ResolveStartupSeed(ulong indexerRound, ulong? storedThrough, ulong? mirroredRound)
+        internal static (ulong SeedRound, bool Rewind, bool Verified) ResolveStartupSeed(ulong indexerRound, ulong? storedThrough, ulong? mirroredRound)
         {
             var seedRound = indexerRound - 1;
             ulong? stored = storedThrough.HasValue && mirroredRound.HasValue ? Math.Max(storedThrough.Value, mirroredRound.Value) : storedThrough ?? mirroredRound;
-            if (stored is { } known && known < seedRound) return (known, true);
-            return (Math.Max(seedRound, mirroredRound ?? seedRound), false);
+            if (stored is { } known && known < seedRound) return (known, true, true);
+            return (Math.Max(seedRound, mirroredRound ?? seedRound), false, stored.HasValue);
         }
 
         private IEnumerable<(string Name, Algorand.Algod.IDefaultApi Api)> Algods()
@@ -518,15 +523,16 @@ namespace AVMTradeReporter.Services
                 // A transaction whose processing threw (asset / pool lookup hiccup) would otherwise be missing from a block
                 // that then counts as completely stored; re-processing is idempotent (registrations are keyed by tx id).
                 var failed = await _transactionProcessor.ProcessBlock(block, this, this, cancellationToken);
-                for (var attempt = 2; failed > 0 && attempt <= BlockProcessAttempts; attempt++)
+                for (var attempt = 2; failed.Count > 0 && attempt <= BlockProcessAttempts; attempt++)
                 {
-                    _logger.LogWarning("{failed} transaction(s) of block {blockId} failed to process - processing the block again (attempt {attempt})", failed, blockId, attempt);
-                    await Task.Delay(TimeSpan.FromSeconds(attempt), cancellationToken);
-                    failed = await _transactionProcessor.ProcessBlock(block, this, this, cancellationToken);
+                    _logger.LogWarning("{failed} transaction(s) of block {blockId} failed to process - processing them again (attempt {attempt})", failed.Count, blockId, attempt);
+                    await Task.Delay(TimeSpan.FromSeconds(attempt - 1), cancellationToken);
+                    // position 0 means the block as a whole failed: everything is processed again
+                    failed = await _transactionProcessor.ProcessBlock(block, this, this, cancellationToken, failed.Contains(0UL) ? null : failed.ToHashSet());
                 }
-                if (failed > 0)
+                if (failed.Count > 0)
                 {
-                    _logger.LogError("{failed} transaction(s) of block {blockId} could not be processed after {attempts} attempts - their events are lost (see CLAUDE.md, known limits)", failed, blockId, BlockProcessAttempts);
+                    _logger.LogError("{failed} transaction(s) of block {blockId} could not be processed after {attempts} attempts - their events are lost (see CLAUDE.md, known limits)", failed.Count, blockId, BlockProcessAttempts);
                 }
                 _pending.Close(blockId);
 
@@ -542,22 +548,29 @@ namespace AVMTradeReporter.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, ex.Message);
-                // Whatever was registered before the exception goes out with the next flush, and only then does the block
-                // count as stored for the latest-block watermark.
+                // Whatever was registered before the exception is flushed now (best effort) or with the next block, and only
+                // then does the block count as stored for the latest-block watermark.
                 _pending.Close(blockId);
+                try
+                {
+                    await FlushPendingAsync(cancellationToken);
+                }
+                catch (Exception flushEx) when (flushEx is not OperationCanceledException)
+                {
+                    _logger.LogError(flushEx, "Flushing pending documents after the failure of block {blockId} failed too", blockId);
+                }
             }
         }
 
         /// <summary>
         /// Stores every closed pending block (one bulk call per index) and completes exactly the blocks whose documents
-        /// were acknowledged. Without Elasticsearch a store "fails" by design (the documents were still processed): nothing
-        /// can be retried later, so such blocks count as done rather than staying pending for ever.
+        /// were acknowledged (the repositories answer true for "nothing to persist" - empty batch, no Elasticsearch).
         /// </summary>
         private async Task FlushPendingAsync(CancellationToken cancellationToken)
         {
             var flush = await _pending.FlushAsync(
-                async trades => await _tradeRepository.StoreTradesAsync(trades, cancellationToken) || !_tradeRepository.HasStorage,
-                async liquidity => await _liquidityRepository.StoreLiquidityUpdatesAsync(liquidity, cancellationToken) || !_liquidityRepository.HasStorage,
+                trades => _tradeRepository.StoreTradesAsync(trades, cancellationToken),
+                liquidity => _liquidityRepository.StoreLiquidityUpdatesAsync(liquidity, cancellationToken),
                 cancellationToken);
             if (flush.StoreFailed)
             {
@@ -601,11 +614,13 @@ namespace AVMTradeReporter.Services
                 _logger.LogError(ex, "Error while stopping background service");
             }
 
-            // Persist where the stored data really ends, so a graceful restart neither loses nor replays blocks.
+            // Persist where the stored data really ends, so a graceful restart neither loses nor replays blocks. Closed batches
+            // (a block whose task finished but whose flush failed or threw) get one more chance first.
             if (Indexer != null && _blockTracker?.CompletedThrough != null && _indexerRepository != null)
             {
                 try
                 {
+                    await FlushPendingAsync(CancellationToken.None);
                     RecordStoredThrough();
                     await _indexerRepository.StoreIndexerAsync(Indexer, CancellationToken.None);
                 }

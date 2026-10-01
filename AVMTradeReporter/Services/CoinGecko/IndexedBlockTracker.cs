@@ -18,8 +18,11 @@ namespace AVMTradeReporter.Services.CoinGecko
     /// </remarks>
     public interface IIndexedBlockTracker
     {
-        /// <summary>Starts the watermark at a round known to be complete (all earlier work is done).</summary>
-        void Seed(ulong completedRound, long unixTimestamp);
+        /// <summary>
+        /// Starts the watermark at a round known to be complete (all earlier work is done). Without a timestamp the round is
+        /// covered but not advertised; an unverified seed is never mirrored to Redis (it would be trusted on the next restart).
+        /// </summary>
+        void Seed(ulong completedRound, long? unixTimestamp, bool verified = true);
 
         /// <summary>Records that a block was fully processed and stored. Out of order completions are fine.</summary>
         void MarkCompleted(ulong round, long? unixTimestamp);
@@ -47,7 +50,8 @@ namespace AVMTradeReporter.Services.CoinGecko
         private long _persistedRound = -1;
         private IndexedBlock? _watermark;
         private IndexedBlock? _published;
-        private (IndexedBlock? Value, DateTimeOffset At)? _redisRead;
+        private sealed record RedisRead(IndexedBlock? Value, DateTimeOffset At);
+        private RedisRead? _redisRead; // one reference, swapped atomically - request threads read it without a lock
 
         public IndexedBlockTracker(
             IOptions<AppConfiguration> options,
@@ -68,17 +72,19 @@ namespace AVMTradeReporter.Services.CoinGecko
             get { lock (_lock) return _watermark; }
         }
 
-        public void Seed(ulong completedRound, long unixTimestamp)
+        public void Seed(ulong completedRound, long? unixTimestamp, bool verified = true)
         {
+            IndexedBlock? toPublish;
             lock (_lock)
             {
                 if (_watermark != null && _watermark.Round >= completedRound) return;
-                _watermark = new IndexedBlock(completedRound, unixTimestamp);
-                _published = _watermark;
+                _watermark = new IndexedBlock(completedRound, unixTimestamp ?? 0);
+                toPublish = unixTimestamp != null ? _watermark : null;
+                if (toPublish != null) _published = toPublish;
                 foreach (var stale in _pending.Keys.Where(k => k <= completedRound).ToList()) _pending.Remove(stale);
             }
             AdvancePending();
-            PersistAsync(_published!).ContinueWith(_ => { }, TaskScheduler.Default);
+            if (toPublish != null && verified) PersistAsync(toPublish).ContinueWith(_ => { }, TaskScheduler.Default);
         }
 
         public void MarkCompleted(ulong round, long? unixTimestamp)
@@ -181,7 +187,7 @@ namespace AVMTradeReporter.Services.CoinGecko
             {
                 _logger.LogDebug(ex, "Could not read latest indexed block from Redis");
             }
-            _redisRead = (value, now);
+            _redisRead = new RedisRead(value, now);
             return value;
         }
     }

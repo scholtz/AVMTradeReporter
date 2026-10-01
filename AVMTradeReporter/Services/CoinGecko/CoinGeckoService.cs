@@ -487,13 +487,8 @@ namespace AVMTradeReporter.Services.CoinGecko
 
         private async Task<byte[]> ComputeAndCacheAsync(ulong fromBlock, ulong toBlock, string key, string redisKey)
         {
-            var gated = false;
             try
             {
-                // At most MaxConcurrentEventQueries uncached ranges are built at a time: distinct ranges are the one thing a caller
-                // can multiply, and each costs Elasticsearch queries. Waiting longer than a few seconds is a retryable 503.
-                gated = await _computeGate.WaitAsync(TimeSpan.FromSeconds(5));
-                if (!gated) throw new TransientDataException("too many events requests are being built right now");
                 // CancellationToken.None: the shared computation must not be killed by whichever caller cancels first.
                 var json = JsonSerializer.SerializeToUtf8Bytes(new CoinGeckoEventsResponse { Events = await BuildEventsAsync(fromBlock, toBlock, CancellationToken.None) }, JsonOptions);
                 RememberInMemory(key, json);
@@ -502,7 +497,6 @@ namespace AVMTradeReporter.Services.CoinGecko
             }
             finally
             {
-                if (gated) _computeGate.Release();
                 // Removed by the computation itself (not by a waiting caller, who may have been cancelled): a finished
                 // entry must never be reused by a later request - the caches above are the only place results live.
                 _inFlight.TryRemove(key, out _);
@@ -514,20 +508,34 @@ namespace AVMTradeReporter.Services.CoinGecko
             var tooMany = _eventsCache.TryGetValue("too-many:" + EventsKey(fromBlock, toBlock), out string? knownTooMany) ? knownTooMany : null;
             if (tooMany != null) throw new TooManyEventsException(tooMany);
             using var budget = new EventBudget(_config.MaxEventsPerRequest, _config.MaxParallelQueriesPerRange);
-            var tradesTask = FetchBisectingAsync((lo, hi, size) => _source.GetTradesAsync(lo, hi, size, cancellationToken), fromBlock, toBlock, budget);
-            var liquidityTask = FetchBisectingAsync((lo, hi, size) => _source.GetLiquidityAsync(lo, hi, size, cancellationToken), fromBlock, toBlock, budget);
+            // At most MaxConcurrentEventQueries uncached ranges query storage at a time: distinct ranges are the one thing a
+            // caller can multiply, and each costs Elasticsearch queries. Waiting longer than a few seconds is a retryable 503.
+            // Only the storage queries hold a slot - the pair lookups below may wait for a snapshot rebuild (algod), which
+            // must not block other ranges' queries.
+            if (!await _computeGate.WaitAsync(TimeSpan.FromSeconds(5))) throw new TransientDataException("too many events requests are being built right now");
+            List<Trade> trades;
+            List<Liquidity> liquidity;
             try
             {
-                await Task.WhenAll(tradesTask, liquidityTask);
+                var tradesTask = FetchBisectingAsync((lo, hi, size) => _source.GetTradesAsync(lo, hi, size, cancellationToken), fromBlock, toBlock, budget);
+                var liquidityTask = FetchBisectingAsync((lo, hi, size) => _source.GetLiquidityAsync(lo, hi, size, cancellationToken), fromBlock, toBlock, budget);
+                try
+                {
+                    await Task.WhenAll(tradesTask, liquidityTask);
+                }
+                catch (TooManyEventsException ex)
+                {
+                    // remembered briefly so a client repeating the same oversize request does not re-run the whole fan-out
+                    _eventsCache.Set("too-many:" + EventsKey(fromBlock, toBlock), ex.Message, new MemoryCacheEntryOptions { Size = 1, AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(60) });
+                    throw;
+                }
+                trades = tradesTask.Result.DistinctBy(t => t.TxId).ToList();
+                liquidity = liquidityTask.Result.DistinctBy(l => l.TxId).ToList();
             }
-            catch (TooManyEventsException ex)
+            finally
             {
-                // remembered briefly so a client repeating the same oversize request does not re-run the whole fan-out
-                _eventsCache.Set("too-many:" + EventsKey(fromBlock, toBlock), ex.Message, new MemoryCacheEntryOptions { Size = 1, AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(60) });
-                throw;
+                _computeGate.Release();
             }
-            var trades = tradesTask.Result.DistinctBy(t => t.TxId).ToList();
-            var liquidity = liquidityTask.Result.DistinctBy(l => l.TxId).ToList();
 
             var keys = new List<EventOrderKey>(trades.Count + liquidity.Count);
             foreach (var t in trades) keys.Add(new EventOrderKey(t.BlockId, t.TxnIndex, t.EventIndex, string.IsNullOrEmpty(t.TopTxId) ? t.TxId : t.TopTxId, t.TxId, 0));

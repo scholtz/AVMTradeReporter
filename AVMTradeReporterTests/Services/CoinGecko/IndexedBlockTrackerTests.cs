@@ -158,6 +158,40 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         }
 
         [Test]
+        public async Task Seed_WithoutTimestamp_IsCoveredButNotAdvertised()
+        {
+            var tracker = Create();
+            tracker.Seed(100, null);
+            Assert.That(await tracker.GetLatestAsync(), Is.Null, "no made-up timestamp for block 100");
+            Assert.That(tracker.CompletedThrough!.Round, Is.EqualTo(100UL));
+            tracker.MarkCompleted(101, 1003);
+            Assert.That(await tracker.GetLatestAsync(), Is.EqualTo(new IndexedBlock(101, 1003)));
+        }
+
+        [Test]
+        public async Task UnverifiedSeed_IsNotMirroredToRedis()
+        {
+            var writes = 0;
+            var db = new Mock<StackExchange.Redis.IDatabase>();
+            db.Setup(d => d.StringSetAsync(It.IsAny<StackExchange.Redis.RedisKey>(), It.IsAny<StackExchange.Redis.RedisValue>(), It.IsAny<StackExchange.Redis.Expiration>(), It.IsAny<StackExchange.Redis.ValueCondition>(), It.IsAny<StackExchange.Redis.CommandFlags>()))
+                .Returns(() => { Interlocked.Increment(ref writes); return Task.FromResult(true); });
+            var config = new AppConfiguration();
+            config.Redis.Enabled = true;
+            config.CoinGecko.LatestBlockVisibilityDelaySeconds = 0;
+            var tracker = new IndexedBlockTracker(Options.Create(config), NullLogger<IndexedBlockTracker>.Instance, new ServiceCollection().AddSingleton(db.Object).BuildServiceProvider());
+
+            tracker.Seed(100, 1000, verified: false);
+            await Task.Delay(100);
+            Assert.That(writes, Is.Zero, "a guessed completion must not become the next restart's truth");
+            Assert.That((await tracker.GetLatestAsync())!.Round, Is.EqualTo(100UL), "still advertised locally");
+
+            tracker.MarkCompleted(101, 1003);
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            while (writes == 0 && DateTime.UtcNow < deadline) await Task.Delay(20);
+            Assert.That(writes, Is.EqualTo(1), "a real completion is mirrored");
+        }
+
+        [Test]
         public async Task Seed_DoesNotMoveTheWatermarkBackwards()
         {
             var tracker = Create();

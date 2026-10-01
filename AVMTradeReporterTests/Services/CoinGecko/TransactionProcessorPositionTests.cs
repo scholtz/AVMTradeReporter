@@ -45,6 +45,43 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             Assert.That(trades.positions, Is.EqualTo(new (ulong?, uint?)[] { (null, null) }));
         }
 
+        private sealed class FailingSwapProcessor : ISwapProcessor
+        {
+            public string AppArg { get; set; } = "AA";
+            public int FailuresLeft;
+            public int Calls;
+
+            public Trade? GetTrade(SignedTransaction current, SignedTransaction? previous, Algorand.Algod.Model.Block? block, Digest? txGroup, string topTxId, Address trader, TxState tradeState)
+            {
+                Calls++;
+                if (FailuresLeft-- > 0) throw new InvalidOperationException("asset lookup hiccup");
+                return new Trade { TxId = "T" + Calls, TopTxId = topTxId };
+            }
+        }
+
+        [Test]
+        public async Task ProcessBlock_ReportsFailedPositions_AndReprocessesOnlyThose()
+        {
+            var processor = new TransactionProcessor(NullLogger<TransactionProcessor>.Instance);
+            processor.swapProcessors.Clear();
+            var swaps = new FailingSwapProcessor { FailuresLeft = 1 };
+            processor.swapProcessors["aa"] = swaps;
+            var trades = new DummyTradeService();
+            var block = new Algorand.Algod.Model.CertifiedBlock
+            {
+                Block = new Algorand.Algod.Model.Block { Round = 5, Transactions = new List<SignedTransaction> { AppCall(), AppCall(), AppCall() } },
+            };
+
+            var failed = await processor.ProcessBlock(block, trades, new DummyLiquidityService(), default);
+            Assert.That(failed, Is.EqualTo(new ulong[] { 1 }), "the first transaction threw");
+            Assert.That(trades.positions.Select(p => p.TxnIndex), Is.EqualTo(new ulong?[] { 2, 3 }));
+
+            failed = await processor.ProcessBlock(block, trades, new DummyLiquidityService(), default, failed.ToHashSet());
+            Assert.That(failed, Is.Empty);
+            Assert.That(swaps.Calls, Is.EqualTo(4), "only the failed transaction was processed again");
+            Assert.That(trades.positions.Select(p => p.TxnIndex), Is.EqualTo(new ulong?[] { 2, 3, 1 }));
+        }
+
         [Test]
         public async Task InnerSwapsOfOneTransaction_ShareTheTxnIndexAndCountEvents()
         {

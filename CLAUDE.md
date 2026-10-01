@@ -354,8 +354,8 @@ purpose (CoinGecko's indexer cannot sign ARC-14). Rules that are easy to break:
   amounts are base units of their asset. `priceNative` = asset1 per asset0; asset0/asset1 = pool
   asset A/B (immutable on-chain order).
 - **Known limits (deliberate, same data the website has):** a block that algod cannot return after
-  4 attempts, or a transaction whose processing still throws after the block was processed 3 times
-  (`ProcessBlock` returns the failure count; re-processing is idempotent), is lost for the indexer
+  4 attempts, or a transaction whose processing still throws after 3 attempts (`ProcessBlock`
+  returns the failed positions and re-processes only those; idempotent), is lost for the indexer
   itself, so the block still counts as processed - freezing `latest-block` for ever would be worse
   than that gap (a block without a known timestamp is covered but never advertised).
   `Indexer.Round` is persisted when a block task *starts*, so after a crash it may sit above
@@ -365,7 +365,9 @@ purpose (CoinGecko's indexer cannot sign ARC-14). Rules that are easy to break:
   is higher, it is written only after contiguous completion (`ResolveStartupSeed`; stores are
   idempotent upserts, so a replay only briefly double-counts pool volume until the next
   recompute and re-publishes those trades to the hub). A deliberate forward jump of `Round`
-  must clear `StoredThrough` too. A published pool whose asset decimals cannot be read stays
+  must clear `StoredThrough` too. A seed that is just `Round - 1` (old indexer document, no
+  mirror) is *unverified*: it is advertised but never mirrored to Redis, and a seed whose block
+  header cannot be read is covered but not advertised. A published pool whose asset decimals cannot be read stays
   *transient* (503 for ranges touching it) until they resolve - the assets of a live pool exist;
   only a destroyed-asset tombstone (`IAssetRepository.IsDeletedAsync`) excludes a pool for good.
   `Protocols` is not pre-filled (config binding appends to a default list) - use
