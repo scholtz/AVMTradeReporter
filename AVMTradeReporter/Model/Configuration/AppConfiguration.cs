@@ -49,6 +49,11 @@ namespace AVMTradeReporter.Model.Configuration
         public RedisConfiguration Redis { get; set; } = new RedisConfiguration();
 
         /// <summary>
+        /// GeckoTerminal / CoinGecko DEX integration API (<c>/api/coingecko/*</c>).
+        /// </summary>
+        public CoinGeckoConfiguration CoinGecko { get; set; } = new CoinGeckoConfiguration();
+
+        /// <summary>
         /// Pool refresh background service configuration
         /// </summary>
         public PoolRefreshConfiguration PoolRefresh { get; set; } = new PoolRefreshConfiguration();
@@ -425,5 +430,66 @@ namespace AVMTradeReporter.Model.Configuration
         /// Enables the ARC-56 registry lookup. When disabled only <see cref="KnownScamPools"/> is applied.
         /// </summary>
         public bool RegistryLookupEnabled { get; set; } = true;
+    }
+
+    /// <summary>
+    /// Settings of the GeckoTerminal (CoinGecko) non-EVM DEX integration, see
+    /// <c>CoinGeckoController</c> and the "GeckoTerminal Integration API Standards v0.1".
+    /// </summary>
+    public class CoinGeckoConfiguration
+    {
+        /// <summary>
+        /// Master switch. When false every <c>/api/coingecko/*</c> endpoint answers 404.
+        /// </summary>
+        public bool Enabled { get; set; } = true;
+
+        /// <summary>
+        /// DEX protocols published to GeckoTerminal. Only the Biatec DEX by default - the service also
+        /// indexes Pact/Tiny pools which belong to other DEXes.
+        /// </summary>
+        public List<Models.Data.Enums.DEXProtocol> Protocols { get; set; } = new() { Models.Data.Enums.DEXProtocol.Biatec };
+
+        /// <summary>
+        /// Maximum <c>toBlock - fromBlock + 1</c> accepted by <c>/events</c> (400 above).
+        /// </summary>
+        public int MaxBlockSpan { get; set; } = 1000;
+
+        /// <summary>
+        /// Maximum number of events one <c>/events</c> call may return (400 above, never silently truncated).
+        /// </summary>
+        public int MaxEventsPerRequest { get; set; } = 20000;
+
+        /// <summary>
+        /// Elasticsearch page size of the block-range queries (must stay below index.max_result_window = 10000).
+        /// A full page makes the range bisect, so no event is ever lost to pagination.
+        /// </summary>
+        public int ElasticPageSize { get; set; } = 5000;
+
+        /// <summary>
+        /// Seconds a fully processed block is held back before <c>/latest-block</c> reports it, so the
+        /// Elasticsearch refresh interval (1 s) has made its trades/liquidity searchable. GeckoTerminal
+        /// treats <c>/latest-block</c> as "all events up to here are available", so ahead is unsafe, behind is fine.
+        /// </summary>
+        public int LatestBlockVisibilityDelaySeconds { get; set; } = 3;
+
+        /// <summary>
+        /// Seconds a finalized <c>/events</c> range (toBlock at or below latest-block) is cached in Redis / memory.
+        /// </summary>
+        public int EventsCacheSeconds { get; set; } = 600;
+
+        /// <summary>
+        /// Upper bound of the in-process cache of finalized <c>/events</c> responses, in megabytes.
+        /// </summary>
+        public int EventsMemoryCacheMegabytes { get; set; } = 64;
+
+        /// <summary>
+        /// Seconds the asset (supply/name) answer is cached - assets are mutable, GeckoTerminal re-queries them periodically.
+        /// </summary>
+        public int AssetCacheSeconds { get; set; } = 60;
+
+        /// <summary>
+        /// Seconds the pool snapshot used for <c>/pair</c> and event mapping is reused before it is refreshed.
+        /// </summary>
+        public int PoolSnapshotSeconds { get; set; } = 60;
     }
 }

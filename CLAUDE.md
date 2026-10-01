@@ -325,3 +325,29 @@ Every pool write funnels through `PoolRepository.StorePoolAsync`, which calls
 Tests: `AVMTradeReporterTests/Services/ScamRating/*` (pure policy, mocked
 registry HTTP, plus `[Category("Live")]` checks of the real CLAMM hash and
 the fake pool against the public registry + mainnet algod).
+
+## GeckoTerminal / CoinGecko integration (`/api/coingecko/*`)
+
+`CoinGeckoController` + `Services/CoinGecko/*` implement the "GeckoTerminal Integration API
+Standards v0.1" (`latest-block`, `asset`, `pair`, `events`) for the **Biatec DEX only**
+(`CoinGecko.Protocols`; Pact/Tiny pools in the same index belong to other DEXes). Anonymous on
+purpose (CoinGecko's indexer cannot sign ARC-14). Rules that are easy to break:
+
+- **`latest-block` is `IIndexedBlockTracker`'s watermark, never `Indexer.Round`.** Blocks are
+  processed concurrently (`BlockProcessing.MaxConcurrentTasks`), so `Indexer.Round` runs ahead of
+  the blocks whose trades are actually stored; GeckoTerminal treats latest-block as "all events up
+  to here exist" and would skip the rest for good. The watermark is the highest *contiguous*
+  completed block, held back `LatestBlockVisibilityDelaySeconds` for the Elasticsearch refresh and
+  mirrored to Redis for other replicas. A block whose store failed (`_blocksAwaitingStore` in
+  `TradeReporterBackgroundService`) must not count until a later store succeeds.
+- **`/events` must never truncate or emit an invalid event** (GeckoTerminal halts indexing on a bad
+  event). Page-full ranges are bisected on `blockId`, not paginated; oversize ranges are a 400;
+  unmappable events (unknown pool, zero amount, asset mismatch) are skipped + logged. Query only
+  `blockId`/state/protocol and sort only by `blockId` - `txId` is a *text* field in the old
+  production `trades` index.
+- `(txnIndex, eventIndex)` must be unique per block: `Trade/Liquidity.TxnIndex/EventIndex` are
+  stamped by `TransactionProcessor` (`EventPosition`); older documents get a deterministic synthetic
+  position (`CoinGeckoEventOrdering`).
+- Biatec pool reserves (`Trade.A/B`) are 1e9-scaled whatever the asset decimals; swap/liquidity
+  amounts are base units of their asset. `priceNative` = asset1 per asset0; asset0/asset1 = pool
+  asset A/B (immutable on-chain order).

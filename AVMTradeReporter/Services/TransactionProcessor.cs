@@ -77,7 +77,7 @@ namespace AVMTradeReporter.Services
                         {
                             currTx.Tx.FillInParamsFromBlockHeader(block.Block);
                             var txId = currTx.Tx.TxID();
-                            await this.ProcessTransaction(currTx, prevTx1, prevTx2, block.Block, currTx.Tx.Group, txId, currTx.Tx.Sender, TxState.Confirmed, tradeService, liquidityService, cancellationToken);
+                            await this.ProcessTransaction(currTx, prevTx1, prevTx2, block.Block, currTx.Tx.Group, txId, currTx.Tx.Sender, TxState.Confirmed, tradeService, liquidityService, cancellationToken, new EventPosition(index));
                         }
                         catch (Exception exc)
                         {
@@ -105,7 +105,8 @@ namespace AVMTradeReporter.Services
             TxState tradeState,
             ITradeService tradeService,
             ILiquidityService liquidityService,
-            CancellationToken cancellationToken
+            CancellationToken cancellationToken,
+            EventPosition? position = null
             )
         {
 
@@ -119,6 +120,11 @@ namespace AVMTradeReporter.Services
                         var trade = swapProcessor.GetTrade(current, previous1, block, txGroup, topTxId, trader, tradeState);
                         if (trade != null)
                         {
+                            if (position != null)
+                            {
+                                trade.TxnIndex = position.TxnIndex;
+                                trade.EventIndex = position.NextEventIndex();
+                            }
                             await tradeService.RegisterTrade(trade, cancellationToken);
                         }
                     }
@@ -127,6 +133,11 @@ namespace AVMTradeReporter.Services
                         var liqUpdate = liquidityProcessor.GetLiquidityUpdate(current, previous1, previous2, block, txGroup, topTxId, trader, tradeState);
                         if (liqUpdate != null)
                         {
+                            if (position != null)
+                            {
+                                liqUpdate.TxnIndex = position.TxnIndex;
+                                liqUpdate.EventIndex = position.NextEventIndex();
+                            }
                             await liquidityService.RegisterLiquidity(liqUpdate, cancellationToken);
                         }
                     }
@@ -144,7 +155,7 @@ namespace AVMTradeReporter.Services
                     if (txGroup != null) current.Tx.Group = txGroup;
                     var txId = current.Tx.TxID();
 
-                    await ProcessTransaction(currTx, prevTx1, prevTx2, block, current.Tx.Group, topTxId, trader, tradeState, tradeService, liquidityService, cancellationToken);
+                    await ProcessTransaction(currTx, prevTx1, prevTx2, block, current.Tx.Group, topTxId, trader, tradeState, tradeService, liquidityService, cancellationToken, position);
                     prevTx2 = prevTx1;
                     prevTx1 = currTx;
                 }

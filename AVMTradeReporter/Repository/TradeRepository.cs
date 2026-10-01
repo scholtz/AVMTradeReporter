@@ -77,6 +77,8 @@ namespace AVMTradeReporter.Repository
                             { "poolAddress", new KeywordProperty() },
                             { "poolAppId", new LongNumberProperty() },
                             { "topTxId", new KeywordProperty() },
+                            { "txnIndex", new LongNumberProperty() },
+                            { "eventIndex", new LongNumberProperty() },
                             { "tradeState", new KeywordProperty() }    // Enum as keyword
                         }
                     }

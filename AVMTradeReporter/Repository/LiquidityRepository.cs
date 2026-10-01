@@ -61,6 +61,8 @@ namespace AVMTradeReporter.Repository
                             { "poolAddress", new Elastic.Clients.Elasticsearch.Mapping.KeywordProperty() },
                             { "poolAppId", new Elastic.Clients.Elasticsearch.Mapping.LongNumberProperty() },
                             { "topTxId", new Elastic.Clients.Elasticsearch.Mapping.KeywordProperty() },
+                            { "txnIndex", new Elastic.Clients.Elasticsearch.Mapping.LongNumberProperty() },
+                            { "eventIndex", new Elastic.Clients.Elasticsearch.Mapping.LongNumberProperty() },
                             { "txState", new Elastic.Clients.Elasticsearch.Mapping.KeywordProperty() }
                         }
                     }

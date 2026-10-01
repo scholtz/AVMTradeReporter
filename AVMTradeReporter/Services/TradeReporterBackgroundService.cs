@@ -9,6 +9,7 @@ using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Model.Valuation;
 using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Repository;
+using AVMTradeReporter.Services.CoinGecko;
 using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
 
@@ -31,6 +32,11 @@ namespace AVMTradeReporter.Services
         private readonly IAssetRepository _assetRepository;
         private readonly TransactionProcessor _transactionProcessor;
         private readonly BlockRepository _blockRepository;
+        private readonly IIndexedBlockTracker? _blockTracker;
+
+        // Blocks whose trades/liquidity could not be stored yet (they stay in _trades/_liquidityUpdates and are
+        // retried with the next block). They must not count as indexed for the GeckoTerminal latest-block watermark.
+        private readonly ConcurrentDictionary<ulong, long?> _blocksAwaitingStore = new();
 
         // Async processing support
         private readonly SemaphoreSlim _concurrentTasksSemaphore;
@@ -50,9 +56,11 @@ namespace AVMTradeReporter.Services
             IPoolRepository poolRepository,
             IAssetRepository assetRepository,
             TransactionProcessor transactionProcessor,
-            BlockRepository blockRepository
+            BlockRepository blockRepository,
+            IIndexedBlockTracker? blockTracker = null
             )
         {
+            _blockTracker = blockTracker;
             _logger = logger;
             _appConfig = appConfig;
             _indexerRepository = indexerRepository;
@@ -131,6 +139,8 @@ namespace AVMTradeReporter.Services
             {
                 _logger.LogError(ex, "Failed to initialize PoolRepository. Continuing without pool cache.");
             }
+
+            await SeedBlockTrackerAsync(stoppingToken);
 
             while (!stoppingToken.IsCancellationRequested)
             {
@@ -397,8 +407,40 @@ namespace AVMTradeReporter.Services
             await _indexerRepository.StoreIndexerAsync(Indexer, cancellationToken);
 #endif
         }
+        /// <summary>
+        /// Starts the GeckoTerminal latest-block watermark: every block below the indexer's current round was handled
+        /// by an earlier run. Only the forward indexer owns the watermark (a backward / backfill indexer never does).
+        /// </summary>
+        private async Task SeedBlockTrackerAsync(CancellationToken cancellationToken)
+        {
+            if (_blockTracker == null || Indexer == null || Indexer.Round == 0) return;
+            if (_appConfig.Value.Direction == "-") return;
+            try
+            {
+                var seedRound = Indexer.Round - 1;
+                long timestamp = Indexer.Updated.ToUnixTimeSeconds(); // fallback: close to the block time, corrected by the next block
+                try
+                {
+                    var header = await _algod.GetBlockAsync(seedRound, Format.Msgpack, true);
+                    if (header?.Block?.Timestamp != null) timestamp = Convert.ToInt64(header.Block.Timestamp);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Could not read the header of block {round} for the latest-block watermark, using the indexer update time", seedRound);
+                }
+                _blockTracker.Seed(seedRound, timestamp);
+                _logger.LogInformation("Latest indexed block watermark starts at {round}", seedRound);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to seed the latest indexed block watermark");
+            }
+        }
+
         private async Task ProcessBlockWorkAsync(ulong blockId, CancellationToken cancellationToken)
         {
+            long? blockTimestamp = null;
+            var stored = true;
             try
             {
                 var algodConfig = _appConfig.Value.Algod;
@@ -434,18 +476,33 @@ namespace AVMTradeReporter.Services
                     return;
                 }
 
+                blockTimestamp = block.Block?.Timestamp != null ? Convert.ToInt64(block.Block.Timestamp) : null;
                 _logger.LogInformation("Found transactions: {txCount}", block.Block?.Transactions?.Count ?? 0);
                 await _transactionProcessor.ProcessBlock(block, this, this, cancellationToken);
 
-                var result = await _tradeRepository.StoreTradesAsync(_trades.Values.ToArray(), cancellationToken);
+                // Captured BEFORE the batches below are snapshotted: whatever an earlier failed block left in
+                // _trades/_liquidityUpdates is part of these batches, so a successful store completes those blocks too.
+                var retryBlocks = _blocksAwaitingStore.ToArray();
+                var tradeBatch = _trades.Values.ToArray();
+                var result = await _tradeRepository.StoreTradesAsync(tradeBatch, cancellationToken);
                 if (result)
                 {
                     _trades.Clear();
                 }
-                result = await _liquidityRepository.StoreLiquidityUpdatesAsync(_liquidityUpdates.Values.ToArray(), cancellationToken);
+                var tradesStored = result || tradeBatch.Length == 0;
+                var liquidityBatch = _liquidityUpdates.Values.ToArray();
+                result = await _liquidityRepository.StoreLiquidityUpdatesAsync(liquidityBatch, cancellationToken);
                 if (result)
                 {
                     _liquidityUpdates.Clear();
+                }
+                stored = tradesStored && (result || liquidityBatch.Length == 0);
+                if (stored)
+                {
+                    foreach (var retry in retryBlocks)
+                    {
+                        if (_blocksAwaitingStore.TryRemove(retry.Key, out var ts)) _blockTracker?.MarkCompleted(retry.Key, ts);
+                    }
                 }
 
 
@@ -459,6 +516,17 @@ namespace AVMTradeReporter.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, ex.Message);
+            }
+            finally
+            {
+                // A block that is lost for good (algod failure, exception) is still "done": the indexer moves on, so
+                // holding the watermark back would stall latest-block forever. A block whose documents are only
+                // waiting for a retried store is held back until that store succeeds.
+                if (!cancellationToken.IsCancellationRequested)
+                {
+                    if (stored) _blockTracker?.MarkCompleted(blockId, blockTimestamp);
+                    else _blocksAwaitingStore[blockId] = blockTimestamp;
+                }
             }
         }
 

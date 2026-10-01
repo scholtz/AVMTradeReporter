@@ -119,6 +119,7 @@ Authentication
   - GET /api/Gossip/status (relay connectivity health check)
   - GET /api/Stats/dex (DefiLlama DEX stats adapter integration)
   - GET /api/OHLC/* (TradingView UDF charting datafeed: config, time, symbols, symbol_info, search, marks, timescale_marks, quotes, history)
+  - GET /api/coingecko/* (GeckoTerminal / CoinGecko DEX integration: latest-block, asset, pair, events - polled by CoinGecko's indexer, which cannot sign ARC-14 tokens)
 
 Elasticsearch
 - Client configured with ApiKey authentication and default mappings
@@ -177,6 +178,17 @@ REST API
   - Powered by Elasticsearch sum aggregations on valueUSD, feesUSD, feesUSDProvider, feesUSDProtocol
   - Example (daily): GET /api/stats/dex?dex=Biatec&timestamp=2024-01-15T00:00:00Z
   - Example (hourly): GET /api/stats/dex?dex=Biatec&timestamp=2024-01-15T00:00:00Z&to=2024-01-15T01:00:00Z
+- GeckoTerminal / CoinGecko integration (no authentication required), implements "GeckoTerminal Integration API Standards v0.1" for the Biatec DEX
+  - GET /api/coingecko/latest-block -> `{block:{blockNumber, blockTimestamp}}`: the newest block for which every swap / join / exit is stored and searchable (watermark of fully processed blocks held back `CoinGecko.LatestBlockVisibilityDelaySeconds` for the Elasticsearch refresh; mirrored to Redis so every replica answers the same). 503 until known.
+  - GET /api/coingecko/asset?id=<assetId> -> `{asset:{id,name,symbol,decimals,totalSupply,metadata}}` (ALGO is id 0, supply decimalized). 404 for unknown/destroyed assets.
+  - GET /api/coingecko/pair?id=<poolAppId> -> `{pair:{id,dexKey,asset0Id,asset1Id,feeBps}}`; asset0 = pool asset A, asset1 = pool asset B (on-chain order, never changes). 404 for unknown / scam pools.
+  - GET /api/coingecko/events?fromBlock=&toBlock= -> `{events:[...]}`, both bounds inclusive, sorted by block, txnIndex, eventIndex. 400 when toBlock < fromBlock, the range exceeds `CoinGecko.MaxBlockSpan` (1000) or `MaxEventsPerRequest`, or toBlock is beyond latest-block.
+    - swap: `asset0In+asset1Out` or `asset1In+asset0Out` (amounts as the trader paid / received), `priceNative` = asset1 per asset0 of the executed swap, `reserves` after the swap, `metadata.fees{0|1}In` = input amount x pool LP fee.
+    - liquidity deposit -> `join`, withdrawal -> `exit` (`amount0`, `amount1`, `reserves`).
+    - amounts are decimalized strings (amount / 10^decimals; Biatec reserves are stored in a 1e9 scale), `txnId` is the top-level transaction id, `maker` the sender, `blockTimestamp` unix seconds.
+    - `txnIndex` / `eventIndex` are persisted by the block processor (`Trade.TxnIndex/EventIndex`); documents indexed before that get a deterministic synthetic position after the real ones of their block.
+    - events that cannot be expressed safely (unknown pool, zero amount, asset mismatch) are skipped and logged: GeckoTerminal halts indexing on an invalid event.
+  - Efficiency: asset/pair come from the in-memory caches; events cost two blockId-filtered Elasticsearch queries (range bisection instead of deep pagination) and are then cached in memory + Redis (`CoinGecko.EventsCacheSeconds`) with concurrent identical requests collapsed. Only the protocols in `CoinGecko.Protocols` (default Biatec) are published.
 - Test utilities (development)
   - GET /api/signalr/auth-test
   - GET /api/signalr/auth-test-authorized (requires auth)

@@ -146,6 +146,11 @@ namespace AVMTradeReporter
             builder.Services.AddSingleton<IAssetTimeseriesService, AssetTimeseriesService>();
             builder.Services.AddSingleton<IOhlcUsdRepairService, OhlcUsdRepairService>();
 
+            // GeckoTerminal / CoinGecko DEX integration (api/coingecko/*)
+            builder.Services.AddSingleton<AVMTradeReporter.Services.CoinGecko.IIndexedBlockTracker, AVMTradeReporter.Services.CoinGecko.IndexedBlockTracker>();
+            builder.Services.AddSingleton<AVMTradeReporter.Services.CoinGecko.ICoinGeckoEventSource, AVMTradeReporter.Services.CoinGecko.ElasticCoinGeckoEventSource>();
+            builder.Services.AddSingleton<AVMTradeReporter.Services.CoinGecko.ICoinGeckoService, AVMTradeReporter.Services.CoinGecko.CoinGeckoService>();
+
             // Scam rating: ARC-56 registry lookup + known scam pool list (see ScamRatingConfiguration)
             builder.Services.AddSingleton<IArc56RegistryClient>(sp =>
             {
