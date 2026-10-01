@@ -231,6 +231,8 @@ namespace AVMTradeReporterTests.Services.CoinGecko
                 AssetIdB = Algo,
                 AssetAmountA = 750_000,
                 AssetAmountB = 5_000_000,
+                A = 1_000_000_000,
+                B = 2_000_000_000,
                 TxId = "L",
                 BlockId = 1,
                 Timestamp = Time,
@@ -252,22 +254,31 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         }
 
         [Test]
-        public void Liquidity_SingleSidedDepositIsAllowed()
+        public void Liquidity_WithAnUnknownReserveSide_IsSkipped_BecauseDeltaZeroMeansUnchangedNotEmpty()
         {
-            var liquidity = new Liquidity
+            // a single-sided CLAMM deposit changes only one reserve: the other one is absent from the state delta and stored as 0
+            Liquidity Make(ulong a, ulong b, LiquidityDirection direction) => new()
             {
-                Direction = LiquidityDirection.DepositLiquidity,
+                Direction = direction,
                 AssetIdA = Algo,
                 AssetIdB = Usdc,
                 AssetAmountA = 1_000_000,
                 AssetAmountB = 0,
+                A = a,
+                B = b,
                 TxId = "L",
                 Timestamp = Time,
                 LiquidityProvider = "LP",
             };
-            var join = CoinGeckoMapper.TryMapLiquidity(liquidity, BiatecPair, new EventPositionPair(1, 0));
-            Assert.That(join!.Amount0, Is.EqualTo("1"));
-            Assert.That(join.Amount1, Is.EqualTo("0"));
+            var position = new EventPositionPair(1, 0);
+
+            Assert.That(CoinGeckoMapper.TryMapLiquidity(Make(5_000_000_000, 0, LiquidityDirection.DepositLiquidity), BiatecPair, position), Is.Null);
+            Assert.That(CoinGeckoMapper.TryMapLiquidity(Make(0, 5_000_000_000, LiquidityDirection.WithdrawLiquidity), BiatecPair, position), Is.Null);
+            Assert.That(CoinGeckoMapper.TryMapLiquidity(Make(0, 0, LiquidityDirection.DepositLiquidity), BiatecPair, position), Is.Null, "a deposit cannot leave an empty pool");
+
+            var singleSided = CoinGeckoMapper.TryMapLiquidity(Make(5_000_000_000, 7_000_000_000, LiquidityDirection.DepositLiquidity), BiatecPair, position);
+            Assert.That(singleSided!.Amount0, Is.EqualTo("1"));
+            Assert.That(singleSided.Amount1, Is.EqualTo("0"));
         }
     }
 }

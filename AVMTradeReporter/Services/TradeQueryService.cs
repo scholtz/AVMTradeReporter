@@ -490,14 +490,7 @@ namespace AVMTradeReporter.Services
         /// an unmapped field is not an error, it just matches nothing.
         /// </summary>
         private static void AddDualKeywordTerm(QueryDescriptor<Trade> query, string field, string value)
-        {
-            query.Bool(b => b
-                .Should(
-                    s => s.Term(t => t.Field(field).Value(FieldValue.String(value))),
-                    s => s.Term(t => t.Field(field + ".keyword").Value(FieldValue.String(value)))
-                )
-                .MinimumShouldMatch(1));
-        }
+            => ElasticKeywordQuery.DualKeywordTerm(query, field, value);
 
         private static void AddEitherAssetClause(List<Action<QueryDescriptor<Trade>>> must, ulong assetId)
         {

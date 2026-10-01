@@ -74,15 +74,17 @@ namespace AVMTradeReporter.Services.CoinGecko
         private readonly ConcurrentDictionary<string, Lazy<Task<byte[]>>> _inFlight = new();
         private readonly ConcurrentDictionary<ulong, (CoinGeckoAsset? Asset, DateTimeOffset Expires)> _assets = new();
         private readonly SemaphoreSlim _snapshotLock = new(1, 1);
-        private volatile PoolSnapshot _snapshot = new(new Dictionary<ulong, PairInfo>(), new Dictionary<ulong, DateTimeOffset>(), new HashSet<ulong>(), DateTimeOffset.MinValue);
+        private volatile PoolSnapshot _snapshot = new(new Dictionary<ulong, PairInfo>(), new Dictionary<ulong, DateTimeOffset>(), new HashSet<ulong>(), new HashSet<ulong>(), DateTimeOffset.MinValue);
 
         /// <param name="Pairs">Published pairs by pool application id.</param>
         /// <param name="Unresolved">Published pools whose asset decimals could not be resolved, with the time they were first seen so (transient for <see cref="CoinGeckoConfiguration.UnresolvedPoolGraceMinutes"/>, then skipped).</param>
         /// <param name="AssetIds">Every asset of a published pool: the only assets <c>/asset</c> answers for.</param>
-        private sealed record PoolSnapshot(Dictionary<ulong, PairInfo> Pairs, Dictionary<ulong, DateTimeOffset> Unresolved, HashSet<ulong> AssetIds, DateTimeOffset LoadedAt);
+        /// <param name="Excluded">Pools the repository knows but that must never be published (scam, malformed).</param>
+        private sealed record PoolSnapshot(Dictionary<ulong, PairInfo> Pairs, Dictionary<ulong, DateTimeOffset> Unresolved, HashSet<ulong> AssetIds, HashSet<ulong> Excluded, DateTimeOffset LoadedAt);
 
         /// <summary>Pair lookup result: <see cref="Transient"/> means "exists but cannot be described right now - try again", not "unknown".</summary>
-        private readonly record struct PairLookup(PairInfo? Pair, bool Transient);
+        /// <param name="Excluded">The pool is known but deliberately not published, so its events are skipped for good.</param>
+        private readonly record struct PairLookup(PairInfo? Pair, bool Transient, bool Excluded = false);
 
         /// <summary>Data that is expected to exist could not be read right now; the request must fail (503) instead of answering incompletely.</summary>
         private sealed class TransientDataException : Exception
@@ -187,7 +189,11 @@ namespace AVMTradeReporter.Services.CoinGecko
             var metadata = new Dictionary<string, string> { ["type"] = asset.Type.ToString() };
             if (!string.IsNullOrWhiteSpace(parameters.Url)) metadata["url"] = parameters.Url!;
 
-            var total = parameters.Total.HasValue ? CoinGeckoMapper.Decimalize(parameters.Total.Value, decimals) : null;
+            // The native token is synthesized by AssetRepository with its supply in WHOLE units (10 billion) next to
+            // Decimals = 6, unlike an ASA whose Total is in base units - decimalizing it would be 1e6 too small.
+            var total = !parameters.Total.HasValue ? null
+                : assetId == 0 ? new decimal(parameters.Total.Value)
+                : CoinGeckoMapper.Decimalize(parameters.Total.Value, decimals);
             return new CoinGeckoAsset
             {
                 Id = assetId.ToString(CultureInfo.InvariantCulture),
@@ -243,7 +249,7 @@ namespace AVMTradeReporter.Services.CoinGecko
             // is then skipped instead of stalling the whole integration at its first block for ever.
             var transient = snapshot.Unresolved.TryGetValue(appId, out var since)
                 && _time.GetUtcNow() - since < TimeSpan.FromMinutes(Math.Max(0, _config.UnresolvedPoolGraceMinutes));
-            return new PairLookup(null, transient);
+            return new PairLookup(null, transient, snapshot.Excluded.Contains(appId));
         }
 
         private async Task<PoolSnapshot> GetSnapshotAsync(TimeSpan? forceIfOlderThan, CancellationToken cancellationToken)
@@ -261,13 +267,18 @@ namespace AVMTradeReporter.Services.CoinGecko
                 var pairs = new Dictionary<ulong, PairInfo>();
                 var unresolved = new Dictionary<ulong, DateTimeOffset>();
                 var assetIds = new HashSet<ulong>();
+                var excluded = new HashSet<ulong>();
                 var now = _time.GetUtcNow();
                 foreach (var protocol in _config.PublishedProtocols)
                 {
                     var pools = await _poolRepository.GetPoolsAsync(null, null, null, protocol, int.MaxValue, null, SortDirection.Desc, cancellationToken);
                     foreach (var pool in pools)
                     {
-                        if (!IsPublishable(pool)) continue;
+                        if (!IsPublishable(pool))
+                        {
+                            excluded.Add(pool.PoolAppId);
+                            continue;
+                        }
                         assetIds.Add(pool.AssetIdA!.Value);
                         assetIds.Add(pool.AssetIdB!.Value);
                         var pair = await ToPairInfoAsync(pool, cancellationToken);
@@ -280,7 +291,7 @@ namespace AVMTradeReporter.Services.CoinGecko
                         }
                     }
                 }
-                _snapshot = new PoolSnapshot(pairs, unresolved, assetIds, now);
+                _snapshot = new PoolSnapshot(pairs, unresolved, assetIds, excluded, now);
                 return _snapshot;
             }
             finally
@@ -429,6 +440,14 @@ namespace AVMTradeReporter.Services.CoinGecko
                 // as the final answer for an immutable range and GeckoTerminal would never see them.
                 if (lookup.Transient) throw new TransientDataException($"pool {appId} cannot be described right now");
                 var pair = lookup.Pair;
+                if (pair == null && !lookup.Excluded)
+                {
+                    // Not known at all: a pool created moments ago that the pool cache has not registered yet looks exactly
+                    // like this. Skipping its first events would be cached as final, so recent events wait (503) a little.
+                    var eventTime = isTrade ? trades[i].Timestamp : liquidity[i - trades.Count].Timestamp;
+                    if (eventTime != null && _time.GetUtcNow() - eventTime.Value < TimeSpan.FromSeconds(Math.Max(0, _config.UnknownPoolGraceSeconds)))
+                        throw new TransientDataException($"pool {appId} is not registered yet");
+                }
                 CoinGeckoEvent? mapped = pair == null ? null
                     : isTrade ? CoinGeckoMapper.TryMapSwap(trades[i], pair, positions[i])
                     : CoinGeckoMapper.TryMapLiquidity(liquidity[i - trades.Count], pair, positions[i]);

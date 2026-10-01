@@ -52,8 +52,8 @@ namespace AVMTradeReporter.Services.CoinGecko
                 .Sort(so => so.Field(f => f.Field(t => t.BlockId).Order(SortOrder.Asc)))
                 .Query(q => q.Bool(b => b.Filter(
                     f => f.Range(r => r.Number(n => n.Field(t => t.BlockId).Gte(lo).Lte(hi))),
-                    f => DualKeywordTerms(f, "tradeState", new[] { nameof(TxState.Confirmed) }),
-                    f => DualKeywordTerms(f, "protocol", _protocols.Select(p => p.ToString()))))),
+                    f => ElasticKeywordQuery.DualKeywordTerms(f, "tradeState", new[] { nameof(TxState.Confirmed) }),
+                    f => ElasticKeywordQuery.DualKeywordTerms(f, "protocol", _protocols.Select(p => p.ToString()))))),
                 cancellationToken);
             if (!response.IsValidResponse) throw new InvalidOperationException($"Elasticsearch trades query failed: {response.DebugInformation}");
             return response.Documents.ToList();
@@ -69,22 +69,11 @@ namespace AVMTradeReporter.Services.CoinGecko
                 .Sort(so => so.Field(f => f.Field(t => t.BlockId).Order(SortOrder.Asc)))
                 .Query(q => q.Bool(b => b.Filter(
                     f => f.Range(r => r.Number(n => n.Field(t => t.BlockId).Gte(lo).Lte(hi))),
-                    f => DualKeywordTerms(f, "txState", new[] { nameof(TxState.Confirmed) }),
-                    f => DualKeywordTerms(f, "protocol", _protocols.Select(p => p.ToString()))))),
+                    f => ElasticKeywordQuery.DualKeywordTerms(f, "txState", new[] { nameof(TxState.Confirmed) }),
+                    f => ElasticKeywordQuery.DualKeywordTerms(f, "protocol", _protocols.Select(p => p.ToString()))))),
                 cancellationToken);
             if (!response.IsValidResponse) throw new InvalidOperationException($"Elasticsearch liquidity query failed: {response.DebugInformation}");
             return response.Documents.Where(d => d.BlockId >= lo && d.BlockId <= hi).ToList();
-        }
-
-        /// <summary>Exact match that works for keyword mapped fields and for text fields with a ".keyword" subfield.</summary>
-        private static void DualKeywordTerms<T>(QueryDescriptor<T> query, string field, IEnumerable<string> values)
-        {
-            var terms = values.Select(FieldValue.String).ToArray();
-            query.Bool(b => b
-                .Should(
-                    s => s.Terms(t => t.Field(field).Terms(new TermsQueryField(terms))),
-                    s => s.Terms(t => t.Field(field + ".keyword").Terms(new TermsQueryField(terms))))
-                .MinimumShouldMatch(1));
         }
     }
 }

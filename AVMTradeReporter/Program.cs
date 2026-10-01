@@ -313,6 +313,23 @@ namespace AVMTradeReporter
                         return RateLimitPartition.GetNoLimiter("health");
                     }
 
+                    // CoinGecko's indexer polls latest-block and events about every 2 s (and walks every asset / pair
+                    // once on its first sync) - that alone exhausts the 60/min anonymous budget, so the GeckoTerminal
+                    // endpoints get their own, larger bucket per client IP, ahead of the authenticated tier (the endpoints are
+                    // public: a caller that happens to send a token must not land in a smaller bucket).
+                    if (httpContext.Request.Path.StartsWithSegments("/api/coingecko"))
+                    {
+                        var coinGeckoIp = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+                        var coinGeckoLimit = Math.Max(1, appConfig?.CoinGecko?.RateLimitPerMinute ?? 1200);
+                        return RateLimitPartition.GetFixedWindowLimiter($"coingecko:{coinGeckoIp}", _ => new FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = coinGeckoLimit,
+                            Window = TimeSpan.FromMinutes(1),
+                            QueueLimit = 0,
+                            AutoReplenishment = true,
+                        });
+                    }
+
                     // AlgorandAuthenticationHandlerV2 only succeeds (IsAuthenticated == true) for a
                     // validly signed ARC-14 transaction - EmptySuccessOnFailure (which would instead
                     // return a "successful" ticket with an empty identity on a missing/bad token) is
@@ -335,21 +352,6 @@ namespace AVMTradeReporter
                     }
 
                     var clientIp = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-
-                    // CoinGecko's indexer polls latest-block and events about every 2 s (and walks every asset / pair
-                    // once on its first sync) - that alone exhausts the 60/min anonymous budget, so the GeckoTerminal
-                    // endpoints get their own, larger bucket per client that is not shared with the rest of the API.
-                    if (httpContext.Request.Path.StartsWithSegments("/api/coingecko"))
-                    {
-                        var coinGeckoLimit = Math.Max(1, appConfig?.CoinGecko?.RateLimitPerMinute ?? 1200);
-                        return RateLimitPartition.GetFixedWindowLimiter($"coingecko:{clientIp}", _ => new FixedWindowRateLimiterOptions
-                        {
-                            PermitLimit = coinGeckoLimit,
-                            Window = TimeSpan.FromMinutes(1),
-                            QueueLimit = 0,
-                            AutoReplenishment = true,
-                        });
-                    }
 
                     return RateLimitPartition.GetFixedWindowLimiter($"anon:{clientIp}", _ => new FixedWindowRateLimiterOptions
                     {

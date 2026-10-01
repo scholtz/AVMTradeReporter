@@ -204,6 +204,17 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         }
 
         [Test]
+        public async Task Asset_Algo_SupplyIsInWholeUnits_BecauseTheNativeTokenIsStoredThatWay()
+        {
+            // AssetRepository synthesizes ALGO with Total = 10_000_000_000 whole ALGO next to Decimals = 6
+            _assets.Setup(a => a.GetAssetAsync(0, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Asset(0, "Algorand", "ALGO", 6, 10_000_000_000));
+            var result = await Create().GetAssetAsync("0", default);
+            Assert.That(result.Value!.Asset.TotalSupply, Is.EqualTo("10000000000"));
+            Assert.That(result.Value.Asset.Decimals, Is.EqualTo(6));
+        }
+
+        [Test]
         public void MapAsset_FallsBackWhenNameOrUnitMissing_AndSkipsDestroyedAssets()
         {
             var noName = Asset(5, "", "", 2, 100);
@@ -574,6 +585,35 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             var queriesAfterFirst = _source.TradeCalls;
             Assert.That((await service.GetEventsJsonAsync(100, 159, default)).Outcome, Is.EqualTo(CoinGeckoOutcome.BadRequest));
             Assert.That(_source.TradeCalls, Is.EqualTo(queriesAfterFirst), "the oversize answer is remembered - no second fan-out against storage");
+        }
+
+        [Test]
+        public async Task Events_RecentEventOfAPoolNobodyKnowsYet_IsHeldBack_NotSkippedAndCachedAsFinal()
+        {
+            // a pool created moments ago may not be registered in the pool cache yet
+            var fresh = Swap("FRESH", 10, 1, 0, appId: 424242);
+            fresh.Timestamp = DateTimeOffset.UtcNow;
+            _source.Trades.Add(fresh);
+            var service = Create();
+
+            Assert.That((await service.GetEventsJsonAsync(10, 10, default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
+
+            // the same pool registered a moment later -> the very same range is complete
+            await _pools.StorePoolAsync(Pool(424242, "FRESHPOOL", 0, 31566704));
+            await Task.Delay(5200);
+            Assert.That(Events(await service.GetEventsJsonAsync(10, 10, default)), Has.Length.EqualTo(1));
+        }
+
+        [Test]
+        public async Task Events_RecentEventOfAnExcludedScamPool_IsSkippedForGood_NotHeldBack()
+        {
+            var scam = Pool(666, "SCAMMY", 0, 31566704);
+            scam.ScamRating = 95;
+            await _pools.StorePoolAsync(scam);
+            var trade = Swap("SCAM", 10, 1, 0, appId: 666);
+            trade.Timestamp = DateTimeOffset.UtcNow;
+            _source.Trades.Add(trade);
+            Assert.That(Events(await Create().GetEventsJsonAsync(10, 10, default)), Is.Empty);
         }
 
         [Test]

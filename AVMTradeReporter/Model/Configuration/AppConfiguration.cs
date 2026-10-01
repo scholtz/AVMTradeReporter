@@ -512,5 +512,11 @@ namespace AVMTradeReporter.Model.Configuration
         /// whole integration for ever.
         /// </summary>
         public int UnresolvedPoolGraceMinutes { get; set; } = 10;
+
+        /// <summary>
+        /// Seconds an event of a pool the pool cache does not know at all is held back (503) instead of skipped: a pool
+        /// created moments ago is registered with a short delay, and its first events must not be dropped for good.
+        /// </summary>
+        public int UnknownPoolGraceSeconds { get; set; } = 120;
     }
 }
