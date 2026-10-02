@@ -1,7 +1,9 @@
 using Algorand;
 using Algorand.Algod;
+using Algorand.Algod.Model;
 using AVMTradeReporter.Extensions;
 using AVMTradeReporter.Model.Configuration;
+using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Models.Data.Enums;
 using AVMTradeReporter.Processors.Pool;
 using AVMTradeReporter.Services.ScamRating;
@@ -26,17 +28,35 @@ namespace AVMTradeReporterTests.Services.ScamRating
         {
             using var httpClient = HttpClientConfigurator.ConfigureHttpClient(Algorand.Algod.AlgodConfiguration.MainNet);
             var algod = new DefaultApi(httpClient);
-            var app = await algod.GetApplicationByIDAsync(FakePoolAppId);
-            var hash = app.Params.ApprovalProgram.Bytes.ToSha256Hex();
             var address = Address.ForApplication(FakePoolAppId).EncodeAsString();
-
             var registry = new Arc56RegistryClient(new HttpClient(), new OptionsWrapper<AppConfiguration>(new AppConfiguration()), new LoggerFactory().CreateLogger<Arc56RegistryClient>());
-            Assert.That(await registry.IsApprovalProgramRegisteredAsync(hash), Is.False, $"approval hash {hash} of app {FakePoolAppId} must not be in the ARC-56 registry");
 
-            var processor = new BiatecPoolProcessor(algod, new MockPoolRepository(), new LoggerFactory().CreateLogger<BiatecPoolProcessor>(), new MockAssetRepository());
-            var pool = await processor.LoadPoolAsync(address, FakePoolAppId);
-            Assert.That(pool.ApprovalProgramHash, Is.EqualTo(hash));
-            Assert.That(pool.Protocol, Is.EqualTo(DEXProtocol.Biatec));
+            AVMTradeReporter.Models.Data.Pool pool;
+            try
+            {
+                var app = await algod.GetApplicationByIDAsync(FakePoolAppId);
+                var hash = app.Params.ApprovalProgram.Bytes.ToSha256Hex();
+                Assert.That(await registry.IsApprovalProgramRegisteredAsync(hash), Is.False, $"approval hash {hash} of app {FakePoolAppId} must not be in the ARC-56 registry");
+
+                var processor = new BiatecPoolProcessor(algod, new MockPoolRepository(), new LoggerFactory().CreateLogger<BiatecPoolProcessor>(), new MockAssetRepository());
+                pool = await processor.LoadPoolAsync(address, FakePoolAppId);
+                Assert.That(pool.ApprovalProgramHash, Is.EqualTo(hash));
+                Assert.That(pool.Protocol, Is.EqualTo(DEXProtocol.Biatec));
+            }
+            catch (ApiException<ErrorResponse> ex) when (ex.StatusCode == 404)
+            {
+                // The scammer deleted the application on chain (algod: 404), so the live fetch is gone for good. What this
+                // test protects is the rating rule itself, which only needs the app id: a Biatec-looking pool with
+                // balances, listed in KnownScamPools, must end up rated 100 with zero balances.
+                pool = new AVMTradeReporter.Models.Data.Pool
+                {
+                    PoolAddress = address,
+                    PoolAppId = FakePoolAppId,
+                    Protocol = DEXProtocol.Biatec,
+                    A = 5_000_000_000,
+                    B = 7_000_000_000,
+                };
+            }
 
             var service = new ScamRatingService(registry, new OptionsWrapper<AppConfiguration>(new AppConfiguration()), new LoggerFactory().CreateLogger<ScamRatingService>());
             await service.ApplyAsync(pool);
