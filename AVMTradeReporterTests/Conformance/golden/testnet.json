@@ -1,0 +1,73 @@
+{
+  "network": "Algorand testnet (stage)",
+  "recorded": "2026-10-02",
+  "cases": [
+    {
+      "name": "Biatec ALGO/USDC swap, July 2026 (legacy document without stored position)",
+      "fromBlock": 66144120,
+      "toBlock": 66144130,
+      "events": [
+        {
+          "asset0In": "0.799",
+          "asset1Out": "6.412157",
+          "priceNative": "8.025227784730913642052565707",
+          "metadata": {
+            "fees0In": "0.000799"
+          },
+          "block": {
+            "blockNumber": 66144125,
+            "blockTimestamp": 1786281263
+          },
+          "eventType": "swap",
+          "txnId": "NBX4GBFCZC3KG3NZK6HOQDTO76HLT2DCVVBGISRXTL55GXCJLCMA",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "TESTNTTTJDHIF5PJZUBTTDYYSKLCLM6KXCTWIOOTZJX5HO7263DPPMM2SU",
+          "pairId": "768787561",
+          "reserves": {
+            "asset0": "18.238241",
+            "asset1": "3.533225"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Biatec ALGO/USDC swap, Sept 2026",
+      "fromBlock": 67322810,
+      "toBlock": 67322820,
+      "events": [
+        {
+          "asset0In": "0.4",
+          "asset1Out": "3.198327",
+          "priceNative": "7.9958175",
+          "metadata": {
+            "fees0In": "0.0004"
+          },
+          "block": {
+            "blockNumber": 67322816,
+            "blockTimestamp": 1789459301
+          },
+          "eventType": "swap",
+          "txnId": "ES5LHK7PFMXIBOLA5K545I4PT26AJQKPIWWLNMZB4OWPNEG3H7RA",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "ALGONAUTSPIUHDCX3SLFXOFDUKOE4VY36XV4JX2JHQTWJNKVBKPEBQACRY",
+          "pairId": "768787561",
+          "reserves": {
+            "asset0": "18.638241",
+            "asset1": "0.334898"
+          }
+        }
+      ]
+    }
+  ],
+  "pairs": [
+    {
+      "id": "768787561",
+      "dexKey": "biatec",
+      "asset0Id": "0",
+      "asset1Id": "10458941",
+      "feeBps": 10
+    }
+  ]
+}

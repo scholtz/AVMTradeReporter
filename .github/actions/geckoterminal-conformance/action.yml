@@ -1,0 +1,61 @@
+name: GeckoTerminal conformance
+description: >-
+  Runs the live GeckoTerminal conformance, smoke and latency suite (AVMTradeReporterTests, Category=Conformance) against a
+  deployed /api/coingecko. Fails when the API violates the GeckoTerminal Integration API Standards v0.1, serves stale or
+  gappy data, or exceeds its latency budgets.
+inputs:
+  base_url:
+    description: API base URL without trailing slash, e.g. https://api.testnet.scan.biatec.io
+    required: true
+  golden:
+    description: Name of a Conformance/golden/*.json file with recorded historical events ("testnet", "mainnet"); empty = skip
+    required: false
+    default: ""
+  expect_events:
+    description: "true: finding no event in the scanned window (and no golden range) fails the run"
+    required: false
+    default: "true"
+  poll_seconds:
+    description: Duration of the polling simulation
+    required: false
+    default: "40"
+  latency_factor:
+    description: Multiplier for the latency budgets (CI runners are slower than the target network)
+    required: false
+    default: "1"
+  wait_minutes:
+    description: How long to wait for latest-block to answer 200 (right after a rollout)
+    required: false
+    default: "5"
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
+    - name: Build the test project
+      shell: bash
+      run: dotnet build AVMTradeReporterTests -c Release --nologo -v q
+    - name: Run the conformance suite
+      shell: bash
+      env:
+        GECKOTERMINAL_BASE_URL: ${{ inputs.base_url }}
+        GECKOTERMINAL_GOLDEN: ${{ inputs.golden }}
+        GECKOTERMINAL_EXPECT_EVENTS: ${{ inputs.expect_events }}
+        GECKOTERMINAL_POLL_SECONDS: ${{ inputs.poll_seconds }}
+        GECKOTERMINAL_LATENCY_FACTOR: ${{ inputs.latency_factor }}
+        GECKOTERMINAL_WAIT_MINUTES: ${{ inputs.wait_minutes }}
+      run: |
+        echo "### GeckoTerminal conformance: ${{ inputs.base_url }}" >> "$GITHUB_STEP_SUMMARY"
+        set +e
+        dotnet test AVMTradeReporterTests -c Release --no-build --nologo \
+          --filter "Category=Conformance" \
+          --logger "trx;LogFileName=conformance.trx" \
+          --logger "console;verbosity=normal" 2>&1 | tee conformance.log
+        status=${PIPESTATUS[0]}
+        {
+          echo '```'
+          grep -E "latest-block .* old|p95|polling cycles|concurrent pollers|events in|Passed!|Failed!|Failed |violates" conformance.log | head -40
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
+        exit $status

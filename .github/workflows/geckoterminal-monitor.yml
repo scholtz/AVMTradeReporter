@@ -1,0 +1,28 @@
+name: GeckoTerminal monitor
+
+# Scheduled health check of the live integration. GeckoTerminal halts the indexing of a DEX on the first bad response and
+# does not tell us - this does, within hours instead of days: stale latest-block, schema violations, gaps, latency budget
+# breaches, a vanished rate-limit bucket. A failing run is the alert (enable failure notifications for this workflow).
+# The mainnet job needs Conformance/golden/mainnet.json (see docs/GECKOTERMINAL.md) - without it the golden test is skipped.
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  stage:
+    uses: ./.github/workflows/geckoterminal-conformance.yml
+    with:
+      base_url: https://api.testnet.scan.biatec.io
+      golden: testnet
+  algorand-mainnet:
+    # set the repository variable GECKOTERMINAL_MAINNET_LIVE=true once the integration was promoted to mainnet
+    if: ${{ vars.GECKOTERMINAL_MAINNET_LIVE == 'true' }}
+    uses: ./.github/workflows/geckoterminal-conformance.yml
+    with:
+      base_url: https://api.algorand.scan.biatec.io
+      golden: mainnet
+      latency_factor: "2"
