@@ -171,3 +171,15 @@ jobs:
       - name: Remove kubeconfig
         if: always()
         run: rm -f "$HOME/.kube/config"
+
+  # After every stage deploy: prove the GeckoTerminal integration on the freshly rolled-out stage pods (schema, gaps,
+  # latency, golden data). A red run means this version must NOT be promoted - promote-production.yml re-checks stage as
+  # its gate. See docs/GECKOTERMINAL.md.
+  verify-stage:
+    name: Verify GeckoTerminal integration on stage
+    needs: deploy-stage
+    uses: ./.github/workflows/geckoterminal-conformance.yml
+    with:
+      base_url: https://api.testnet.scan.biatec.io
+      golden: testnet
+      latency_factor: "2"

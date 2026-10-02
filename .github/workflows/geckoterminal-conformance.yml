@@ -1,0 +1,64 @@
+name: GeckoTerminal conformance
+
+# Reusable + manual: runs the live conformance suite against one deployed API. Called by deploy.yml (stage, after every
+# deploy), by geckoterminal-monitor.yml (scheduled) and runnable by hand from the Actions tab to check any environment on
+# demand. promote-production.yml uses the same composite action directly (stage gate before a promotion, production smoke
+# test after it).
+on:
+  workflow_call:
+    inputs:
+      base_url: { required: true, type: string }
+      golden: { required: false, type: string, default: "" }
+      expect_events: { required: false, type: string, default: "true" }
+      poll_seconds: { required: false, type: string, default: "40" }
+      latency_factor: { required: false, type: string, default: "1" }
+      wait_minutes: { required: false, type: string, default: "5" }
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: API base URL (no trailing slash)
+        required: true
+        default: https://api.testnet.scan.biatec.io
+      golden:
+        description: Golden data set (testnet | mainnet | empty)
+        required: false
+        default: testnet
+      expect_events:
+        required: false
+        default: "true"
+      poll_seconds:
+        required: false
+        default: "40"
+      latency_factor:
+        required: false
+        default: "1"
+      wait_minutes:
+        required: false
+        default: "5"
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/geckoterminal-conformance
+        with:
+          base_url: ${{ inputs.base_url }}
+          golden: ${{ inputs.golden }}
+          expect_events: ${{ inputs.expect_events }}
+          poll_seconds: ${{ inputs.poll_seconds }}
+          latency_factor: ${{ inputs.latency_factor }}
+          wait_minutes: ${{ inputs.wait_minutes }}
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-${{ github.run_id }}-${{ github.job }}
+          path: |
+            AVMTradeReporterTests/TestResults/conformance.trx
+            conformance.log
+          if-no-files-found: ignore

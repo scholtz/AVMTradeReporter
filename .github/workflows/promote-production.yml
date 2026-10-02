@@ -35,6 +35,14 @@ on:
           - algorand
           - voi
           - all
+      skip_stage_verification:
+        description: >-
+          Emergency only: promote without requiring that stage runs exactly this version and passes the GeckoTerminal
+          conformance suite. Leave unchecked - the gate exists so that a version that breaks the CoinGecko integration
+          never reaches mainnet.
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -99,6 +107,44 @@ jobs:
           fi
 
   # ---------------------------------------------------------------------
+  # Stage 0b: verify-stage - the safety gate against breaking the GeckoTerminal / CoinGecko integration on mainnet.
+  # 1. stage must run EXACTLY the version being promoted (the manifest in the repo records what the stage rollout
+  #    deployed), otherwise stage's green result says nothing about this version;
+  # 2. the live conformance suite (schema, gaps, golden data, latency, load) must pass against stage right now.
+  # The suite is the same one that runs after every stage deploy and that smoke-tests production after promotion.
+  # See docs/GECKOTERMINAL.md.
+  # ---------------------------------------------------------------------
+  verify-stage:
+    name: Verify GeckoTerminal integration on stage
+    needs: resolve-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Stage must run the version being promoted
+        run: |
+          version="${{ needs.resolve-version.outputs.version }}"
+          staged=$(grep -oE "${IMAGE_API}:[^\"[:space:]]+" k8s/stage/deployment-api-stage.yaml | head -n1 | cut -d: -f2)
+          echo "promoting: $version / stage runs: $staged"
+          if [ "${{ inputs.skip_stage_verification }}" = "true" ]; then
+            echo "::warning::skip_stage_verification is set - promoting $version without proving it on stage"
+          elif [ "$staged" != "$version" ]; then
+            echo "::error::Stage runs '$staged', not '$version'. Promote the version stage verified, or deploy $version to stage first (push to master / run Build and Deploy) and let it pass."
+            exit 1
+          fi
+
+      - name: Live conformance suite against stage
+        if: ${{ !inputs.skip_stage_verification }}
+        uses: ./.github/actions/geckoterminal-conformance
+        with:
+          base_url: https://api.testnet.scan.biatec.io
+          golden: testnet
+          latency_factor: "2"
+          poll_seconds: "60"
+
+  # ---------------------------------------------------------------------
   # Stage 1: verify-images - the versioned tag was pushed by deploy.yml when
   # this build went to stage, but that doesn't guarantee it's still there or
   # that it finished pushing (e.g. an explicit --version input for a build
@@ -133,7 +179,7 @@ jobs:
   # the exact versioned tag in its manifests.
   # ---------------------------------------------------------------------
   promote-tag:
-    needs: [resolve-version, verify-images]
+    needs: [resolve-version, verify-images, verify-stage]
     if: inputs.network == 'algorand' || inputs.network == 'all'
     runs-on: ubuntu-latest
     steps:
@@ -169,7 +215,7 @@ jobs:
   # ---------------------------------------------------------------------
   deploy-production:
     name: Deploy to production (Algorand mainnet)
-    needs: [resolve-version, verify-images, promote-tag]
+    needs: [resolve-version, verify-images, promote-tag, verify-stage]
     if: inputs.network == 'algorand' || inputs.network == 'all'
     runs-on: ubuntu-latest
     environment:
@@ -270,7 +316,7 @@ jobs:
   # ---------------------------------------------------------------------
   deploy-production-voi:
     name: Deploy to production (Voi mainnet)
-    needs: [resolve-version, verify-images, promote-tag]
+    needs: [resolve-version, verify-images, promote-tag, verify-stage]
     if: |
       (inputs.network == 'voi' || inputs.network == 'all') &&
       (needs.promote-tag.result == 'success' || needs.promote-tag.result == 'skipped')
@@ -362,3 +408,49 @@ jobs:
       - name: Remove kubeconfig
         if: always()
         run: rm -f "$HOME/.kube/config"
+
+  # ---------------------------------------------------------------------
+  # Stage 4: smoke-production - the same live suite against the freshly rolled-out production API. The deploy job already
+  # waited for the rollouts (kubectl rollout status), so the pods are warm. A failure here means GeckoTerminal may already
+  # be receiving bad data: ROLL BACK at once -
+  #   kubectl rollout undo deployment/avm-trade-reporter-app-deployment -n biatec-scan   (and ...2-app-deployment)
+  # and set the repository variable GECKOTERMINAL_MAINNET_LIVE only after a green run.
+  # ---------------------------------------------------------------------
+  smoke-production:
+    name: Smoke test production (Algorand mainnet)
+    needs: deploy-production
+    if: ${{ always() && needs.deploy-production.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+      - uses: ./.github/actions/geckoterminal-conformance
+        with:
+          base_url: https://api.algorand.scan.biatec.io
+          golden: mainnet
+          expect_events: "true"
+          latency_factor: "2"
+          wait_minutes: "10"
+      - name: How to roll back
+        if: failure()
+        run: |
+          echo "::error::The GeckoTerminal conformance suite FAILED on production after the promotion. Roll back: kubectl rollout undo deployment/avm-trade-reporter-app-deployment -n biatec-scan; kubectl rollout undo deployment/avm-trade-reporter2-app-deployment -n biatec-scan"
+
+  smoke-production-voi:
+    name: Smoke test production (Voi mainnet)
+    needs: deploy-production-voi
+    if: ${{ always() && needs.deploy-production-voi.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+      - uses: ./.github/actions/geckoterminal-conformance
+        with:
+          base_url: https://api.voi.scan.biatec.io
+          expect_events: "false"
+          latency_factor: "2"
+          wait_minutes: "10"

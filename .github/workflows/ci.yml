@@ -1,0 +1,28 @@
+name: CI
+
+# Offline gate for every pull request: the GeckoTerminal integration's unit, conformance (the strict schema validator run
+# against the service's own output) and performance (mainnet-scale budgets) suites. None of them needs a network, a
+# database or a secret. The live conformance suite (Category=Conformance, needs a deployed API) runs from deploy.yml
+# against stage and from promote-production.yml before / after a promotion - see docs/GECKOTERMINAL.md.
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build
+        run: dotnet build AVMTradeReporterTests -c Release --nologo -v q
+      - name: GeckoTerminal integration - unit, conformance and performance suites
+        run: >-
+          dotnet test AVMTradeReporterTests -c Release --no-build --nologo
+          --filter "FullyQualifiedName~Services.CoinGecko|FullyQualifiedName~CoinGeckoController|FullyQualifiedName~AVMTradeReporterTests.Conformance|FullyQualifiedName~AVMTradeReporterTests.Performance|FullyQualifiedName~StableSwapDustPriceTests"
