@@ -49,6 +49,11 @@ namespace AVMTradeReporter.Model.Configuration
         public RedisConfiguration Redis { get; set; } = new RedisConfiguration();
 
         /// <summary>
+        /// GeckoTerminal / CoinGecko DEX integration API (<c>/api/coingecko/*</c>).
+        /// </summary>
+        public CoinGeckoConfiguration CoinGecko { get; set; } = new CoinGeckoConfiguration();
+
+        /// <summary>
         /// Pool refresh background service configuration
         /// </summary>
         public PoolRefreshConfiguration PoolRefresh { get; set; } = new PoolRefreshConfiguration();
@@ -425,5 +430,122 @@ namespace AVMTradeReporter.Model.Configuration
         /// Enables the ARC-56 registry lookup. When disabled only <see cref="KnownScamPools"/> is applied.
         /// </summary>
         public bool RegistryLookupEnabled { get; set; } = true;
+    }
+
+    /// <summary>
+    /// Settings of the GeckoTerminal (CoinGecko) non-EVM DEX integration, see
+    /// <c>CoinGeckoController</c> and the "GeckoTerminal Integration API Standards v0.1".
+    /// </summary>
+    public class CoinGeckoConfiguration
+    {
+        /// <summary>
+        /// Master switch. When false every <c>/api/coingecko/*</c> endpoint answers 404.
+        /// </summary>
+        public bool Enabled { get; set; } = true;
+
+        /// <summary>
+        /// DEX protocols published to GeckoTerminal. Only the Biatec DEX by default - the service also
+        /// indexes Pact/Tiny pools which belong to other DEXes.
+        /// </summary>
+        public List<Models.Data.Enums.DEXProtocol> Protocols { get; set; } = new();
+
+        /// <summary>
+        /// The protocols actually published: <see cref="Protocols"/>, or Biatec when none is configured. (The default is
+        /// not put into the list itself because configuration binding appends to a pre-filled list, which would make
+        /// Biatec impossible to remove and duplicate it when it is configured explicitly.)
+        /// </summary>
+        public IReadOnlyList<Models.Data.Enums.DEXProtocol> PublishedProtocols =>
+            Protocols.Count == 0 ? new[] { Models.Data.Enums.DEXProtocol.Biatec } : Protocols.Distinct().ToList();
+
+        /// <summary>
+        /// Maximum <c>toBlock - fromBlock + 1</c> accepted by <c>/events</c> (400 above).
+        /// </summary>
+        public int MaxBlockSpan { get; set; } = 1000;
+
+        /// <summary>
+        /// Maximum number of events one <c>/events</c> call may return (400 above, never silently truncated).
+        /// </summary>
+        public int MaxEventsPerRequest { get; set; } = 20000;
+
+        /// <summary>
+        /// Elasticsearch page size of the block-range queries (must stay below index.max_result_window = 10000).
+        /// A full page makes the range bisect, so no event is ever lost to pagination.
+        /// </summary>
+        public int ElasticPageSize { get; set; } = 5000;
+
+        /// <summary>
+        /// Seconds a fully processed block is held back before <c>/latest-block</c> reports it, so the
+        /// Elasticsearch refresh interval (1 s) has made its trades/liquidity searchable. GeckoTerminal
+        /// treats <c>/latest-block</c> as "all events up to here are available", so ahead is unsafe, behind is fine.
+        /// </summary>
+        public int LatestBlockVisibilityDelaySeconds { get; set; } = 3;
+
+        /// <summary>
+        /// Seconds a finalized <c>/events</c> range (toBlock at or below latest-block) is cached in Redis / memory.
+        /// </summary>
+        public int EventsCacheSeconds { get; set; } = 600;
+
+        /// <summary>
+        /// Upper bound of the in-process cache of finalized <c>/events</c> responses, in megabytes.
+        /// </summary>
+        public int EventsMemoryCacheMegabytes { get; set; } = 64;
+
+        /// <summary>
+        /// Seconds the asset (supply/name) answer is cached - assets are mutable, GeckoTerminal re-queries them periodically.
+        /// </summary>
+        public int AssetCacheSeconds { get; set; } = 60;
+
+        /// <summary>
+        /// Seconds the pool snapshot used for <c>/pair</c> and event mapping is reused before it is refreshed.
+        /// </summary>
+        public int PoolSnapshotSeconds { get; set; } = 60;
+
+        /// <summary>
+        /// Requests per minute and client IP accepted by <c>/api/coingecko/*</c> (own rate limit bucket, separate from
+        /// the 60/min anonymous budget of the rest of the API).
+        /// </summary>
+        public int RateLimitPerMinute { get; set; } = 1200;
+
+        /// <summary>
+        /// Seconds an event of a pool the pool cache does not know at all is held back (503) instead of skipped: a pool
+        /// created moments ago is registered with a short delay, and its first events must not be dropped for good.
+        /// </summary>
+        public int UnknownPoolGraceSeconds { get; set; } = 120;
+
+        /// <summary>
+        /// How many times (one per <see cref="PoolSnapshotSeconds"/>) a pool that has stored events but is missing from the
+        /// pool cache (its registration threw) is loaded from chain and registered on demand before its events are given up.
+        /// Ranges touching it answer 503 meanwhile.
+        /// </summary>
+        public int UnknownPoolLoadAttempts { get; set; } = 10;
+
+        /// <summary>
+        /// Seconds a transient <c>/events</c> failure (pool not registered yet, snapshot catching up, too many builds) is
+        /// remembered per range, so the consumer's 2-second retries do not re-run the storage queries each time.
+        /// </summary>
+        public int TransientMemoSeconds { get; set; } = 3;
+
+        /// <summary>
+        /// Set to true for ONE start after moving <c>Indexer.Round</c> forward on purpose (skipping a range): the persisted
+        /// <c>StoredThrough</c> is cleared so the indexer does not rewind to it. Unset it again afterwards.
+        /// </summary>
+        public bool ClearStoredThroughOnStartup { get; set; } = false;
+
+        /// <summary>
+        /// How many uncached <c>/events</c> ranges may be built (Elasticsearch queries) at the same time; further ones wait a
+        /// few seconds and then fail with a retryable 503. Cached ranges are not limited.
+        /// </summary>
+        public int MaxConcurrentEventQueries { get; set; } = 4;
+
+        /// <summary>
+        /// Elasticsearch queries one <c>/events</c> range may run in parallel while it bisects a dense block range.
+        /// </summary>
+        public int MaxParallelQueriesPerRange { get; set; } = 8;
+
+        /// <summary>
+        /// Pools whose asset decimals are looked up at algod in parallel while the pair snapshot is (re)built - the warm-up
+        /// runs before the pod opens its port, so a cold cache must not cost one round trip per asset in sequence.
+        /// </summary>
+        public int SnapshotResolveParallelism { get; set; } = 16;
     }
 }

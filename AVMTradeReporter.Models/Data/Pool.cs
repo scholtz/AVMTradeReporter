@@ -129,6 +129,9 @@ namespace AVMTradeReporter.Models.Data
         /// USD price of asset B 7 days ago.
         /// </summary>
         public decimal? PriceBUSD7D { get; set; }
+        private static readonly BigInteger StableSwapPriceScaleThreshold = new BigInteger(1_000_000_000);
+        private static readonly BigInteger StableSwapPriceScale = new BigInteger(1_000_000_000_000);
+
         public decimal VirtualAmountA
         {
             get
@@ -178,6 +181,13 @@ namespace AVMTradeReporter.Models.Data
                                 var realA = new BigInteger(StableA.Value);
                                 var realB = new BigInteger(StableB.Value);
 
+                                // The price is a ratio of reserve changes, so the curve can be evaluated at any scale. Dust-sized
+                                // pools (a few thousand base units) would otherwise lose the price to integer rounding of the
+                                // probe trade (delta = reserve / 10000 rounds to 1) and report e.g. 2.0 for a 1:1 pair.
+                                var scale = realA < StableSwapPriceScaleThreshold || realB < StableSwapPriceScaleThreshold ? StableSwapPriceScale : BigInteger.One;
+                                realA *= scale;
+                                realB *= scale;
+
                                 var D = GetD(realA, realB, amp);
 
                                 var delta = realA / 10000;
@@ -186,7 +196,7 @@ namespace AVMTradeReporter.Models.Data
                                 var newB = GetY(realA + delta, amp, D);
                                 var price = (decimal)(realB - newB) / (decimal)delta;
 
-                                var dDecimal = (decimal)D / (decimal)Math.Pow(10, (double)(AssetADecimals ?? 0));
+                                var dDecimal = (decimal)(D / scale) / (decimal)Math.Pow(10, (double)(AssetADecimals ?? 0));
                                 var virtualLiquidity = dDecimal / 2;
 
                                 var priceReal = price * (decimal)Math.Pow(10, (double)(AssetADecimals ?? 0) - (double)(AssetBDecimals ?? 0));
@@ -308,6 +318,13 @@ namespace AVMTradeReporter.Models.Data
                                 var realA = new BigInteger(StableA.Value);
                                 var realB = new BigInteger(StableB.Value);
 
+                                // The price is a ratio of reserve changes, so the curve can be evaluated at any scale. Dust-sized
+                                // pools (a few thousand base units) would otherwise lose the price to integer rounding of the
+                                // probe trade (delta = reserve / 10000 rounds to 1) and report e.g. 2.0 for a 1:1 pair.
+                                var scale = realA < StableSwapPriceScaleThreshold || realB < StableSwapPriceScaleThreshold ? StableSwapPriceScale : BigInteger.One;
+                                realA *= scale;
+                                realB *= scale;
+
                                 var D = GetD(realA, realB, amp);
 
                                 var delta = realA / 10000;
@@ -316,7 +333,7 @@ namespace AVMTradeReporter.Models.Data
                                 var newB = GetY(realA + delta, amp, D);
                                 var price = (decimal)(realB - newB) / (decimal)delta;
 
-                                var dDecimal = (decimal)D / (decimal)Math.Pow(10, (double)(AssetADecimals ?? 0));
+                                var dDecimal = (decimal)(D / scale) / (decimal)Math.Pow(10, (double)(AssetADecimals ?? 0));
                                 var virtualLiquidity = dDecimal / 2;
 
                                 var priceReal = price * (decimal)Math.Pow(10, (double)(AssetADecimals ?? 0) - (double)(AssetBDecimals ?? 0));

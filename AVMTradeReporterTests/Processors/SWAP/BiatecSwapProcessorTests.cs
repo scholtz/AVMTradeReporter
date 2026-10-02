@@ -26,6 +26,20 @@ namespace AVMTradeReporterTests.Processors.LiquidityAdd
             //Assert.That(json, Is.EqualTo("{\r\n  \"AssetIdIn\": 1241945177,\r\n  \"AssetIdOut\": 31566704,\r\n  \"AssetAmountIn\": 11057638,\r\n  \"AssetAmountOut\": 10024195,\r\n  \"TxId\": \"QSWXTJL7KNG5227UG2GTCRJNEDDFMFYXEQ2JE2JH6BO7GSWKRPCQ\",\r\n  \"BlockId\": 52531655,\r\n  \"TxGroup\": \"xVoaswyYIil6ogy3/68YfA3uT5P8OQGTZ1kC/I62BtY=\",\r\n  \"Timestamp\": \"2025-08-07T22:27:27+00:00\",\r\n  \"Trader\": \"RFJOKPEZ3ER3WOU3LR4FXMIT4BPBTDTBBKV4PH34UCDX4RIH6PTMDM3UJY\",\r\n  \"PoolAddress\": \"IVNCBYPN4YSEQARE3BSYID64DIB2GD2XQD47ANYZXFBSHCASOLTZOQLKAQ\",\r\n  \"PoolAppId\": 1243421154,\r\n  \"TopTxId\": \"4LHW76RBO4DMY5CWH5PXMTBJOU4SG3QRHMOZ42KFGU4EAW5QCDZQ\",\r\n  \"TradeState\": 1,\r\n  \"A\": 5724617427,\r\n  \"B\": 6322692739\r\n}"));
         }
         [Test]
+        public async Task BiatecSwapProcessorMultiHopSwapsGetConsecutiveEventIndexesInsideOneTransaction()
+        {
+            // block 52531655 holds one aggregator transaction (3rd of the block) that swaps through two pools.
+            // GeckoTerminal needs a unique (txnIndex, eventIndex) per event: same txn, event 0 then event 1.
+            var client = new Algorand.Gossip.GossipHttpClient(Algorand.Gossip.GossipHttpConfiguration.MainNetArchival);
+            var block = await client.FetchBlockAsync(52531655);
+
+            var txProcessor = new TransactionProcessor(new LoggerFactory().CreateLogger<TransactionProcessor>());
+            var dummyTradeService = new DummyTradeService();
+            await txProcessor.ProcessBlock(block, dummyTradeService, new DummyLiquidityService(), new CancellationTokenSource(TimeSpan.FromSeconds(30)).Token);
+
+            Assert.That(dummyTradeService.positions, Is.EqualTo(new (ulong?, uint?)[] { (3, 0), (3, 1) }));
+        }
+        [Test]
         public async Task BiatecSwapProcessorTestAsa2Asa55991837()
         {
             var client = new Algorand.Gossip.GossipHttpClient(Algorand.Gossip.GossipHttpConfiguration.MainNetArchival);

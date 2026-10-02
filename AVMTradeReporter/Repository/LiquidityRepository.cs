@@ -1,6 +1,7 @@
 ﻿using AVMTradeReporter.Hubs;
 using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Models.Data;
+using AVMTradeReporter.Models.Data.Enums;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Core.Bulk;
 using Elastic.Clients.Elasticsearch.IndexManagement;
@@ -61,6 +62,8 @@ namespace AVMTradeReporter.Repository
                             { "poolAddress", new Elastic.Clients.Elasticsearch.Mapping.KeywordProperty() },
                             { "poolAppId", new Elastic.Clients.Elasticsearch.Mapping.LongNumberProperty() },
                             { "topTxId", new Elastic.Clients.Elasticsearch.Mapping.KeywordProperty() },
+                            { "txnIndex", new Elastic.Clients.Elasticsearch.Mapping.LongNumberProperty() },
+                            { "eventIndex", new Elastic.Clients.Elasticsearch.Mapping.LongNumberProperty() },
                             { "txState", new Elastic.Clients.Elasticsearch.Mapping.KeywordProperty() }
                         }
                     }
@@ -77,24 +80,34 @@ namespace AVMTradeReporter.Repository
             Console.WriteLine($"Template created: {response.IsValidResponse}");
         }
 
-        public async Task<bool> StoreLiquidityUpdatesAsync(Liquidity[] items, CancellationToken cancellationToken)
+        /// <summary>
+        /// Persists the liquidity events (upsert by tx id) and reports, per document, what happened - see <see cref="StoreResult"/>.
+        /// </summary>
+        /// <param name="items">Documents to upsert.</param>
+        /// <param name="cancellationToken">Cancellation token.</param>
+        /// <param name="publish">False when the documents were already announced to the live feed by an earlier attempt.</param>
+        public async Task<StoreResult> StoreLiquidityUpdatesAsync(Liquidity[] items, CancellationToken cancellationToken, bool publish = true)
         {
             if (!items.Any())
             {
-                //_logger.LogDebug("No items to store");
-                return false;
+                return StoreResult.AllStored;
             }
 
             try
             {
-                _ = Task.Run(() => PublishLiquidityUpdatesToHub(items, cancellationToken));
-
-                foreach (var item in items)
+                // Only a document's first store is announced: a document re-sent by a later flush (rejected before, or
+                // Elasticsearch unreachable) must not reach the live feed twice.
+                if (publish)
                 {
-                    BiatecScanHub.RecentLiquidityUpdates.Enqueue(item);
-                    if (BiatecScanHub.RecentLiquidityUpdates.Count > 100)
+                    _ = Task.Run(() => PublishLiquidityUpdatesToHub(items, cancellationToken));
+
+                    foreach (var item in items)
                     {
-                        BiatecScanHub.RecentLiquidityUpdates.TryDequeue(out _);
+                        BiatecScanHub.RecentLiquidityUpdates.Enqueue(item);
+                        if (BiatecScanHub.RecentLiquidityUpdates.Count > 100)
+                        {
+                            BiatecScanHub.RecentLiquidityUpdates.TryDequeue(out _);
+                        }
                     }
                 }
 
@@ -102,15 +115,23 @@ namespace AVMTradeReporter.Repository
 
                 var bulkRequest = new BulkRequest("liquidity")
                 {
-                    Operations = new BulkOperationsCollection()
+                    Operations = new BulkOperationsCollection(),
+                    // searchable before the block counts as indexed (latest-block): no timer guessing the refresh interval
+                    Refresh = Elastic.Clients.Elasticsearch.Refresh.WaitFor,
                 };
 
                 foreach (var item in items)
                 {
-                    bulkRequest.Operations.Add(new BulkIndexOperation<Liquidity>(item)
+                    // A mempool preview (TxPool) is create-only: it must never overwrite the confirmed document the block
+                    // processor may have stored meanwhile (Elasticsearch then answers 409 = exists already, not a rejection).
+                    if (item.TxState == TxState.TxPool)
                     {
-                        Id = item.TxId
-                    });
+                        bulkRequest.Operations.Add(new BulkCreateOperation<Liquidity>(item) { Id = item.TxId });
+                    }
+                    else
+                    {
+                        bulkRequest.Operations.Add(new BulkIndexOperation<Liquidity>(item) { Id = item.TxId });
+                    }
                 }
                 if (_elasticClient == null)
                 {
@@ -122,6 +143,7 @@ namespace AVMTradeReporter.Repository
                             await _poolRepository.UpdatePoolFromLiquidity(liquidity, cancellationToken);
                         }
                     }, cancellationToken);
+                    return StoreResult.AllStored; // nothing to persist without Elasticsearch - the events were processed
                 }
                 else
                 {
@@ -137,28 +159,36 @@ namespace AVMTradeReporter.Repository
 
                         if (failureCount > 0)
                         {
-                            foreach (var failedItem in bulkResponse.Items.Where(item => !item.IsValid))
+                            foreach (var failedItem in bulkResponse.Items.Where(item => !item.IsValid && item.Status != 409))
                             {
                                 _logger.LogWarning("Failed to index liquidity {id}: {error}",
                                     failedItem.Id, failedItem.Error?.Reason ?? "Unknown error");
                             }
                         }
 
-                        // Update pools for successfully stored liquidity updates
-                        if (successCount > 0)
+                        var successfulLiquidityUpdates = new List<Liquidity>();
+                        var rejectedIds = new List<string>();
+                        var bulkResponseItems = bulkResponse.Items.ToList();
+
+                        for (int i = 0; i < items.Length && i < bulkResponseItems.Count; i++)
                         {
-                            var successfulLiquidityUpdates = new List<Liquidity>();
-                            var bulkResponseItems = bulkResponse.Items.ToList();
-
-                            for (int i = 0; i < items.Length && i < bulkResponseItems.Count; i++)
+                            if (bulkResponseItems[i].IsValid)
                             {
-                                if (bulkResponseItems[i].IsValid)
-                                {
-                                    successfulLiquidityUpdates.Add(items[i]);
-                                }
+                                successfulLiquidityUpdates.Add(items[i]);
                             }
+                            else if (bulkResponseItems[i].Status == 409)
+                            {
+                                // create-only preview of a document that exists already (confirmed, or an earlier preview): settled
+                            }
+                            else
+                            {
+                                rejectedIds.Add(items[i].TxId);
+                            }
+                        }
 
-                            // Update pools from confirmed liquidity updates in background
+                        // Update pools from confirmed liquidity updates in background
+                        if (successfulLiquidityUpdates.Count > 0)
+                        {
                             _ = Task.Run(async () =>
                             {
                                 foreach (var liquidity in successfulLiquidityUpdates)
@@ -168,21 +198,20 @@ namespace AVMTradeReporter.Repository
                             }, cancellationToken);
                         }
 
-                        return true;
+                        // Per document: the caller retries only the rejected ones (upserts by tx id are idempotent).
+                        return new StoreResult(true, rejectedIds);
                     }
                     else
                     {
                         _logger.LogError("LP Bulk indexing failed: {error}", bulkResponse.DebugInformation);
-                        return false;
+                        return StoreResult.Unreachable;
                     }
                 }
-
-                return false;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to bulk index LP");
-                return false;
+                return StoreResult.Unreachable;
             }
         }
 

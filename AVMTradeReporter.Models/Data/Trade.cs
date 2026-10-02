@@ -107,6 +107,19 @@ namespace AVMTradeReporter.Models.Data
         public ulong? PoolTick { get; set; }
 
         /// <summary>
+        /// 1-based position of the top-level transaction inside its block (null for trades indexed before
+        /// this field existed). Together with <see cref="EventIndex"/> it gives every trade/liquidity event
+        /// of a block a unique, chronological position (needed by the GeckoTerminal integration).
+        /// </summary>
+        public ulong? TxnIndex { get; set; }
+
+        /// <summary>
+        /// 0-based order of this event (swap or liquidity change) inside its top-level transaction,
+        /// e.g. the second pool of a multi-hop aggregator swap has <c>EventIndex = 1</c>.
+        /// </summary>
+        public uint? EventIndex { get; set; }
+
+        /// <summary>
         /// Protocol fees in asset A (base units), if available.
         /// </summary>
         public ulong? AF { get; set; }

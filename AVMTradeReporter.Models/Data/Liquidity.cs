@@ -129,5 +129,16 @@ namespace AVMTradeReporter.Models.Data
         /// When only one side has a price, valuation is based on the priced side.
         /// </summary>
         public decimal? ValueUSD { get; set; }
+
+        /// <summary>
+        /// 1-based position of the top-level transaction inside its block (null for events indexed before
+        /// this field existed). See <see cref="Trade.TxnIndex"/>.
+        /// </summary>
+        public ulong? TxnIndex { get; set; }
+
+        /// <summary>
+        /// 0-based order of this event inside its top-level transaction (shared counter with swaps).
+        /// </summary>
+        public uint? EventIndex { get; set; }
     }
 }

@@ -271,6 +271,9 @@ namespace AVMTradeReporter.Repository
             }
         }
 
+        public Task<bool> IsDeletedAsync(ulong assetId, CancellationToken cancellationToken = default)
+            => Task.FromResult(_assetCache.TryGetValue(assetId, out var cached) && cached.Deleted);
+
         public async Task SetAssetAsync(BiatecAsset asset, CancellationToken cancellationToken = default)
         {
             if (asset == null) return;

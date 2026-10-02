@@ -10,6 +10,13 @@ namespace AVMTradeReporter.Repository
     {
         Task InitializeAsync(CancellationToken cancellationToken = default);
         Task<Pool?> GetPoolAsync(string poolAddress, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// The cached pool exactly as it is, or null when the cache does not hold it. Unlike <see cref="GetPoolAsync"/> this
+        /// neither enriches the pool nor hides one whose asset decimals are not resolved yet - callers that resolve
+        /// decimals themselves (the CoinGecko pair snapshot) need the raw entry to tell "unresolved" from "unknown".
+        /// </summary>
+        Pool? GetCachedPool(string poolAddress);
         Task<bool> StorePoolAsync(Pool pool, bool updateAggregated = true, CancellationToken? cancellationToken = null);
         Task UpdatePoolFromTrade(Trade trade, CancellationToken cancellationToken);
         Task UpdatePoolFromLiquidity(Liquidity liquidity, CancellationToken cancellationToken);

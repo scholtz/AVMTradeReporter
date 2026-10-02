@@ -146,6 +146,11 @@ namespace AVMTradeReporter
             builder.Services.AddSingleton<IAssetTimeseriesService, AssetTimeseriesService>();
             builder.Services.AddSingleton<IOhlcUsdRepairService, OhlcUsdRepairService>();
 
+            // GeckoTerminal / CoinGecko DEX integration (api/coingecko/*)
+            builder.Services.AddSingleton<AVMTradeReporter.Services.CoinGecko.IIndexedBlockTracker, AVMTradeReporter.Services.CoinGecko.IndexedBlockTracker>();
+            builder.Services.AddSingleton<AVMTradeReporter.Services.CoinGecko.ICoinGeckoEventSource, AVMTradeReporter.Services.CoinGecko.ElasticCoinGeckoEventSource>();
+            builder.Services.AddSingleton<AVMTradeReporter.Services.CoinGecko.ICoinGeckoService, AVMTradeReporter.Services.CoinGecko.CoinGeckoService>();
+
             // Scam rating: ARC-56 registry lookup + known scam pool list (see ScamRatingConfiguration)
             builder.Services.AddSingleton<IArc56RegistryClient>(sp =>
             {
@@ -308,6 +313,23 @@ namespace AVMTradeReporter
                         return RateLimitPartition.GetNoLimiter("health");
                     }
 
+                    // CoinGecko's indexer polls latest-block and events about every 2 s (and walks every asset / pair
+                    // once on its first sync) - that alone exhausts the 60/min anonymous budget, so the GeckoTerminal
+                    // endpoints get their own, larger bucket per client IP, ahead of the authenticated tier (the endpoints are
+                    // public: a caller that happens to send a token must not land in a smaller bucket).
+                    if (httpContext.Request.Path.StartsWithSegments("/api/coingecko"))
+                    {
+                        var coinGeckoIp = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+                        var coinGeckoLimit = Math.Max(1, appConfig?.CoinGecko?.RateLimitPerMinute ?? 1200);
+                        return RateLimitPartition.GetFixedWindowLimiter($"coingecko:{coinGeckoIp}", _ => new FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = coinGeckoLimit,
+                            Window = TimeSpan.FromMinutes(1),
+                            QueueLimit = 0,
+                            AutoReplenishment = true,
+                        });
+                    }
+
                     // AlgorandAuthenticationHandlerV2 only succeeds (IsAuthenticated == true) for a
                     // validly signed ARC-14 transaction - EmptySuccessOnFailure (which would instead
                     // return a "successful" ticket with an empty identity on a missing/bad token) is
@@ -330,6 +352,7 @@ namespace AVMTradeReporter
                     }
 
                     var clientIp = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
                     return RateLimitPartition.GetFixedWindowLimiter($"anon:{clientIp}", _ => new FixedWindowRateLimiterOptions
                     {
                         PermitLimit = 60,
@@ -478,6 +501,9 @@ namespace AVMTradeReporter
             _ = app.Services.GetService<AggregatedPoolRepository>() ?? throw new Exception("aggregatedPoolRepository not initialized");
             var poolRepository = app.Services.GetService<IPoolRepository>() as PoolRepository ?? throw new Exception("Pool repository not initialized");
             poolRepository.InitializeAsync(cancellationTokenSource.Token).Wait();
+            // The CoinGecko pair snapshot is derived from the pool cache (plus asset decimals): warm it here, before the port
+            // opens, like every other in-memory cache (see CLAUDE.md "HA deploys") instead of on the first request to a new pod.
+            app.Services.GetRequiredService<AVMTradeReporter.Services.CoinGecko.ICoinGeckoService>().WarmUpAsync(cancellationTokenSource.Token).Wait();
 
             _ = app.Services.GetService<IDefaultApi>();
             _ = app.Services.GetService<BlockRepository>();

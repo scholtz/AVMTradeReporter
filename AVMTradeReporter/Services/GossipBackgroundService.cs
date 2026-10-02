@@ -48,6 +48,10 @@ namespace AVMTradeReporter.Services
             _appConfig = appConfig;
         }
 
+        // previews already announced to the live feed (hub, recent queue) - a re-send after an unreachable store must not
+        // announce them again; guarded by _finalizeLock
+        readonly HashSet<string> _announced = new(StringComparer.Ordinal);
+        readonly SemaphoreSlim _finalizeLock = new(1, 1);
         ConcurrentDictionary<string, Trade> _trades = new ConcurrentDictionary<string, Trade>();
         ConcurrentDictionary<string, Liquidity> _liquidityUpdates = new ConcurrentDictionary<string, Liquidity>();
         public Task RegisterTrade(Trade trade, CancellationToken cancellationToken)
@@ -64,19 +68,61 @@ namespace AVMTradeReporter.Services
 
         private async Task FinalizeAsync(CancellationToken cancellationToken)
         {
+            // several relay receive loops finalize concurrently: the buffers and the announced-set are settled one at a time
+            await _finalizeLock.WaitAsync(cancellationToken);
             try
             {
-                var result = await _tradeRepository.StoreTradesAsync(_trades.Values.ToArray(), cancellationToken);
-                if (result)
+                await FinalizeCoreAsync(cancellationToken);
+            }
+            finally
+            {
+                _finalizeLock.Release();
+            }
+        }
+
+        private async Task FinalizeCoreAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                // Mempool previews: once Elasticsearch was reached the buffer is cleared, rejected documents included (they are
+                // written again, confirmed, by the block processor; nothing here is worth re-sending for ever).
+                var reached = true;
+                var (freshTrades, resentTrades) = FirstSend.Split(_trades.Values.ToArray(), t => t.TxId, _announced);
+                foreach (var (batch, publish) in new[] { (freshTrades, true), (resentTrades, false) })
                 {
-                    _trades.Clear();
+                    if (batch.Length == 0) continue;
+                    var result = await _tradeRepository.StoreTradesAsync(batch, cancellationToken, publish);
+                    foreach (var sent in batch) _announced.Add(sent.TxId);
+                    if (!result.Reached)
+                    {
+                        reached = false;
+                        continue;
+                    }
+                    // exactly what was sent - a preview registered meanwhile goes out with the next batch
+                    foreach (var sent in batch)
+                    {
+                        _trades.TryRemove(new KeyValuePair<string, Trade>(sent.TxId, sent));
+                        _announced.Remove(sent.TxId);
+                    }
                 }
-                result = await _liquidityRepository.StoreLiquidityUpdatesAsync(_liquidityUpdates.Values.ToArray(), cancellationToken);
-                if (result)
+                var (freshLiquidity, resentLiquidity) = FirstSend.Split(_liquidityUpdates.Values.ToArray(), l => l.TxId, _announced);
+                foreach (var (batch, publish) in new[] { (freshLiquidity, true), (resentLiquidity, false) })
                 {
-                    _liquidityUpdates.Clear();
+                    if (batch.Length == 0) continue;
+                    var result = await _liquidityRepository.StoreLiquidityUpdatesAsync(batch, cancellationToken, publish);
+                    foreach (var sent in batch) _announced.Add(sent.TxId);
+                    if (!result.Reached)
+                    {
+                        reached = false;
+                        continue;
+                    }
+                    foreach (var sent in batch)
+                    {
+                        _liquidityUpdates.TryRemove(new KeyValuePair<string, Liquidity>(sent.TxId, sent));
+                        _announced.Remove(sent.TxId);
+                    }
                 }
-                await Task.CompletedTask; // Placeholder for actual work
+                if (!reached) _logger.LogWarning("Elasticsearch could not be reached; {trades} trade and {liquidity} liquidity previews stay buffered", _trades.Count, _liquidityUpdates.Count);
             }
             catch (Exception ex)
             {

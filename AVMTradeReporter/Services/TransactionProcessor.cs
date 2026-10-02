@@ -61,8 +61,14 @@ namespace AVMTradeReporter.Services
             liquidityProcessors.Add(biatecLRem.AppArg.ToLower(), biatecLRem);
         }
 
-        public async Task ProcessBlock(CertifiedBlock block, ITradeService tradeService, ILiquidityService liquidityService, CancellationToken cancellationToken)
+        /// <summary>
+        /// Registers every swap / liquidity event of the block (or only of the top-level transactions at the given 1-based
+        /// positions). Returns the positions of the transactions whose processing threw (each is logged); the caller may
+        /// process just those again - registrations are keyed by tx id, so that is idempotent.
+        /// </summary>
+        public async Task<IReadOnlyList<ulong>> ProcessBlock(CertifiedBlock block, ITradeService tradeService, ILiquidityService liquidityService, CancellationToken cancellationToken, IReadOnlySet<ulong>? onlyPositions = null)
         {
+            var failed = new List<ulong>();
             try
             {
                 Algorand.Algod.Model.Transactions.SignedTransaction? prevTx1 = null;
@@ -73,25 +79,43 @@ namespace AVMTradeReporter.Services
                     foreach (var currTx in block.Block.Transactions)
                     {
                         index++;
+                        if (onlyPositions != null && !onlyPositions.Contains(index))
+                        {
+                            // skipped, but it still is the previous transaction of the next one
+                            prevTx2 = prevTx1;
+                            prevTx1 = currTx;
+                            continue;
+                        }
                         try
                         {
                             currTx.Tx.FillInParamsFromBlockHeader(block.Block);
                             var txId = currTx.Tx.TxID();
-                            await this.ProcessTransaction(currTx, prevTx1, prevTx2, block.Block, currTx.Tx.Group, txId, currTx.Tx.Sender, TxState.Confirmed, tradeService, liquidityService, cancellationToken);
+                            await this.ProcessTransaction(currTx, prevTx1, prevTx2, block.Block, currTx.Tx.Group, txId, currTx.Tx.Sender, TxState.Confirmed, tradeService, liquidityService, cancellationToken, new EventPosition(index)); // whatever the transaction type: a processor that matches it must get a position
+                        }
+                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                        {
+                            throw;
                         }
                         catch (Exception exc)
                         {
-                            _logger.LogInformation("Error processing transaction {index} in block {block}: {error}", index, block.Block.Round, exc.Message);
+                            failed.Add(index);
+                            _logger.LogWarning(exc, "Error processing transaction {index} in block {block}", index, block.Block.Round);
                         }
                         prevTx2 = prevTx1;
                         prevTx1 = currTx;
                     }
                 }
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to process block {round}", block.Block?.Round);
+                failed.Add(0); // position 0 = the block as a whole
             }
+            return failed;
         }
 
         public async Task ProcessTransaction(
@@ -105,7 +129,8 @@ namespace AVMTradeReporter.Services
             TxState tradeState,
             ITradeService tradeService,
             ILiquidityService liquidityService,
-            CancellationToken cancellationToken
+            CancellationToken cancellationToken,
+            EventPosition? position = null
             )
         {
 
@@ -119,6 +144,11 @@ namespace AVMTradeReporter.Services
                         var trade = swapProcessor.GetTrade(current, previous1, block, txGroup, topTxId, trader, tradeState);
                         if (trade != null)
                         {
+                            if (position != null)
+                            {
+                                trade.TxnIndex = position.TxnIndex;
+                                trade.EventIndex = position.NextEventIndex();
+                            }
                             await tradeService.RegisterTrade(trade, cancellationToken);
                         }
                     }
@@ -127,6 +157,11 @@ namespace AVMTradeReporter.Services
                         var liqUpdate = liquidityProcessor.GetLiquidityUpdate(current, previous1, previous2, block, txGroup, topTxId, trader, tradeState);
                         if (liqUpdate != null)
                         {
+                            if (position != null)
+                            {
+                                liqUpdate.TxnIndex = position.TxnIndex;
+                                liqUpdate.EventIndex = position.NextEventIndex();
+                            }
                             await liquidityService.RegisterLiquidity(liqUpdate, cancellationToken);
                         }
                     }
@@ -144,7 +179,7 @@ namespace AVMTradeReporter.Services
                     if (txGroup != null) current.Tx.Group = txGroup;
                     var txId = current.Tx.TxID();
 
-                    await ProcessTransaction(currTx, prevTx1, prevTx2, block, current.Tx.Group, topTxId, trader, tradeState, tradeService, liquidityService, cancellationToken);
+                    await ProcessTransaction(currTx, prevTx1, prevTx2, block, current.Tx.Group, topTxId, trader, tradeState, tradeService, liquidityService, cancellationToken, position);
                     prevTx2 = prevTx1;
                     prevTx1 = currTx;
                 }

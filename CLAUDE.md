@@ -325,3 +325,85 @@ Every pool write funnels through `PoolRepository.StorePoolAsync`, which calls
 Tests: `AVMTradeReporterTests/Services/ScamRating/*` (pure policy, mocked
 registry HTTP, plus `[Category("Live")]` checks of the real CLAMM hash and
 the fake pool against the public registry + mainnet algod).
+
+## GeckoTerminal / CoinGecko integration (`/api/coingecko/*`)
+
+`CoinGeckoController` + `Services/CoinGecko/*` implement the "GeckoTerminal Integration API
+Standards v0.1" (`latest-block`, `asset`, `pair`, `events`) for the **Biatec DEX only**
+(`CoinGecko.Protocols`; Pact/Tiny pools in the same index belong to other DEXes). Anonymous on
+purpose (CoinGecko's indexer cannot sign ARC-14). Rules that are easy to break:
+
+- **`latest-block` is `IIndexedBlockTracker`'s watermark, never `Indexer.Round`.** Blocks are
+  processed concurrently (`BlockProcessing.MaxConcurrentTasks`), so `Indexer.Round` runs ahead of
+  the blocks whose trades are actually stored; GeckoTerminal treats latest-block as "all events up
+  to here exist" and would skip the rest for good. The watermark is the highest *contiguous*
+  completed block, held back `LatestBlockVisibilityDelaySeconds` for the Elasticsearch refresh and
+  mirrored to Redis for other replicas. Documents are batched **per block** (`PendingBlockBatches`):
+  a block counts only once its own documents were acknowledged; a failed store keeps the batch
+  for the next flush. A block whose processing threw is closed as is and completes with the next
+  successful flush (its registered documents go out with it).
+- **`/events` must never truncate or emit an invalid event** (GeckoTerminal halts indexing on a bad
+  event). Page-full ranges are bisected on `blockId`, not paginated; oversize ranges are a 400;
+  unmappable events (unknown pool, zero amount, asset mismatch) are skipped + logged. Query only
+  `blockId`/state/protocol and sort only by `blockId` - `txId` is a *text* field in the old
+  production `trades` index.
+- `(txnIndex, eventIndex)` must be unique per block: `Trade/Liquidity.TxnIndex/EventIndex` are
+  stamped by `TransactionProcessor` (`EventPosition`); older documents get a deterministic synthetic
+  position (`CoinGeckoEventOrdering`).
+- Biatec pool reserves (`Trade.A/B`) are 1e9-scaled whatever the asset decimals; swap/liquidity
+  amounts are base units of their asset. `priceNative` = asset1 per asset0; asset0/asset1 = pool
+  asset A/B (immutable on-chain order).
+- **Known limits (deliberate, same data the website has):** a block that algod cannot return
+  within 4 quick attempts is retried in the background for 30 minutes (`RecoverLostBlockAsync`,
+  the watermark and `StoredThrough` wait for it, so a restart re-processes it too) and only then
+  given up; a transaction whose processing still throws after 3 attempts (`ProcessBlock`
+  returns the failed positions and re-processes only those; idempotent), is lost for the indexer
+  itself, so the block still counts as processed - freezing `latest-block` for ever would be worse
+  than that gap (a block without a known timestamp is covered but never advertised).
+  `Indexer.Round` is persisted when a block task *starts*, so after a crash it may sit above
+  blocks that were never stored: the indexer therefore also persists `Indexer.StoredThrough`
+  (the contiguous completed watermark, written with every increment and on graceful shutdown)
+  and on startup **rewinds** `Round` to `StoredThrough + 1` - or to the Redis mirror + 1 when that
+  is higher, it is written only after contiguous completion (`ResolveStartupSeed`; stores are
+  idempotent upserts, so a replay only briefly double-counts pool volume until the next
+  recompute and re-publishes those trades to the hub). The Redis mirror may only *raise* the
+  persisted `StoredThrough`, never replace it: a deliberate forward jump of `Round` clears
+  `StoredThrough` and is then respected whatever the mirror says. A seed without `StoredThrough`
+  is *unverified*: advertised, but neither mirrored nor persisted until this run completed a
+  block; a seed whose block header cannot be read is covered but not advertised. A pool that
+  has stored events but is missing from the pool cache is loaded from chain and registered on
+  demand (`TryRegisterUnknownPoolAsync`, `UnknownPoolLoadAttempts`). Single-sided join/exit
+  events (one reserve absent from the state delta, stored as 0) are not reported - the live pool
+  cache is not "the reserve before the event" under concurrent block processing, so it cannot
+  fill the gap; swaps carry authoritative reserves. A published pool whose asset decimals cannot be read stays
+  *transient* (503 for ranges touching it) until they resolve - the assets of a live pool exist;
+  only a destroyed-asset tombstone (`IAssetRepository.IsDeletedAsync`) excludes a pool for good.
+  `Protocols` is not pre-filled (config binding appends to a default list) - use
+  `PublishedProtocols`.
+- More deliberate limits: stores report per document (`StoreResult`); a document Elasticsearch
+  rejects is retried on the next flushes `PendingBlockBatches.DefaultMaxRejections` (3) times, then
+  dropped (logged, the block completes without it), while an *unreachable* Elasticsearch keeps
+  every batch pending indefinitely - the watermark waits (re-sends pass `publish: false`, so the
+  live feed sees a document once - `FirstSend.Split`, also used by the gossip preview buffer, whose
+  TxPool previews are create-only bulk ops so a late re-send never overwrites a confirmed
+  document; a graceful stop cancels only the fetch loop and lets in-flight blocks finish on
+  `_processingCts`); the backlog is re-tried every 10 s in 2000-document slices and
+  the loop stops fetching at `MaxPendingBlocks` = 500 waiting blocks); a forward jump of `Round`
+  is done with `CoinGecko.ClearStoredThroughOnStartup` for one start; an indexer document without
+  `StoredThrough` re-processes the last `MaxConcurrentTasks` blocks just in case. Follow-up (#23):
+  persisting the resume point as the contiguous watermark itself would make `StoredThrough`, the
+  mirror rules and the flag unnecessary - `Indexer.Round` is read by other tooling, so not done
+  here; `metadata.fees*In` uses the pool's *current* LP fee; synthetic
+  positions of documents indexed before `TxnIndex` existed are deterministic per block but not
+  chronological; the Redis latest-block mirror never lowers a higher value (delete the key after
+  an intentional re-index); uncached `/events` ranges are built at most
+  `MaxConcurrentEventQueries` at a time and an event of a pool the cache has never heard of is
+  held back (503) for `UnknownPoolGraceSeconds` so a brand new pool's first events are not lost;
+  an **empty** pair snapshot (pool cache not initialised on this pod) makes every pair lookup
+  transient so a range is never cached as "no events". The snapshot is warmed from `Program.cs`
+  before the port opens (`ICoinGeckoService.WarmUpAsync`); a forced refresh for an unknown id only
+  re-reads the in-memory pool cache (unresolved pools retry algod on the regular cadence only,
+  tracked separately as `FullRefreshAt` so steady probing cannot postpone it); an expired snapshot
+  is served stale while one background rebuild runs (only the first build and "unknown id"
+  lookups wait for it). A single block with 10 000+ events is a deterministic 400 (cannot be
+  served by one query); the events cache key carries the protocol list.
