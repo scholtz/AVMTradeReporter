@@ -88,7 +88,7 @@ namespace AVMTradeReporter.Services.CoinGecko
         /// <param name="Excluded">Pools the repository knows but that must never be published (scam, malformed).</param>
         /// <param name="LoadedAt">When this snapshot was built (a forced, in-memory rebuild counts).</param>
         /// <param name="FullRefreshAt">When unresolved pools were last retried at the asset repository - the regular cadence, which forced rebuilds must not keep postponing.</param>
-        /// <param name="PoolCacheEmpty">The pool repository held no pool at all (any protocol): not initialised on this pod, or still warming.</param>
+        /// <param name="PoolCacheEmpty">The pool repository held no pool at all (any protocol) AND never finished loading: not initialised on this pod, or still warming. A repository that loaded fine and simply has no pool (a network the DEX is not on yet) is NOT this - its lookups are honest 404s and its events an empty list.</param>
         private sealed record PoolSnapshot(Dictionary<ulong, PairInfo> Pairs, Dictionary<ulong, DateTimeOffset> Unresolved, HashSet<ulong> AssetIds, HashSet<ulong> Excluded, DateTimeOffset LoadedAt, DateTimeOffset FullRefreshAt, bool PoolCacheEmpty);
 
         /// <summary>Pair lookup result: <see cref="Transient"/> means "exists but cannot be described right now - try again", not "unknown".</summary>
@@ -284,7 +284,7 @@ namespace AVMTradeReporter.Services.CoinGecko
             // A pool created after the snapshot was taken: refresh once (rate limited, in-memory only) before answering "unknown".
             snapshot = await GetSnapshotAsync(MissingPoolRefreshInterval, cancellationToken);
             if (snapshot.Pairs.TryGetValue(appId, out pair)) return new PairLookup(pair, false);
-            // An empty pool cache (PoolRepository.InitializeAsync failed on this pod, or still warming) makes every pool look
+            // An empty pool cache that never finished loading (PoolRepository.InitializeAsync failed on this pod, or still warming) makes every pool look
             // unknown and would cache every range as "no events": transient, never final. A deployment that simply has no pool
             // of a published protocol is a different thing - its lookups are honest 404s.
             if (snapshot.PoolCacheEmpty) return new PairLookup(null, true);
@@ -401,7 +401,7 @@ namespace AVMTradeReporter.Services.CoinGecko
                         }
                     }
                 });
-            _snapshot = new PoolSnapshot(pairs, unresolved, assetIds, excluded, now, retryUnresolved ? now : snapshot.FullRefreshAt, !anyPool);
+            _snapshot = new PoolSnapshot(pairs, unresolved, assetIds, excluded, now, retryUnresolved ? now : snapshot.FullRefreshAt, !anyPool && !_poolRepository.IsInitialized);
             return _snapshot;
         }
 

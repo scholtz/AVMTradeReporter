@@ -93,6 +93,9 @@ namespace AVMTradeReporterTests
             throw new NotImplementedException();
         }
 
+        /// <summary>A loaded repository by default; a test sets false to model a pod whose pool cache never finished loading.</summary>
+        public bool IsInitialized { get; set; } = true;
+
         public IEnumerable<string> GetAllPoolAddresses()
         {
             return pools.Select(p => p.PoolAddress).ToList();

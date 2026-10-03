@@ -760,6 +760,8 @@ namespace AVMTradeReporter.Repository
             return _poolsCache.Count;
         }
 
+        public bool IsInitialized => _isInitialized;
+
         public IEnumerable<string> GetAllPoolAddresses()
         {
             return _poolsCache.Keys.ToList();
