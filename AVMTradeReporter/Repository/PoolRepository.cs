@@ -37,7 +37,11 @@ namespace AVMTradeReporter.Repository
         // In-memory cache for pools
         private static readonly ConcurrentDictionary<string, Pool> _poolsCache = new();
         private readonly SemaphoreSlim _initializationSemaphore = new(1, 1);
-        private bool _isInitialized = false;
+        private volatile bool _isInitialized = false;
+        // Set only when a backend actually ANSWERED the pool load (Redis returned pools, or Elasticsearch answered - an absent
+        // 'pools' index counts as an answer: nothing was ever stored). The loaders swallow their errors and return 0, so
+        // "initialised with 0 pools" alone cannot tell a network without pools from a backend that was down at start.
+        private volatile bool _backendAnswered = false;
 
         // Per-pool load locks to prevent duplicate concurrent enrichment
         private static readonly ConcurrentDictionary<string, SemaphoreSlim> _poolLoadSemaphores = new();
@@ -223,6 +227,7 @@ namespace AVMTradeReporter.Repository
                             _logger.LogWarning(ex, "Failed to deserialize pool from Redis key: {key}", redisKey);
                         }
                     }
+                    if (loadedCount > 0) _backendAnswered = true;
                     return loadedCount;
                 }
 
@@ -253,6 +258,7 @@ namespace AVMTradeReporter.Repository
                     }
                 }
 
+                if (loadedCount > 0) _backendAnswered = true;
                 return loadedCount;
             }
             catch (Exception ex)
@@ -277,6 +283,7 @@ namespace AVMTradeReporter.Repository
 
                 if (searchResponse.IsValidResponse)
                 {
+                    _backendAnswered = true;
                     int loadedCount = 0;
                     foreach (var pool in searchResponse.Documents)
                     {
@@ -288,6 +295,13 @@ namespace AVMTradeReporter.Repository
                     return loadedCount;
                 }
 
+                // 404 = the 'pools' index does not exist yet: a network without any pool (the index is created by the first one)
+                if (searchResponse.ApiCallDetails.HttpStatusCode == 404)
+                {
+                    _backendAnswered = true;
+                    _logger.LogWarning("Elasticsearch has no 'pools' index yet - no pool has ever been stored");
+                    return 0;
+                }
                 _logger.LogError("Failed to load pools from Elasticsearch: {error}", searchResponse.DebugInformation);
                 return 0;
             }
@@ -760,7 +774,7 @@ namespace AVMTradeReporter.Repository
             return _poolsCache.Count;
         }
 
-        public bool IsInitialized => _isInitialized;
+        public bool IsInitialized => _isInitialized && _backendAnswered;
 
         public IEnumerable<string> GetAllPoolAddresses()
         {

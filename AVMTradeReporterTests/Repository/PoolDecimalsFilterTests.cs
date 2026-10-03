@@ -86,5 +86,18 @@ namespace AVMTradeReporterTests.Repository
             Assert.That(result, Is.Empty,
                 "Non-Biatec pools without decimals would serve wrongly scaled amounts and must stay excluded.");
         }
+
+        [Test]
+        public async Task IsInitialized_StaysFalse_WhenNoBackendAnsweredThePoolLoad()
+        {
+            // The loaders swallow their errors and return 0 (here: no Elasticsearch client). Initialisation still completes, but
+            // that must not read as "a network without pools" - CoinGecko would answer permanent 404s instead of a retryable 503.
+            var repository = CreatePoolRepository();
+            Assert.That(repository.IsInitialized, Is.False, "before the load");
+
+            await repository.InitializeAsync(CancellationToken.None);
+
+            Assert.That(repository.IsInitialized, Is.False, "the load failed - nothing answered");
+        }
     }
 }
