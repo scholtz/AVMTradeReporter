@@ -16,7 +16,7 @@ namespace AVMTradeReporterTests
 
         public Task InitializeAsync(CancellationToken cancellationToken = default)
         {
-            pools.Clear();
+            // like the real repository: loading never discards what is already cached (CoinGecko retries a failed load through here)
             return Task.CompletedTask;
         }
 
@@ -92,6 +92,9 @@ namespace AVMTradeReporterTests
         {
             throw new NotImplementedException();
         }
+
+        /// <summary>A loaded repository by default; a test sets false to model a pod whose pool cache never finished loading.</summary>
+        public bool PoolLoadSucceeded { get; set; } = true;
 
         public IEnumerable<string> GetAllPoolAddresses()
         {

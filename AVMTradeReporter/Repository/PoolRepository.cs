@@ -37,7 +37,13 @@ namespace AVMTradeReporter.Repository
         // In-memory cache for pools
         private static readonly ConcurrentDictionary<string, Pool> _poolsCache = new();
         private readonly SemaphoreSlim _initializationSemaphore = new(1, 1);
-        private bool _isInitialized = false;
+        private volatile bool _isInitialized = false;
+        // Set only when the pool load got an authoritative answer: Elasticsearch (the source of truth) answered - an absent
+        // 'pools' index counts, nothing was ever stored - or Redis returned pools. An EMPTY Redis proves nothing (it is only a cache). The loaders swallow their errors and return 0, so
+        // "initialised with 0 pools" alone cannot tell a network without pools from a backend that was down at start.
+        private volatile bool _backendAnswered = false;
+        private DateTimeOffset _lastLoadAttempt = DateTimeOffset.MinValue;
+        private static readonly TimeSpan FailedLoadRetryInterval = TimeSpan.FromSeconds(60);
 
         // Per-pool load locks to prevent duplicate concurrent enrichment
         private static readonly ConcurrentDictionary<string, SemaphoreSlim> _poolLoadSemaphores = new();
@@ -73,8 +79,11 @@ namespace AVMTradeReporter.Repository
             await _initializationSemaphore.WaitAsync(cancellationToken);
             try
             {
-                if (_isInitialized)
+                // A load no backend answered (both swallow their errors) is retried - throttled, InitializeAsync is also the
+                // lazy entry of every repository call - so a pod that started while Redis/Elasticsearch were down recovers.
+                if (_isInitialized && (_backendAnswered || DateTimeOffset.UtcNow - _lastLoadAttempt < FailedLoadRetryInterval))
                     return;
+                _lastLoadAttempt = DateTimeOffset.UtcNow;
 
                 _logger.LogInformation("Initializing PoolRepository - loading pools from Redis and Elasticsearch");
 
@@ -96,6 +105,7 @@ namespace AVMTradeReporter.Repository
                     }
                 }
 
+                _lastLoadAttempt = DateTimeOffset.UtcNow; // throttle from the END of the attempt: a slow load must not make waiters retry at once
                 _isInitialized = true;
                 _logger.LogInformation("PoolRepository initialization completed. Total pools in memory: {count}", _poolsCache.Count);
 
@@ -223,6 +233,7 @@ namespace AVMTradeReporter.Repository
                             _logger.LogWarning(ex, "Failed to deserialize pool from Redis key: {key}", redisKey);
                         }
                     }
+                    if (loadedCount > 0) _backendAnswered = true;
                     return loadedCount;
                 }
 
@@ -253,6 +264,7 @@ namespace AVMTradeReporter.Repository
                     }
                 }
 
+                if (loadedCount > 0) _backendAnswered = true;
                 return loadedCount;
             }
             catch (Exception ex)
@@ -277,6 +289,7 @@ namespace AVMTradeReporter.Repository
 
                 if (searchResponse.IsValidResponse)
                 {
+                    _backendAnswered = true;
                     int loadedCount = 0;
                     foreach (var pool in searchResponse.Documents)
                     {
@@ -288,6 +301,13 @@ namespace AVMTradeReporter.Repository
                     return loadedCount;
                 }
 
+                // index_not_found (404) = the 'pools' index does not exist yet (a bare 404 from a proxy / wrong URL is NOT an answer): a network without any pool (the index is created by the first one)
+                if (searchResponse.ApiCallDetails.HttpStatusCode == 404 && searchResponse.ElasticsearchServerError?.Error?.Type == "index_not_found_exception")
+                {
+                    _backendAnswered = true;
+                    _logger.LogWarning("Elasticsearch has no 'pools' index yet - no pool has ever been stored");
+                    return 0;
+                }
                 _logger.LogError("Failed to load pools from Elasticsearch: {error}", searchResponse.DebugInformation);
                 return 0;
             }
@@ -759,6 +779,8 @@ namespace AVMTradeReporter.Repository
             await EnsureInitialized(cancellationToken);
             return _poolsCache.Count;
         }
+
+        public bool PoolLoadSucceeded => _isInitialized && _backendAnswered;
 
         public IEnumerable<string> GetAllPoolAddresses()
         {
