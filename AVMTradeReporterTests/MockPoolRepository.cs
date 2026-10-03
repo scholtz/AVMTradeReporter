@@ -16,7 +16,7 @@ namespace AVMTradeReporterTests
 
         public Task InitializeAsync(CancellationToken cancellationToken = default)
         {
-            pools.Clear();
+            // like the real repository: loading never discards what is already cached (CoinGecko retries a failed load through here)
             return Task.CompletedTask;
         }
 

@@ -325,6 +325,13 @@ namespace AVMTradeReporter.Services.CoinGecko
 
         private async Task<PoolSnapshot> RebuildSnapshotAsync(PoolSnapshot snapshot, bool retryUnresolved)
         {
+            // A pod whose pool load was never answered (Redis / Elasticsearch down at start) recovers here: InitializeAsync reloads
+            // (throttled inside the repository) while the snapshot keeps being rebuilt, instead of waiting for the hourly refresh.
+            if (!_poolRepository.PoolLoadSucceeded)
+            {
+                try { await _poolRepository.InitializeAsync(); }
+                catch (Exception ex) { _logger.LogWarning(ex, "CoinGecko: retrying the pool cache load failed"); }
+            }
             var pairs = new Dictionary<ulong, PairInfo>();
             var unresolved = new Dictionary<ulong, DateTimeOffset>();
             var assetIds = new HashSet<ulong>();

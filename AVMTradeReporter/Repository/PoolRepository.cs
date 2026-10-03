@@ -38,8 +38,8 @@ namespace AVMTradeReporter.Repository
         private static readonly ConcurrentDictionary<string, Pool> _poolsCache = new();
         private readonly SemaphoreSlim _initializationSemaphore = new(1, 1);
         private volatile bool _isInitialized = false;
-        // Set only when a backend actually ANSWERED the pool load (Redis returned pools, or Elasticsearch answered - an absent
-        // 'pools' index counts as an answer: nothing was ever stored). The loaders swallow their errors and return 0, so
+        // Set only when the pool load got an authoritative answer: Elasticsearch (the source of truth) answered - an absent
+        // 'pools' index counts, nothing was ever stored - or Redis returned pools. An EMPTY Redis proves nothing (it is only a cache). The loaders swallow their errors and return 0, so
         // "initialised with 0 pools" alone cannot tell a network without pools from a backend that was down at start.
         private volatile bool _backendAnswered = false;
         private DateTimeOffset _lastLoadAttempt = DateTimeOffset.MinValue;
@@ -105,6 +105,7 @@ namespace AVMTradeReporter.Repository
                     }
                 }
 
+                _lastLoadAttempt = DateTimeOffset.UtcNow; // throttle from the END of the attempt: a slow load must not make waiters retry at once
                 _isInitialized = true;
                 _logger.LogInformation("PoolRepository initialization completed. Total pools in memory: {count}", _poolsCache.Count);
 
@@ -209,7 +210,6 @@ namespace AVMTradeReporter.Repository
                 // Prefer index set if present for efficiency
                 if (await _redisDatabase.KeyExistsAsync(indexKey))
                 {
-                    _backendAnswered = true; // Redis answered, even if the pool set is empty
                     var members = await _redisDatabase.SetMembersAsync(indexKey);
                     foreach (var member in members)
                     {
