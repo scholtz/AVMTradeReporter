@@ -401,7 +401,7 @@ namespace AVMTradeReporter.Services.CoinGecko
                         }
                     }
                 });
-            _snapshot = new PoolSnapshot(pairs, unresolved, assetIds, excluded, now, retryUnresolved ? now : snapshot.FullRefreshAt, !anyPool && !_poolRepository.IsInitialized);
+            _snapshot = new PoolSnapshot(pairs, unresolved, assetIds, excluded, now, retryUnresolved ? now : snapshot.FullRefreshAt, !anyPool && !_poolRepository.PoolLoadSucceeded);
             return _snapshot;
         }
 

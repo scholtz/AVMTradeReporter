@@ -722,7 +722,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         public async Task Events_EmptyPoolCache_IsTransient_NotCachedAsNoEvents()
         {
             // the pod's pool cache failed to initialise / is still warming: every pool looks unknown
-            _pools = new MockPoolRepository { IsInitialized = false };
+            _pools = new MockPoolRepository { PoolLoadSucceeded = false };
             _source.Trades.Add(Swap("OLD", 10, 1, 0)); // older than UnknownPoolGraceSeconds
             var service = Create(c => c.PoolSnapshotSeconds = 1);
 
@@ -740,7 +740,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         {
             // a network the DEX is not on yet (Voi): the pool cache loaded fine and holds no pool at all. Answering 503 for ever
             // failed the production smoke test and would stall a consumer that polls it - nothing is wrong, there is just nothing here.
-            _pools = new MockPoolRepository { IsInitialized = true };
+            _pools = new MockPoolRepository { PoolLoadSucceeded = true };
             var service = Create();
 
             Assert.That((await service.GetPairAsync("1", default)).Outcome, Is.EqualTo(CoinGeckoOutcome.NotFound));
@@ -873,7 +873,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             public Task<List<PoolModel>> GetPoolsAsync(ulong? assetIdA, ulong? assetIdB, string? address, DEXProtocol? protocol = null, int size = 100, PoolOrderBy? orderBy = null, SortDirection direction = SortDirection.Desc, CancellationToken cancellationToken = default) => Task.FromResult(_pools.ToList());
             public Task<int> GetPoolCountAsync(CancellationToken cancellationToken = default) => Task.FromResult(_pools.Count);
             public Task UpdateAggregatedPool(ulong aId, ulong bId, CancellationToken cancellationToken) => Task.CompletedTask;
-            public bool IsInitialized { get; set; }
+            public bool PoolLoadSucceeded { get; set; } = true;
             public IEnumerable<string> GetAllPoolAddresses() => _pools.Select(p => p.PoolAddress).ToList();
 
             public AVMTradeReporter.Processors.Pool.IPoolProcessor? GetPoolProcessor(DEXProtocol protocol)

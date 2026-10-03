@@ -37,6 +37,6 @@ namespace AVMTradeReporter.Repository
         /// initialised repository that holds no pool is a deployment without pools (a network the DEX is not on yet); an
         /// uninitialised one is a pod whose backends failed at start (the loaders swallow errors and return 0) or is still warming - the two must not be confused (the latter is retryable, the former is a plain "nothing here").
         /// </summary>
-        bool IsInitialized { get; }
+        bool PoolLoadSucceeded { get; }
     }
 }

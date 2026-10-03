@@ -42,6 +42,8 @@ namespace AVMTradeReporter.Repository
         // 'pools' index counts as an answer: nothing was ever stored). The loaders swallow their errors and return 0, so
         // "initialised with 0 pools" alone cannot tell a network without pools from a backend that was down at start.
         private volatile bool _backendAnswered = false;
+        private DateTimeOffset _lastLoadAttempt = DateTimeOffset.MinValue;
+        private static readonly TimeSpan FailedLoadRetryInterval = TimeSpan.FromSeconds(60);
 
         // Per-pool load locks to prevent duplicate concurrent enrichment
         private static readonly ConcurrentDictionary<string, SemaphoreSlim> _poolLoadSemaphores = new();
@@ -77,8 +79,11 @@ namespace AVMTradeReporter.Repository
             await _initializationSemaphore.WaitAsync(cancellationToken);
             try
             {
-                if (_isInitialized)
+                // A load no backend answered (both swallow their errors) is retried - throttled, InitializeAsync is also the
+                // lazy entry of every repository call - so a pod that started while Redis/Elasticsearch were down recovers.
+                if (_isInitialized && (_backendAnswered || DateTimeOffset.UtcNow - _lastLoadAttempt < FailedLoadRetryInterval))
                     return;
+                _lastLoadAttempt = DateTimeOffset.UtcNow;
 
                 _logger.LogInformation("Initializing PoolRepository - loading pools from Redis and Elasticsearch");
 
@@ -204,6 +209,7 @@ namespace AVMTradeReporter.Repository
                 // Prefer index set if present for efficiency
                 if (await _redisDatabase.KeyExistsAsync(indexKey))
                 {
+                    _backendAnswered = true; // Redis answered, even if the pool set is empty
                     var members = await _redisDatabase.SetMembersAsync(indexKey);
                     foreach (var member in members)
                     {
@@ -295,8 +301,8 @@ namespace AVMTradeReporter.Repository
                     return loadedCount;
                 }
 
-                // 404 = the 'pools' index does not exist yet: a network without any pool (the index is created by the first one)
-                if (searchResponse.ApiCallDetails.HttpStatusCode == 404)
+                // index_not_found (404) = the 'pools' index does not exist yet (a bare 404 from a proxy / wrong URL is NOT an answer): a network without any pool (the index is created by the first one)
+                if (searchResponse.ApiCallDetails.HttpStatusCode == 404 && searchResponse.ElasticsearchServerError?.Error?.Type == "index_not_found_exception")
                 {
                     _backendAnswered = true;
                     _logger.LogWarning("Elasticsearch has no 'pools' index yet - no pool has ever been stored");
@@ -774,7 +780,7 @@ namespace AVMTradeReporter.Repository
             return _poolsCache.Count;
         }
 
-        public bool IsInitialized => _isInitialized && _backendAnswered;
+        public bool PoolLoadSucceeded => _isInitialized && _backendAnswered;
 
         public IEnumerable<string> GetAllPoolAddresses()
         {

@@ -20,8 +20,10 @@ namespace AVMTradeReporter.HealthChecks
         public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
         {
             var count = await _poolRepository.GetPoolCountAsync(cancellationToken);
-            return count > 0
-                ? HealthCheckResult.Healthy($"Pool cache populated ({count} pools)")
+            if (count > 0) return HealthCheckResult.Healthy($"Pool cache populated ({count} pools)");
+            // loaded fine, just nothing stored: a network the DEX is not on yet - not a wiped cache
+            return _poolRepository.PoolLoadSucceeded
+                ? HealthCheckResult.Healthy("Pool cache loaded, no pools stored yet")
                 : HealthCheckResult.Degraded("Pool cache empty");
         }
     }
