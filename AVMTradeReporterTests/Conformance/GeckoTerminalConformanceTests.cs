@@ -367,12 +367,14 @@ namespace AVMTradeReporterTests.Conformance
 
         // ------------------------------------------------------------------------------------------------ latency budgets
 
-        private static async Task<List<double>> Time(int count, Func<int, string> path)
+        /// <param name="allowNotFound">The endpoint may legitimately answer 404 (a network without any pool has no asset 0): the latency of that answer still counts.</param>
+        private static async Task<List<double>> Time(int count, Func<int, string> path, bool allowNotFound = false)
         {
             var samples = new List<double>();
             for (var i = 0; i < count; i++)
             {
                 var (status, body, elapsed) = await Get(path(i));
+                if (allowNotFound && status == HttpStatusCode.NotFound) { samples.Add(elapsed.TotalMilliseconds); continue; }
                 Assert.That(status, Is.EqualTo(HttpStatusCode.OK), $"{path(i)}: {Truncate(body)}");
                 samples.Add(elapsed.TotalMilliseconds);
             }
@@ -392,7 +394,7 @@ namespace AVMTradeReporterTests.Conformance
             var warmEvents = await Time(1, _ => $"events?fromBlock={latest - 500}&toBlock={latest - 100}"); // fills the cache
             var cachedEvents = await Time(20, _ => $"events?fromBlock={latest - 500}&toBlock={latest - 100}");
             var coldEvents = await Time(5, i => $"events?fromBlock={latest - 5_000 - (ulong)i * 1_000 - 999}&toBlock={latest - 5_000 - (ulong)i * 1_000}");
-            var pairs = await Time(10, _ => "asset?id=0");
+            var pairs = await Time(10, _ => "asset?id=0", allowNotFound: true); // Voi has no pool, so no asset 0: its 404 must be fast too
 
             TestContext.Out.WriteLine($"latest-block p95 {Percentile(latestBlock, .95):F0} ms | cached events p95 {Percentile(cachedEvents, .95):F0} ms | cold 1000-block events max {coldEvents.Max():F0} ms | asset p95 {Percentile(pairs, .95):F0} ms");
             Assert.That(Percentile(latestBlock, .95), Is.LessThan(800 * factor), "latest-block is polled every 2 s - it must be a memory read");
