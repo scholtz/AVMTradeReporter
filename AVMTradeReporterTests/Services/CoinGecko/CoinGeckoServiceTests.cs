@@ -32,7 +32,10 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             public List<Trade> Trades { get; } = new();
             public List<Liquidity> Liquidity { get; } = new();
             public bool IsAvailable { get; set; } = true;
-            public Exception? Failure { get; set; }
+            public Exception? TradesFailure { get; set; }
+            public Exception? LiquidityFailure { get; set; }
+            /// <summary>The trades query fails (the historical single-failure knob of the tests).</summary>
+            public Exception? Failure { get => TradesFailure; set => TradesFailure = value; }
             public TimeSpan QueryDelay { get; set; }
             public int TradeCalls;
             private int _inFlight;
@@ -51,6 +54,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             public Task<IReadOnlyList<Liquidity>> GetLiquidityAsync(ulong lo, ulong hi, int size, CancellationToken cancellationToken)
             {
                 Interlocked.Increment(ref LiquidityCalls);
+                if (LiquidityFailure != null) throw LiquidityFailure;
                 return RunAsync(() => (IReadOnlyList<Liquidity>)Liquidity.Where(t => t.BlockId >= lo && t.BlockId <= hi).OrderBy(t => t.BlockId).Take(size).ToList());
             }
 
@@ -726,7 +730,8 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         {
             // Voi: no pool, so no trades / liquidity index. Elasticsearch answered - there are no events (200, empty).
             _pools = new MockPoolRepository { PoolLoadSucceeded = true };
-            _source.Failure = ElasticIndexMissing("trades");
+            _source.TradesFailure = ElasticIndexMissing("trades");
+            _source.LiquidityFailure = ElasticIndexMissing("liquidity");
             var service = Create();
 
             var result = await service.GetEventsJsonAsync(10, 20, default);
@@ -736,14 +741,38 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         }
 
         [Test]
-        public async Task Events_MissingEventIndices_OnANetworkWithPools_StayARetryable503()
+        public async Task Events_OnlyTheTradesIndexMissing_OnANetworkWithoutPools_KeepsWhatTheOtherSourceHas()
         {
-            // data that should exist is gone / not restored: an empty answer would be cached and skipped for good
-            _source.Failure = ElasticIndexMissing("trades");
+            // the missing source is empty, the other source is NOT discarded (no pool in the snapshot, but a liquidity event exists)
+            _pools = new MockPoolRepository { PoolLoadSucceeded = true };
+            _source.TradesFailure = ElasticIndexMissing("trades");
+            var service = Create();
+
+            var result = await service.GetEventsJsonAsync(10, 20, default);
+
+            Assert.That(result.Outcome, Is.EqualTo(CoinGeckoOutcome.Ok));
+        }
+
+        [Test]
+        public async Task Events_AMissingIndexDoesNotHideARealFailureOfTheOtherSource()
+        {
+            _pools = new MockPoolRepository { PoolLoadSucceeded = true };
+            _source.TradesFailure = ElasticIndexMissing("trades");
+            _source.LiquidityFailure = new InvalidOperationException("connection refused");
             var service = Create();
 
             Assert.That((await service.GetEventsJsonAsync(10, 20, default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
-            _source.Failure = null;
+        }
+
+        [Test]
+        public async Task Events_MissingEventIndices_OnANetworkWithPools_StayARetryable503()
+        {
+            // data that should exist is gone / not restored: an empty answer would be cached and skipped for good
+            _source.TradesFailure = ElasticIndexMissing("trades");
+            var service = Create();
+
+            Assert.That((await service.GetEventsJsonAsync(10, 20, default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
+            _source.TradesFailure = null;
             _source.Trades.Add(Swap("T1", 10, 1, 0));
             Assert.That(Events(await service.GetEventsJsonAsync(10, 20, default)), Has.Length.EqualTo(1), "nothing was cached as final");
         }
