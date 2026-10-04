@@ -23,6 +23,9 @@ namespace AVMTradeReporterTests.Conformance
         private static readonly string? BaseUrl = Environment.GetEnvironmentVariable("GECKOTERMINAL_BASE_URL")?.TrimEnd('/');
         private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(60) };
 
+        /// <summary>GECKOTERMINAL_EXPECT_EVENTS=false marks a deployment that has no trades (a network without any pool, e.g. Voi).</summary>
+        private static bool ExpectEvents => !string.Equals(Environment.GetEnvironmentVariable("GECKOTERMINAL_EXPECT_EVENTS"), "false", StringComparison.OrdinalIgnoreCase);
+
         private static double LatencyFactor => double.TryParse(Environment.GetEnvironmentVariable("GECKOTERMINAL_LATENCY_FACTOR"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var f) ? f : 1;
         private static int EnvInt(string name, int fallback) => int.TryParse(Environment.GetEnvironmentVariable(name), out var v) ? v : fallback;
 
@@ -116,8 +119,7 @@ namespace AVMTradeReporterTests.Conformance
             var found = await FindRangeWithEvents() ?? await GoldenRangeWithEvents();
             if (found == null)
             {
-                var expect = !string.Equals(Environment.GetEnvironmentVariable("GECKOTERMINAL_EXPECT_EVENTS"), "false", StringComparison.OrdinalIgnoreCase);
-                if (expect) Assert.Fail("no event found in the scanned window - the integration is serving nothing (set GECKOTERMINAL_EXPECT_EVENTS=false for a network without trades)");
+                if (ExpectEvents) Assert.Fail("no event found in the scanned window - the integration is serving nothing (set GECKOTERMINAL_EXPECT_EVENTS=false for a network without trades)");
                 Assert.Ignore("no events in the scanned window");
             }
             return found!.Value;
@@ -367,13 +369,15 @@ namespace AVMTradeReporterTests.Conformance
 
         // ------------------------------------------------------------------------------------------------ latency budgets
 
-        private static async Task<List<double>> Time(int count, Func<int, string> path)
+        /// <param name="allowNotFound">The endpoint may legitimately answer 404 with the API's own error body (a network without any pool has no asset 0): that answer's latency still counts. A 404 without the {"error": ...} body is a routing / proxy miss, never accepted.</param>
+        private static async Task<List<double>> Time(int count, Func<int, string> path, bool allowNotFound = false)
         {
             var samples = new List<double>();
             for (var i = 0; i < count; i++)
             {
                 var (status, body, elapsed) = await Get(path(i));
-                Assert.That(status, Is.EqualTo(HttpStatusCode.OK), $"{path(i)}: {Truncate(body)}");
+                var isApiNotFound = allowNotFound && status == HttpStatusCode.NotFound && body.Contains("\"error\"", StringComparison.Ordinal);
+                if (!isApiNotFound) Assert.That(status, Is.EqualTo(HttpStatusCode.OK), $"{path(i)}: {Truncate(body)}");
                 samples.Add(elapsed.TotalMilliseconds);
             }
             samples.Sort();
@@ -392,7 +396,7 @@ namespace AVMTradeReporterTests.Conformance
             var warmEvents = await Time(1, _ => $"events?fromBlock={latest - 500}&toBlock={latest - 100}"); // fills the cache
             var cachedEvents = await Time(20, _ => $"events?fromBlock={latest - 500}&toBlock={latest - 100}");
             var coldEvents = await Time(5, i => $"events?fromBlock={latest - 5_000 - (ulong)i * 1_000 - 999}&toBlock={latest - 5_000 - (ulong)i * 1_000}");
-            var pairs = await Time(10, _ => "asset?id=0");
+            var pairs = await Time(10, _ => "asset?id=0", allowNotFound: !ExpectEvents); // a network without pools has no asset 0: its (API) 404 must be fast too; elsewhere asset 0 must resolve
 
             TestContext.Out.WriteLine($"latest-block p95 {Percentile(latestBlock, .95):F0} ms | cached events p95 {Percentile(cachedEvents, .95):F0} ms | cold 1000-block events max {coldEvents.Max():F0} ms | asset p95 {Percentile(pairs, .95):F0} ms");
             Assert.That(Percentile(latestBlock, .95), Is.LessThan(800 * factor), "latest-block is polled every 2 s - it must be a memory read");
