@@ -297,8 +297,9 @@ namespace AVMTradeReporter.Services.CoinGecko
         /// <summary>The pool cache loaded fine and holds no pool of a published protocol (not even an undescribable one): no event can exist.</summary>
         private async Task<bool> HasNoPublishedPoolsAsync(CancellationToken cancellationToken)
         {
-            // forced fresh (only reached when both event indices are missing, which is rare): a pool created moments ago must be seen
-            var snapshot = await GetSnapshotAsync(TimeSpan.Zero, cancellationToken);
+            // refreshed at most every MissingPoolRefreshInterval, like an unknown pool id lookup: an anonymous caller probing ranges
+            // must not be able to force a snapshot rebuild per request. A pool registered within that window is the accepted gap.
+            var snapshot = await GetSnapshotAsync(MissingPoolRefreshInterval, cancellationToken);
             return !snapshot.PoolCacheEmpty && snapshot.Pairs.Count == 0 && snapshot.Unresolved.Count == 0 && snapshot.Excluded.Count == 0;
         }
 
