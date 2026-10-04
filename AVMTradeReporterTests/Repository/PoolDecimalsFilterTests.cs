@@ -99,5 +99,18 @@ namespace AVMTradeReporterTests.Repository
 
             Assert.That(repository.PoolLoadSucceeded, Is.False, "the load failed - nothing answered");
         }
+
+        [Test]
+        public void IsIndexNotFound_RecognisesTheThrownElasticsearchAnswer_AndNothingElse()
+        {
+            // Voi: ThrowExceptions() turns the missing 'pools' index into a thrown exception, which must read as "answered: empty"
+            var thrown = new InvalidOperationException("Request failed to execute. Call: Status code 404 from: POST /pools/_search. ServerError: 404Type: index_not_found_exception Reason: \"no such index [pools]\"");
+            Assert.That(PoolRepository.IsIndexNotFound(thrown), Is.True);
+            Assert.That(PoolRepository.IsIndexNotFound(new Exception("outer", thrown)), Is.True, "found in the inner exception");
+
+            Assert.That(PoolRepository.IsIndexNotFound(new HttpRequestException("Connection refused")), Is.False, "backend down is not an answer");
+            Assert.That(PoolRepository.IsIndexNotFound(new Exception("Status code 404 from a proxy")), Is.False, "a bare 404 is not an answer");
+            Assert.That(PoolRepository.IsIndexNotFound(null), Is.False);
+        }
     }
 }

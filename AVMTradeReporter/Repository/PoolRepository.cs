@@ -311,11 +311,34 @@ namespace AVMTradeReporter.Repository
                 _logger.LogError("Failed to load pools from Elasticsearch: {error}", searchResponse.DebugInformation);
                 return 0;
             }
+            catch (Exception ex) when (IsIndexNotFound(ex))
+            {
+                // The client is built with ThrowExceptions() (Program.cs), so a missing 'pools' index does NOT come back as an
+                // invalid response above - it is thrown. This is the normal state of a network the DEX has no pool on yet (Voi):
+                // the backend answered, there is simply nothing stored.
+                _backendAnswered = true;
+                _logger.LogWarning("Elasticsearch has no 'pools' index yet - no pool has ever been stored");
+                return 0;
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to load pools from Elasticsearch");
                 return 0;
             }
+        }
+
+        /// <summary>
+        /// True when the exception (or an inner one) is Elasticsearch's own "index_not_found_exception" answer - the server
+        /// replied, the index does not exist. Anything else (connection refused, timeout, auth, a bare 404 from a proxy) is a
+        /// failed load, not an answer.
+        /// </summary>
+        public static bool IsIndexNotFound(Exception? ex)
+        {
+            for (var depth = 0; ex != null && depth < 8; ex = ex.InnerException, depth++)
+            {
+                if (ex.Message.Contains("index_not_found_exception", StringComparison.Ordinal)) return true;
+            }
+            return false;
         }
 
         private async Task SaveAllPoolsToRedis(CancellationToken cancellationToken)
