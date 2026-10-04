@@ -156,7 +156,7 @@ namespace AVMTradeReporter.Processors.SWAP
 
                     }
                 }
-                if (poolAddress == null) return null;
+                if (poolAddress is null) return null;
 
                 var trade = new Trade
                 {

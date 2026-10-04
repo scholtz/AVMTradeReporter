@@ -220,9 +220,9 @@ namespace AVMTradeReporterTests.Controllers
             });
         }
 
-        public Task<Dictionary<string, (decimal Volume1H, decimal Volume24H, decimal Volume7D)>> GetPoolVolumesAsync(IEnumerable<string> poolAddresses, CancellationToken cancellationToken = default)
+        public Task<Dictionary<string, (decimal Volume1H, decimal Volume24H, decimal Volume7D)>?> GetPoolVolumesAsync(IEnumerable<string> poolAddresses, CancellationToken cancellationToken = default)
         {
-            return Task.FromResult(new Dictionary<string, (decimal, decimal, decimal)>());
+            return Task.FromResult<Dictionary<string, (decimal Volume1H, decimal Volume24H, decimal Volume7D)>?>(new Dictionary<string, (decimal Volume1H, decimal Volume24H, decimal Volume7D)>());
         }
 
         public Task<IReadOnlyDictionary<ulong, AssetVolumeWindows>?> GetAssetVolumeWindowsAsync(DateTimeOffset now, CancellationToken cancellationToken = default)

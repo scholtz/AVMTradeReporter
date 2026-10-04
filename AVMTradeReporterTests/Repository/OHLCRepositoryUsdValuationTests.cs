@@ -5,7 +5,7 @@ namespace AVMTradeReporterTests.Repository;
 
 public class OHLCRepositoryUsdValuationTests
 {
-    private OHLCRepository _repo = new(null, null);
+    private OHLCRepository _repo = new(null!, null!);
 
     /// <summary>
     /// Trade.ValueUSD must play no role in OHLC generation at all: it averages both legs' cached

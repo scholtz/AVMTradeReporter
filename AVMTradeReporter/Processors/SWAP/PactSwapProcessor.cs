@@ -119,7 +119,7 @@ namespace AVMTradeReporter.Processors.SWAP
 
                     }
                 }
-                if (poolAddress == null) return null;
+                if (poolAddress is null) return null;
 
                 ulong A = 0, B = 0, L = 0;
                 var AItem = current.Detail?.GlobalDelta?.FirstOrDefault(kv => kv.Key.ToString() == "A");

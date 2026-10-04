@@ -54,7 +54,7 @@ namespace AVMTradeReporter.Processors.Liqudity
                     assetLPAmount = inAssetTransferTxB.AssetAmount;
                     poolAddress = inAssetTransferTxB.AssetReceiver;
                 }
-                if (poolAddress == null) return null;
+                if (poolAddress is null) return null;
                 var reverse = current.Detail?.InnerTxns?.Reverse();
 
                 var inner = reverse?.Skip(1).FirstOrDefault()?.Tx;

@@ -219,11 +219,11 @@ namespace AVMTradeReporter.Repository
                             UnitName = "ALGO",
                             Name = string.IsNullOrWhiteSpace(_appConfig?.NativeTokenName) ? "Algorand" : _appConfig.NativeTokenName,
                             Url = "https://www.algorand.com",
-                            MetadataHash = null,
-                            Manager = null,
-                            Reserve = null,
-                            Freeze = null,
-                            Clawback = null
+                            MetadataHash = null!,
+                            Manager = null!,
+                            Reserve = null!,
+                            Freeze = null!,
+                            Clawback = null!
                         },
                         Timestamp = DateTimeOffset.UtcNow
                     };

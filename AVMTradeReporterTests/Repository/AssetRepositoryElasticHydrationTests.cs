@@ -117,7 +117,7 @@ namespace AVMTradeReporterTests.Repository
                 .Setup(a => a.GetAssetByIDAsync(It.IsAny<CancellationToken>(), destroyedId))
                 .ThrowsAsync(new Algorand.ApiException<ErrorResponse>(
                     "asset does not exist", 404, "asset does not exist",
-                    new Dictionary<string, IEnumerable<string>>(), new ErrorResponse(), null));
+                    new Dictionary<string, IEnumerable<string>>(), new ErrorResponse(), null!));
 
             var esStore = new Dictionary<ulong, AssetSnapshot>();
             var repoBeforeRestart = new TestAssetRepository(algod.Object, esStore);

@@ -59,7 +59,7 @@ namespace AVMTradeReporter.Processors.Liqudity
                     assetLPAmount = inPayTransferTxB.Amount ?? 0;
                     poolAddress = inPayTransferTxB.Receiver;
                 }
-                if (poolAddress == null) return null;
+                if (poolAddress is null) return null;
 
                 var inner = current.Detail?.InnerTxns?.FirstOrDefault()?.Tx;
                 if (inner is AssetTransferTransaction outAssetTransferTx)
@@ -113,7 +113,7 @@ namespace AVMTradeReporter.Processors.Liqudity
                 {
                     BF = Convert.ToUInt64(BFItem.Value.Value.Uint64);
                 }
-                if (poolAddress == null) return null;
+                if (poolAddress is null) return null;
                 return new Liquidity
                 {
                     Direction = LiquidityDirection.WithdrawLiquidity,

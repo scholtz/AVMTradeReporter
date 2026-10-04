@@ -17,7 +17,7 @@ namespace AVMTradeReporterTests.Repository
     {
         private const ulong UsdcAssetId = 31566704UL;
 
-        private OHLCRepository _repo = new(null, null);
+        private OHLCRepository _repo = new(null!, null!);
 
         [Test]
         public async Task GetIntervalBuckets_BasicTrade_GeneratesAllBuckets()

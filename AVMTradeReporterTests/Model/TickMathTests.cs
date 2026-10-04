@@ -35,8 +35,8 @@ namespace AVMTradeReporterTests.Model
             Assert.That(low, Is.EqualTo(6246004806130590512.0).Within(0.000000001).Percent);
             Assert.That(high, Is.EqualTo(6227295804679904691.0).Within(0.000000001).Percent);
             // current_price sits inside the current tick
-            Assert.That(6237834869436999446.0, Is.LessThan(low));
-            Assert.That(6237834869436999446.0, Is.GreaterThan(high));
+            Assert.That(low, Is.GreaterThan(6237834869436999446.0));
+            Assert.That(high, Is.LessThan(6237834869436999446.0));
         }
 
         [Test]

@@ -60,7 +60,7 @@ namespace AVMTradeReporter.Processors.SWAP
             {
                 return null;
             }
-            if (vaultAddress == null) return null;
+            if (vaultAddress is null) return null;
 
             ulong assetIdOut = 0;
             ulong assetAmountOut = 0;
