@@ -47,8 +47,8 @@ namespace AVMTradeReporter.Processors.Liqudity
             if (vaultDeposit == null) return null;
 
             var vaultAddress = PactWeightedPoolHelper.GetReceiver(previous2.Tx);
-            if (vaultAddress == null) return null;
-            if (PactWeightedPoolHelper.GetReceiver(previous1.Tx) != vaultAddress) return null;
+            if (vaultAddress is null) return null;
+            if (PactWeightedPoolHelper.GetReceiver(previous1.Tx) is not { } receiver1 || receiver1 != vaultAddress) return null;
 
             var assetAId = PactClammHelper.GetUintArg(vaultDeposit, 1);
             var assetAAmount = PactClammHelper.GetUintArg(vaultDeposit, 2);

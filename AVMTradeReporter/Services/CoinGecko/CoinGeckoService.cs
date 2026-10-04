@@ -92,6 +92,8 @@ namespace AVMTradeReporter.Services.CoinGecko
         private sealed record PoolSnapshot(Dictionary<ulong, PairInfo> Pairs, Dictionary<ulong, DateTimeOffset> Unresolved, HashSet<ulong> AssetIds, HashSet<ulong> Excluded, DateTimeOffset LoadedAt, DateTimeOffset FullRefreshAt, bool PoolCacheEmpty);
 
         /// <summary>Pair lookup result: <see cref="Transient"/> means "exists but cannot be described right now - try again", not "unknown".</summary>
+        /// <param name="Pair">The pair, when the pool is known and describable.</param>
+        /// <param name="Transient">The pool exists but cannot be described right now (retry), not "unknown".</param>
         /// <param name="Excluded">The pool is known but deliberately not published, so its events are skipped for good.</param>
         private readonly record struct PairLookup(PairInfo? Pair, bool Transient, bool Excluded = false);
 

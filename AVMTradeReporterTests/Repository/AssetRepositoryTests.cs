@@ -22,7 +22,7 @@ namespace AVMTradeReporterTests.Repository
                     "asset does not exist",
                     new Dictionary<string, IEnumerable<string>>(),
                     new ErrorResponse(),
-                    null));
+                    null!));
 
             var repo = new AssetRepository(algod.Object, NullLogger<AssetRepository>.Instance);
 
@@ -46,7 +46,7 @@ namespace AVMTradeReporterTests.Repository
                     500,
                     "internal error",
                     new Dictionary<string, IEnumerable<string>>(),
-                    null));
+                    null!));
 
             var repo = new AssetRepository(algod.Object, NullLogger<AssetRepository>.Instance);
 

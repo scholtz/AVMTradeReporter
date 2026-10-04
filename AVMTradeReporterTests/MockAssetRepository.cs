@@ -28,11 +28,11 @@ namespace AVMTradeReporterTests
                     UnitName = "M" + assetId,
                     Name = "Mock Asset",
                     Url = "https://mock.asset",
-                    MetadataHash = null,
-                    Manager = null,
-                    Reserve = null,
-                    Freeze = null,
-                    Clawback = null
+                    MetadataHash = null!,
+                    Manager = null!,
+                    Reserve = null!,
+                    Freeze = null!,
+                    Clawback = null!
                 },
                 PriceUSD = 0,
                 TVL_USD = 0,
