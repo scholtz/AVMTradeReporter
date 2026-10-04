@@ -294,6 +294,13 @@ namespace AVMTradeReporter.Services.CoinGecko
             return new PairLookup(null, snapshot.Unresolved.ContainsKey(appId), false); // excluded pools returned above, before the refresh
         }
 
+        /// <summary>The pool cache loaded fine and holds no pool of a published protocol (not even an undescribable one): no event can exist.</summary>
+        private async Task<bool> HasNoPublishedPoolsAsync(CancellationToken cancellationToken)
+        {
+            var snapshot = await GetSnapshotAsync(forceIfOlderThan: null, cancellationToken);
+            return !snapshot.PoolCacheEmpty && snapshot.Pairs.Count == 0 && snapshot.Unresolved.Count == 0 && snapshot.Excluded.Count == 0;
+        }
+
         private async Task<PoolSnapshot> GetSnapshotAsync(TimeSpan? forceIfOlderThan, CancellationToken cancellationToken)
         {
             var regular = TimeSpan.FromSeconds(Math.Max(1, _config.PoolSnapshotSeconds));
@@ -551,6 +558,8 @@ namespace AVMTradeReporter.Services.CoinGecko
                 try
                 {
                     await Task.WhenAll(tradesTask, liquidityTask);
+                    trades = tradesTask.Result.DistinctBy(t => t.TxId).ToList();
+                    liquidity = liquidityTask.Result.DistinctBy(l => l.TxId).ToList();
                 }
                 catch (TooManyEventsException ex)
                 {
@@ -558,8 +567,15 @@ namespace AVMTradeReporter.Services.CoinGecko
                     _eventsCache.Set("too-many:" + EventsKey(fromBlock, toBlock), ex.Message, new MemoryCacheEntryOptions { Size = 1, AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(60) });
                     throw;
                 }
-                trades = tradesTask.Result.DistinctBy(t => t.TxId).ToList();
-                liquidity = liquidityTask.Result.DistinctBy(l => l.TxId).ToList();
+                catch (Exception ex) when (ElasticErrors.IsIndexNotFound(ex, "trades") || ElasticErrors.IsIndexNotFound(ex, "liquidity"))
+                {
+                    // Elasticsearch has no trades / liquidity index. On a network without any published pool (Voi) that is simply
+                    // "no events"; on a network WITH pools it means the data is gone or not restored yet - answering an empty
+                    // range would be cached and the consumer would skip it for good, so that stays a retryable 503.
+                    if (!await HasNoPublishedPoolsAsync(cancellationToken)) throw;
+                    trades = new List<Trade>();
+                    liquidity = new List<Liquidity>();
+                }
             }
             finally
             {

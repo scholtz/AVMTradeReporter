@@ -718,6 +718,36 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             Assert.That(calls.Value, Is.EqualTo(1), "one snapshot load, not one per event");
         }
 
+        private static Exception ElasticIndexMissing(string index) =>
+            new InvalidOperationException($"Request failed to execute. Call: Status code 404 from: POST /{index}/_search. ServerError: Type: index_not_found_exception Reason: \"no such index [{index}]\"");
+
+        [Test]
+        public async Task Events_MissingEventIndices_OnANetworkWithoutPools_AreAnEmptyRange()
+        {
+            // Voi: no pool, so no trades / liquidity index. Elasticsearch answered - there are no events (200, empty).
+            _pools = new MockPoolRepository { PoolLoadSucceeded = true };
+            _source.Failure = ElasticIndexMissing("trades");
+            var service = Create();
+
+            var result = await service.GetEventsJsonAsync(10, 20, default);
+
+            Assert.That(result.Outcome, Is.EqualTo(CoinGeckoOutcome.Ok));
+            Assert.That(Events(result), Is.Empty);
+        }
+
+        [Test]
+        public async Task Events_MissingEventIndices_OnANetworkWithPools_StayARetryable503()
+        {
+            // data that should exist is gone / not restored: an empty answer would be cached and skipped for good
+            _source.Failure = ElasticIndexMissing("trades");
+            var service = Create();
+
+            Assert.That((await service.GetEventsJsonAsync(10, 20, default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
+            _source.Failure = null;
+            _source.Trades.Add(Swap("T1", 10, 1, 0));
+            Assert.That(Events(await service.GetEventsJsonAsync(10, 20, default)), Has.Length.EqualTo(1), "nothing was cached as final");
+        }
+
         [Test]
         public async Task Events_EmptyPoolCache_IsTransient_NotCachedAsNoEvents()
         {
