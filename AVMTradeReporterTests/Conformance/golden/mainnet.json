@@ -1,0 +1,2066 @@
+{
+  "network": "https://api.algorand.scan.biatec.io",
+  "recordedAtLatestBlock": 65667246,
+  "cases": [
+    {
+      "name": "swap events, blocks 65666403-65666675",
+      "fromBlock": 65666403,
+      "toBlock": 65666675,
+      "events": [
+        {
+          "asset0In": "4918.617175",
+          "asset1Out": "745.160378",
+          "priceNative": "0.1514979416953709148954045199",
+          "metadata": {
+            "fees0In": "0.4918617175"
+          },
+          "block": {
+            "blockNumber": 65666403,
+            "blockTimestamp": 1791126026
+          },
+          "eventType": "swap",
+          "txnId": "MFFCTLZFHLLPYGAAUT3LZ55Z4NAO4B6ADXOHD64XEXG3EATIAMMQ",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1068648.098149176",
+            "asset1": "233179.618669844"
+          }
+        },
+        {
+          "asset1In": "40.044455",
+          "asset0Out": "4918.617175",
+          "priceNative": "0.008141405109455382650307604",
+          "metadata": {
+            "fees1In": "0.40044455"
+          },
+          "block": {
+            "blockNumber": 65666403,
+            "blockTimestamp": 1791126026
+          },
+          "eventType": "swap",
+          "txnId": "MFFCTLZFHLLPYGAAUT3LZ55Z4NAO4B6ADXOHD64XEXG3EATIAMMQ",
+          "txnIndex": 1,
+          "eventIndex": 1,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3720386195",
+          "reserves": {
+            "asset0": "70.530599049",
+            "asset1": "973.936100185"
+          }
+        },
+        {
+          "asset0In": "610.271532",
+          "asset1Out": "92.438863",
+          "priceNative": "0.1514716944063515648309808428",
+          "metadata": {
+            "fees0In": "0.0610271532"
+          },
+          "block": {
+            "blockNumber": 65666675,
+            "blockTimestamp": 1791126770
+          },
+          "eventType": "swap",
+          "txnId": "3PXXEE7QTYXXTG67DJJZBMDYCGTSNW3T7UZ3UECKLWFQC6WR3HKQ",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "V6AOXWRKSLOQV2WCHFY4AYAO6LFXNLUT2WDGQNUMO4IBA3CD5EQUOSBSUQ",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1069935.999299176",
+            "asset1": "232984.534775844"
+          }
+        },
+        {
+          "asset1In": "4.990319",
+          "asset0Out": "610.271532",
+          "priceNative": "0.0081772108616070919722993076",
+          "metadata": {
+            "fees1In": "0.04990319"
+          },
+          "block": {
+            "blockNumber": 65666675,
+            "blockTimestamp": 1791126770
+          },
+          "eventType": "swap",
+          "txnId": "3PXXEE7QTYXXTG67DJJZBMDYCGTSNW3T7UZ3UECKLWFQC6WR3HKQ",
+          "txnIndex": 1,
+          "eventIndex": 1,
+          "maker": "V6AOXWRKSLOQV2WCHFY4AYAO6LFXNLUT2WDGQNUMO4IBA3CD5EQUOSBSUQ",
+          "pairId": "3720386326",
+          "reserves": {
+            "asset0": "60786.240228231",
+            "asset1": "9.952273"
+          }
+        },
+        {
+          "asset0In": "6753.797171",
+          "asset1Out": "1022.819589",
+          "priceNative": "0.1514436343146142136343407225",
+          "metadata": {
+            "fees0In": "0.6753797171"
+          },
+          "block": {
+            "blockNumber": 65666675,
+            "blockTimestamp": 1791126770
+          },
+          "eventType": "swap",
+          "txnId": "K6N7C63VU7HN6A6FJ37FST4ML34BSIXWF2NL5CEJQGK7XW33KKSQ",
+          "txnIndex": 2,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1076689.796470176",
+            "asset1": "231961.715186844"
+          }
+        },
+        {
+          "asset1In": "55.606244",
+          "asset0Out": "6753.797171",
+          "priceNative": "0.0082333304646409257705556879",
+          "metadata": {
+            "fees1In": "0.55606244"
+          },
+          "block": {
+            "blockNumber": 65666675,
+            "blockTimestamp": 1791126770
+          },
+          "eventType": "swap",
+          "txnId": "K6N7C63VU7HN6A6FJ37FST4ML34BSIXWF2NL5CEJQGK7XW33KKSQ",
+          "txnIndex": 2,
+          "eventIndex": 1,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3720386326",
+          "reserves": {
+            "asset0": "54032.443057231",
+            "asset1": "65.558517"
+          }
+        },
+        {
+          "asset1In": "4.961954",
+          "asset0Out": "607.498788",
+          "priceNative": "0.0081678418097518904021253784",
+          "metadata": {
+            "fees1In": "0.04961954"
+          },
+          "block": {
+            "blockNumber": 65666675,
+            "blockTimestamp": 1791126770
+          },
+          "eventType": "swap",
+          "txnId": "X7TFYOPZO4XU2YJKRO62WJLMSPY42RX7XEVIVDTCKOGMHVTI27NQ",
+          "txnIndex": 3,
+          "eventIndex": 0,
+          "maker": "V6AOXWRKSLOQV2WCHFY4AYAO6LFXNLUT2WDGQNUMO4IBA3CD5EQUOSBSUQ",
+          "pairId": "3720386326",
+          "reserves": {
+            "asset0": "61396.511760231",
+            "asset1": "4.961954"
+          }
+        },
+        {
+          "asset0In": "607.498788",
+          "asset1Out": "92.02169",
+          "priceNative": "0.1514763351264496679127531033",
+          "metadata": {
+            "fees0In": "0.0607498788"
+          },
+          "block": {
+            "blockNumber": 65666675,
+            "blockTimestamp": 1791126770
+          },
+          "eventType": "swap",
+          "txnId": "X7TFYOPZO4XU2YJKRO62WJLMSPY42RX7XEVIVDTCKOGMHVTI27NQ",
+          "txnIndex": 3,
+          "eventIndex": 1,
+          "maker": "V6AOXWRKSLOQV2WCHFY4AYAO6LFXNLUT2WDGQNUMO4IBA3CD5EQUOSBSUQ",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1069325.727767176",
+            "asset1": "233076.973638844"
+          }
+        }
+      ]
+    },
+    {
+      "name": "swap events, blocks 65665595-65666101",
+      "fromBlock": 65665595,
+      "toBlock": 65666101,
+      "events": [
+        {
+          "asset1In": "6.882559",
+          "asset0Out": "346.027826",
+          "priceNative": "0.0198901894092182054746082762",
+          "metadata": {
+            "fees1In": "0.006882559"
+          },
+          "block": {
+            "blockNumber": 65665595,
+            "blockTimestamp": 1791123805
+          },
+          "eventType": "swap",
+          "txnId": "NIVDQBMX4DC332WUONTY5ZLFB5GFNK5MCT6WVZJWOJWIFA3CVHNQ",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3725020876",
+          "reserves": {
+            "asset0": "3733.616325375",
+            "asset1": "6010.482672441"
+          }
+        },
+        {
+          "asset0In": "346.027826",
+          "asset1Out": "52.461595",
+          "priceNative": "0.1516109140887415221919175945",
+          "metadata": {
+            "fees0In": "0.0346027826"
+          },
+          "block": {
+            "blockNumber": 65665595,
+            "blockTimestamp": 1791123805
+          },
+          "eventType": "swap",
+          "txnId": "NIVDQBMX4DC332WUONTY5ZLFB5GFNK5MCT6WVZJWOJWIFA3CVHNQ",
+          "txnIndex": 1,
+          "eventIndex": 1,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1051553.850134176",
+            "asset1": "235770.184909844"
+          }
+        },
+        {
+          "asset1In": "8.794696",
+          "asset0Out": "441.828448",
+          "priceNative": "0.0199052280128417625114080477",
+          "metadata": {
+            "fees1In": "0.008794696"
+          },
+          "block": {
+            "blockNumber": 65665597,
+            "blockTimestamp": 1791123811
+          },
+          "eventType": "swap",
+          "txnId": "2QNEYWQ66BCLRUDIZMAPUU6ECJK5RQPZWMP2RP34TNOPG25WUAUA",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3725020876",
+          "reserves": {
+            "asset0": "3291.787877375",
+            "asset1": "6019.277368441"
+          }
+        },
+        {
+          "asset0In": "441.828448",
+          "asset1Out": "66.984687",
+          "priceNative": "0.1516079086876723700688462686",
+          "metadata": {
+            "fees0In": "0.0441828448"
+          },
+          "block": {
+            "blockNumber": 65665597,
+            "blockTimestamp": 1791123811
+          },
+          "eventType": "swap",
+          "txnId": "2QNEYWQ66BCLRUDIZMAPUU6ECJK5RQPZWMP2RP34TNOPG25WUAUA",
+          "txnIndex": 1,
+          "eventIndex": 1,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1051995.678582176",
+            "asset1": "235703.200222844"
+          }
+        },
+        {
+          "asset0In": "462.738814",
+          "asset1Out": "70.153266",
+          "priceNative": "0.1516044556400665365408487216",
+          "metadata": {
+            "fees0In": "0.0462738814"
+          },
+          "block": {
+            "blockNumber": 65665742,
+            "blockTimestamp": 1791124209
+          },
+          "eventType": "swap",
+          "txnId": "74U3K5L2KSR4GOE4EBMD4IYIPVTAZVT5DC635FFTS7VMHM3W4ILA",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1052458.417396176",
+            "asset1": "235633.046956844"
+          }
+        },
+        {
+          "asset1In": "9.218921",
+          "asset0Out": "462.738814",
+          "priceNative": "0.0199225150799647422703555617",
+          "metadata": {
+            "fees1In": "0.009218921"
+          },
+          "block": {
+            "blockNumber": 65665742,
+            "blockTimestamp": 1791124209
+          },
+          "eventType": "swap",
+          "txnId": "74U3K5L2KSR4GOE4EBMD4IYIPVTAZVT5DC635FFTS7VMHM3W4ILA",
+          "txnIndex": 1,
+          "eventIndex": 1,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3725020876",
+          "reserves": {
+            "asset0": "2829.049063375",
+            "asset1": "6028.496289441"
+          }
+        },
+        {
+          "asset0In": "496.690837",
+          "asset1Out": "75.298725",
+          "priceNative": "0.1516007934730634058385095596",
+          "metadata": {
+            "fees0In": "0.0496690837"
+          },
+          "block": {
+            "blockNumber": 65665745,
+            "blockTimestamp": 1791124218
+          },
+          "eventType": "swap",
+          "txnId": "HXHCT4AXQSXKAF2WAAMT6OTTGED6NGBEIVZABH63X4HEHXOZLX4A",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1052955.108233176",
+            "asset1": "235557.748231844"
+          }
+        },
+        {
+          "asset1In": "9.90445",
+          "asset0Out": "496.690837",
+          "priceNative": "0.0199408752128841869494765815",
+          "metadata": {
+            "fees1In": "0.00990445"
+          },
+          "block": {
+            "blockNumber": 65665745,
+            "blockTimestamp": 1791124218
+          },
+          "eventType": "swap",
+          "txnId": "HXHCT4AXQSXKAF2WAAMT6OTTGED6NGBEIVZABH63X4HEHXOZLX4A",
+          "txnIndex": 1,
+          "eventIndex": 1,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3725020876",
+          "reserves": {
+            "asset0": "2332.358226375",
+            "asset1": "6038.400739441"
+          }
+        },
+        {
+          "asset0In": "120.332304",
+          "asset1Out": "18.242188",
+          "priceNative": "0.1515984269693697546088704493",
+          "metadata": {
+            "fees0In": "0.0120332304"
+          },
+          "block": {
+            "blockNumber": 65665752,
+            "blockTimestamp": 1791124237
+          },
+          "eventType": "swap",
+          "txnId": "TTNEQM6V6NQEBBYRF7B6JTAUKMGX4TKS5OSSPPOIYRU4ZOJ5GD5A",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1053075.440537176",
+            "asset1": "235539.506043844"
+          }
+        },
+        {
+          "asset1In": "8.940461",
+          "asset0Out": "447.941856",
+          "priceNative": "0.0199589765507423356302743006",
+          "metadata": {
+            "fees1In": "0.008940461"
+          },
+          "block": {
+            "blockNumber": 65665765,
+            "blockTimestamp": 1791124273
+          },
+          "eventType": "swap",
+          "txnId": "L2TDII7KF5AY7CAZ7EPLHBYRNJD3BAX4LTYU3UAM4CYL4LGSYUWQ",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3725020876",
+          "reserves": {
+            "asset0": "1884.416370375",
+            "asset1": "6047.341200441"
+          }
+        },
+        {
+          "asset0In": "447.941856",
+          "asset1Out": "67.906315",
+          "priceNative": "0.1515962710124592598910872933",
+          "metadata": {
+            "fees0In": "0.0447941856"
+          },
+          "block": {
+            "blockNumber": 65665765,
+            "blockTimestamp": 1791124273
+          },
+          "eventType": "swap",
+          "txnId": "L2TDII7KF5AY7CAZ7EPLHBYRNJD3BAX4LTYU3UAM4CYL4LGSYUWQ",
+          "txnIndex": 1,
+          "eventIndex": 1,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1053523.382393176",
+            "asset1": "235471.599728844"
+          }
+        },
+        {
+          "asset1In": "9.198484",
+          "asset0Out": "460.467387",
+          "priceNative": "0.0199764071456378733723437399",
+          "metadata": {
+            "fees1In": "0.009198484"
+          },
+          "block": {
+            "blockNumber": 65665802,
+            "blockTimestamp": 1791124374
+          },
+          "eventType": "swap",
+          "txnId": "3YI77NM7XYIAZX4QGACI7CBP6K4ZBZXWQYBVJUM27QHYNSO4VXGA",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3725020876",
+          "reserves": {
+            "asset0": "1423.948983375",
+            "asset1": "6056.539684441"
+          }
+        },
+        {
+          "asset0In": "460.467387",
+          "asset1Out": "69.802442",
+          "priceNative": "0.1515904143717348651230320466",
+          "metadata": {
+            "fees0In": "0.0460467387"
+          },
+          "block": {
+            "blockNumber": 65665802,
+            "blockTimestamp": 1791124374
+          },
+          "eventType": "swap",
+          "txnId": "3YI77NM7XYIAZX4QGACI7CBP6K4ZBZXWQYBVJUM27QHYNSO4VXGA",
+          "txnIndex": 1,
+          "eventIndex": 1,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1054296.990653176",
+            "asset1": "235354.327208844"
+          }
+        },
+        {
+          "asset0In": "313.140873",
+          "asset1Out": "47.470078",
+          "priceNative": "0.1515933629015590053617816924",
+          "metadata": {
+            "fees0In": "0.0313140873"
+          },
+          "block": {
+            "blockNumber": 65665802,
+            "blockTimestamp": 1791124374
+          },
+          "eventType": "swap",
+          "txnId": "A23RZ6S5X5SNJ26ZNXL2TFBN2ULIZFILB5NXUYOPWRJR43O5CWVA",
+          "txnIndex": 2,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1053836.523266176",
+            "asset1": "235424.129650844"
+          }
+        },
+        {
+          "asset1In": "0.00007373",
+          "asset0Out": "313.140873",
+          "priceNative": "0.0000002354531342192432349769",
+          "metadata": {
+            "fees1In": "0.00000007373"
+          },
+          "block": {
+            "blockNumber": 65665802,
+            "blockTimestamp": 1791124374
+          },
+          "eventType": "swap",
+          "txnId": "A23RZ6S5X5SNJ26ZNXL2TFBN2ULIZFILB5NXUYOPWRJR43O5CWVA",
+          "txnIndex": 2,
+          "eventIndex": 1,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3726984046",
+          "reserves": {
+            "asset0": "156734.142541",
+            "asset1": "0.00915025"
+          }
+        },
+        {
+          "asset1In": "0.00008078",
+          "asset0Out": "342.686157",
+          "priceNative": "0.0000002357258918982245320169",
+          "metadata": {
+            "fees1In": "0.00000008078"
+          },
+          "block": {
+            "blockNumber": 65665805,
+            "blockTimestamp": 1791124383
+          },
+          "eventType": "swap",
+          "txnId": "CETCJM2FBTFQEQDUN43OP2VPJYN4HHIAKK3IRNVNIOPJDKWNTFFA",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3726984046",
+          "reserves": {
+            "asset0": "156391.456384",
+            "asset1": "0.00923103"
+          }
+        },
+        {
+          "asset0In": "342.686157",
+          "asset1Out": "51.946885",
+          "priceNative": "0.1515873458524325509886295174",
+          "metadata": {
+            "fees0In": "0.0342686157"
+          },
+          "block": {
+            "blockNumber": 65665805,
+            "blockTimestamp": 1791124383
+          },
+          "eventType": "swap",
+          "txnId": "CETCJM2FBTFQEQDUN43OP2VPJYN4HHIAKK3IRNVNIOPJDKWNTFFA",
+          "txnIndex": 1,
+          "eventIndex": 1,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1054639.676810176",
+            "asset1": "235302.380323844"
+          }
+        },
+        {
+          "asset1In": "5.223158",
+          "asset0Out": "261.546735",
+          "priceNative": "0.0199702664994078400558125874",
+          "metadata": {
+            "fees1In": "0.005223158"
+          },
+          "block": {
+            "blockNumber": 65665872,
+            "blockTimestamp": 1791124568
+          },
+          "eventType": "swap",
+          "txnId": "ZDKPXRCG3IPXN4G65WOHRBSUNKUE5ZUGPQ6PMGAI4RMVKS2HGMZQ",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "NWV3BOSAYUZPCQDT44XHISKD27673UTD7WYHGEARAJZS3T2VDOPZWBXC4Y",
+          "pairId": "3725020876",
+          "reserves": {
+            "asset0": "1162.402248375",
+            "asset1": "6061.762842441"
+          }
+        },
+        {
+          "asset0In": "300",
+          "asset1Out": "45.480017",
+          "priceNative": "0.1516000566666666666666666667",
+          "metadata": {
+            "fees0In": "0.03"
+          },
+          "block": {
+            "blockNumber": 65665872,
+            "blockTimestamp": 1791124568
+          },
+          "eventType": "swap",
+          "txnId": "ZDKPXRCG3IPXN4G65WOHRBSUNKUE5ZUGPQ6PMGAI4RMVKS2HGMZQ",
+          "txnIndex": 1,
+          "eventIndex": 1,
+          "maker": "NWV3BOSAYUZPCQDT44XHISKD27673UTD7WYHGEARAJZS3T2VDOPZWBXC4Y",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1054939.676810176",
+            "asset1": "235256.900306844"
+          }
+        },
+        {
+          "asset0In": "58.614198",
+          "asset1Out": "8.884946",
+          "priceNative": "0.1515835122404984539752638089",
+          "metadata": {
+            "fees0In": "0.0058614198"
+          },
+          "block": {
+            "blockNumber": 65665874,
+            "blockTimestamp": 1791124573
+          },
+          "eventType": "swap",
+          "txnId": "SVGZWRQTN6QDD7PIWLHRFDGED5XTC3GMXPK4MF5ZAQS3RNRH2HVA",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1054998.291008176",
+            "asset1": "235248.015360844"
+          }
+        },
+        {
+          "asset0In": "437.833473",
+          "asset1Out": "66.367513",
+          "priceNative": "0.1515816334124823754624169633",
+          "metadata": {
+            "fees0In": "0.0437833473"
+          },
+          "block": {
+            "blockNumber": 65666058,
+            "blockTimestamp": 1791125081
+          },
+          "eventType": "swap",
+          "txnId": "XQWZ5WCX6W64F6YUGDFRXYU6K4CDNRO5ZOVS32PWUYTDBCVXUIYA",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1055436.124481176",
+            "asset1": "235181.647847844"
+          }
+        },
+        {
+          "asset1In": "8.758301",
+          "asset0Out": "437.833473",
+          "priceNative": "0.0200037263939388206620739571",
+          "metadata": {
+            "fees1In": "0.008758301"
+          },
+          "block": {
+            "blockNumber": 65666058,
+            "blockTimestamp": 1791125081
+          },
+          "eventType": "swap",
+          "txnId": "XQWZ5WCX6W64F6YUGDFRXYU6K4CDNRO5ZOVS32PWUYTDBCVXUIYA",
+          "txnIndex": 1,
+          "eventIndex": 1,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3725020876",
+          "reserves": {
+            "asset0": "724.568775375",
+            "asset1": "6070.521143441"
+          }
+        },
+        {
+          "asset1In": "8.765497",
+          "asset0Out": "437.824232",
+          "priceNative": "0.0200205844248474579634505018",
+          "metadata": {
+            "fees1In": "0.008765497"
+          },
+          "block": {
+            "blockNumber": 65666058,
+            "blockTimestamp": 1791125081
+          },
+          "eventType": "swap",
+          "txnId": "YMYGBQW7PORU2AOZ44G2K6T7IKK3PQ7UJGSREF2MXPUZRGWV7COA",
+          "txnIndex": 2,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3725020876",
+          "reserves": {
+            "asset0": "286.744543375",
+            "asset1": "6079.286640441"
+          }
+        },
+        {
+          "asset0In": "437.824232",
+          "asset1Out": "66.364649",
+          "priceNative": "0.1515782913541432307017670963",
+          "metadata": {
+            "fees0In": "0.0437824232"
+          },
+          "block": {
+            "blockNumber": 65666058,
+            "blockTimestamp": 1791125081
+          },
+          "eventType": "swap",
+          "txnId": "YMYGBQW7PORU2AOZ44G2K6T7IKK3PQ7UJGSREF2MXPUZRGWV7COA",
+          "txnIndex": 2,
+          "eventIndex": 1,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1055873.948713176",
+            "asset1": "235115.283198844"
+          }
+        },
+        {
+          "asset0In": "432.870428",
+          "asset1Out": "65.612322",
+          "priceNative": "0.151574969681227565861810269",
+          "metadata": {
+            "fees0In": "0.0432870428"
+          },
+          "block": {
+            "blockNumber": 65666059,
+            "blockTimestamp": 1791125083
+          },
+          "eventType": "swap",
+          "txnId": "HOK7YRVUNMCSEKO2YMUUTLJTHMKSPCDAKU6LV4HGGD32JBTII74A",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1056306.819141176",
+            "asset1": "235049.670876844"
+          }
+        },
+        {
+          "asset1In": "0.00010227",
+          "asset0Out": "432.870428",
+          "priceNative": "0.0000002362600754976960449698",
+          "metadata": {
+            "fees1In": "0.00000010227"
+          },
+          "block": {
+            "blockNumber": 65666059,
+            "blockTimestamp": 1791125083
+          },
+          "eventType": "swap",
+          "txnId": "HOK7YRVUNMCSEKO2YMUUTLJTHMKSPCDAKU6LV4HGGD32JBTII74A",
+          "txnIndex": 1,
+          "eventIndex": 1,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3726984046",
+          "reserves": {
+            "asset0": "155958.585956",
+            "asset1": "0.0093333"
+          }
+        },
+        {
+          "asset1In": "0.00008125",
+          "asset0Out": "342.985601",
+          "priceNative": "0.0000002368904110350684954847",
+          "metadata": {
+            "fees1In": "0.00000008125"
+          },
+          "block": {
+            "blockNumber": 65666059,
+            "blockTimestamp": 1791125083
+          },
+          "eventType": "swap",
+          "txnId": "RTRVSINJ5GU5DZ7JJSY5AJPIM5LPIEO3GKZKK5KRWV4XCHB5MXOQ",
+          "txnIndex": 2,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3726984046",
+          "reserves": {
+            "asset0": "155615.600355",
+            "asset1": "0.00941455"
+          }
+        },
+        {
+          "asset0In": "342.985601",
+          "asset1Out": "51.985177",
+          "priceNative": "0.1515666455047481716295139748",
+          "metadata": {
+            "fees0In": "0.0342985601"
+          },
+          "block": {
+            "blockNumber": 65666059,
+            "blockTimestamp": 1791125083
+          },
+          "eventType": "swap",
+          "txnId": "RTRVSINJ5GU5DZ7JJSY5AJPIM5LPIEO3GKZKK5KRWV4XCHB5MXOQ",
+          "txnIndex": 2,
+          "eventIndex": 1,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1057352.529734176",
+            "asset1": "234891.173225844"
+          }
+        },
+        {
+          "asset1In": "10.098409",
+          "asset0Out": "503.652983",
+          "priceNative": "0.0200503309636905297550873435",
+          "metadata": {
+            "fees1In": "0.010098409"
+          },
+          "block": {
+            "blockNumber": 65666059,
+            "blockTimestamp": 1791125083
+          },
+          "eventType": "swap",
+          "txnId": "TAWTJQHUWZ7HSB53QM6WH3KTULTMWKM3ESZ45X5QX62LTXMNW22Q",
+          "txnIndex": 3,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3725015704",
+          "reserves": {
+            "asset0": "361576.768456",
+            "asset1": "10.098541"
+          }
+        },
+        {
+          "asset0In": "503.652983",
+          "asset1Out": "76.338621",
+          "priceNative": "0.1515698776274298369439023058",
+          "metadata": {
+            "fees0In": "0.0503652983"
+          },
+          "block": {
+            "blockNumber": 65666059,
+            "blockTimestamp": 1791125083
+          },
+          "eventType": "swap",
+          "txnId": "TAWTJQHUWZ7HSB53QM6WH3KTULTMWKM3ESZ45X5QX62LTXMNW22Q",
+          "txnIndex": 3,
+          "eventIndex": 1,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1057009.544133176",
+            "asset1": "234943.158402844"
+          }
+        },
+        {
+          "asset0In": "199.072009",
+          "asset1Out": "30.173853",
+          "priceNative": "0.1515725548336632298717596204",
+          "metadata": {
+            "fees0In": "0.0199072009"
+          },
+          "block": {
+            "blockNumber": 65666059,
+            "blockTimestamp": 1791125083
+          },
+          "eventType": "swap",
+          "txnId": "YPYLTCPCK7BWMMXT4PEKMWREIU2G4D25MCVPOC62OQHMZQYAYCRA",
+          "txnIndex": 4,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1056505.891150176",
+            "asset1": "235019.497023844"
+          }
+        },
+        {
+          "asset1In": "10.097724",
+          "asset0Out": "503.103118",
+          "priceNative": "0.020070883361132339473992288",
+          "metadata": {
+            "fees1In": "0.010097724"
+          },
+          "block": {
+            "blockNumber": 65666060,
+            "blockTimestamp": 1791125086
+          },
+          "eventType": "swap",
+          "txnId": "5FGAPUF6NWZB2CPQCB5AGGN2GLFPSCUYV4OX7LBSFODHTHJDLIFA",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3725015704",
+          "reserves": {
+            "asset0": "361073.665338",
+            "asset1": "20.196265"
+          }
+        },
+        {
+          "asset0In": "503.103118",
+          "asset1Out": "76.250113",
+          "priceNative": "0.1515596112843013626482831697",
+          "metadata": {
+            "fees0In": "0.0503103118"
+          },
+          "block": {
+            "blockNumber": 65666060,
+            "blockTimestamp": 1791125086
+          },
+          "eventType": "swap",
+          "txnId": "5FGAPUF6NWZB2CPQCB5AGGN2GLFPSCUYV4OX7LBSFODHTHJDLIFA",
+          "txnIndex": 1,
+          "eventIndex": 1,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1058354.680811176",
+            "asset1": "234739.285691844"
+          }
+        },
+        {
+          "asset0In": "126.532582",
+          "asset1Out": "19.177532",
+          "priceNative": "0.1515620063771400792248118354",
+          "metadata": {
+            "fees0In": "0.0126532582"
+          },
+          "block": {
+            "blockNumber": 65666060,
+            "blockTimestamp": 1791125086
+          },
+          "eventType": "swap",
+          "txnId": "D7LRGZTME7IBRKYGZV3X7BHYNG2JCR7RZB4UOMN2VCXVCBHMKUGQ",
+          "txnIndex": 2,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1057851.577693176",
+            "asset1": "234815.535804844"
+          }
+        },
+        {
+          "asset0In": "372.515377",
+          "asset1Out": "56.459889",
+          "priceNative": "0.1515639151722856262118811809",
+          "metadata": {
+            "fees0In": "0.0372515377"
+          },
+          "block": {
+            "blockNumber": 65666060,
+            "blockTimestamp": 1791125086
+          },
+          "eventType": "swap",
+          "txnId": "RSAUCKCCJGCSAMF4TYTBQKYAQ2MFGG5J35HMZ7GTMPJBPYBF5ZKQ",
+          "txnIndex": 3,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1057725.045111176",
+            "asset1": "234834.713336844"
+          }
+        },
+        {
+          "asset1In": "0.00008837",
+          "asset0Out": "372.515377",
+          "priceNative": "0.00000023722510654909152918",
+          "metadata": {
+            "fees1In": "0.00000008837"
+          },
+          "block": {
+            "blockNumber": 65666060,
+            "blockTimestamp": 1791125086
+          },
+          "eventType": "swap",
+          "txnId": "RSAUCKCCJGCSAMF4TYTBQKYAQ2MFGG5J35HMZ7GTMPJBPYBF5ZKQ",
+          "txnIndex": 3,
+          "eventIndex": 1,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3726984046",
+          "reserves": {
+            "asset0": "155243.084978",
+            "asset1": "0.00950292"
+          }
+        },
+        {
+          "asset1In": "0.00014184",
+          "asset0Out": "597.651036",
+          "priceNative": "0.000000237329129301467487124",
+          "metadata": {
+            "fees1In": "0.00000014184"
+          },
+          "block": {
+            "blockNumber": 65666061,
+            "blockTimestamp": 1791125089
+          },
+          "eventType": "swap",
+          "txnId": "3FG7M3O3Z6AHGSUE7NHHPEMZ6CZGVPSGKCS2SQH3WLEPY3X3EDQA",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3726984046",
+          "reserves": {
+            "asset0": "154645.433942",
+            "asset1": "0.00964476"
+          }
+        },
+        {
+          "asset0In": "597.651036",
+          "asset1Out": "90.5734",
+          "priceNative": "0.1515489717983187767786283901",
+          "metadata": {
+            "fees0In": "0.0597651036"
+          },
+          "block": {
+            "blockNumber": 65666061,
+            "blockTimestamp": 1791125089
+          },
+          "eventType": "swap",
+          "txnId": "3FG7M3O3Z6AHGSUE7NHHPEMZ6CZGVPSGKCS2SQH3WLEPY3X3EDQA",
+          "txnIndex": 1,
+          "eventIndex": 1,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1059796.638676176",
+            "asset1": "234520.753818844"
+          }
+        },
+        {
+          "asset1In": "5.754403",
+          "asset0Out": "286.744542",
+          "priceNative": "0.0200680471888458821999129804",
+          "metadata": {
+            "fees1In": "0.005754403"
+          },
+          "block": {
+            "blockNumber": 65666061,
+            "blockTimestamp": 1791125089
+          },
+          "eventType": "swap",
+          "txnId": "GPZWMGH2D7SVIVWPYECZUTWXL2VP5H32GKU3F7MV4A4T5CUQBPQQ",
+          "txnIndex": 2,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3725020876",
+          "reserves": {
+            "asset0": "0.000001375",
+            "asset1": "6085.041043441"
+          }
+        },
+        {
+          "asset0In": "286.744542",
+          "asset1Out": "43.456807",
+          "priceNative": "0.1515523423633290986930101707",
+          "metadata": {
+            "fees0In": "0.0286744542"
+          },
+          "block": {
+            "blockNumber": 65666061,
+            "blockTimestamp": 1791125089
+          },
+          "eventType": "swap",
+          "txnId": "GPZWMGH2D7SVIVWPYECZUTWXL2VP5H32GKU3F7MV4A4T5CUQBPQQ",
+          "txnIndex": 2,
+          "eventIndex": 1,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1059198.987640176",
+            "asset1": "234611.327218844"
+          }
+        },
+        {
+          "asset0In": "126.359331",
+          "asset1Out": "19.150251",
+          "priceNative": "0.1515539125480175263036174194",
+          "metadata": {
+            "fees0In": "0.0126359331"
+          },
+          "block": {
+            "blockNumber": 65666061,
+            "blockTimestamp": 1791125089
+          },
+          "eventType": "swap",
+          "txnId": "S5BJRI7FKTCMHZAZPQDYQZQ4UCUWCUUVOWZ6T5HDKE37LWETS5FA",
+          "txnIndex": 3,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1058912.243098176",
+            "asset1": "234654.784025844"
+          }
+        },
+        {
+          "asset1In": "8.662862",
+          "asset0Out": "431.202956",
+          "priceNative": "0.0200899875092693010202833582",
+          "metadata": {
+            "fees1In": "0.008662862"
+          },
+          "block": {
+            "blockNumber": 65666061,
+            "blockTimestamp": 1791125089
+          },
+          "eventType": "swap",
+          "txnId": "VUINWRDKAQYYS6FFVWA3MUND6KTKR3C72EJBMWJGK3HEN2QSYPHQ",
+          "txnIndex": 4,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3725015704",
+          "reserves": {
+            "asset0": "360642.462382",
+            "asset1": "28.859127"
+          }
+        },
+        {
+          "asset0In": "431.202956",
+          "asset1Out": "65.351415",
+          "priceNative": "0.1515560459191286248974601185",
+          "metadata": {
+            "fees0In": "0.0431202956"
+          },
+          "block": {
+            "blockNumber": 65666061,
+            "blockTimestamp": 1791125089
+          },
+          "eventType": "swap",
+          "txnId": "VUINWRDKAQYYS6FFVWA3MUND6KTKR3C72EJBMWJGK3HEN2QSYPHQ",
+          "txnIndex": 4,
+          "eventIndex": 1,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1058785.883767176",
+            "asset1": "234673.934276844"
+          }
+        },
+        {
+          "asset0In": "503.134143",
+          "asset1Out": "76.247349",
+          "priceNative": "0.1515447720271291546994058799",
+          "metadata": {
+            "fees0In": "0.0503134143"
+          },
+          "block": {
+            "blockNumber": 65666062,
+            "blockTimestamp": 1791125092
+          },
+          "eventType": "swap",
+          "txnId": "445QNYP5KCB46OQKZAA35T66VSEOWSFY5YGOX2NI5WC4AFHWXFOQ",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1060299.772819176",
+            "asset1": "234444.506469844"
+          }
+        },
+        {
+          "asset1In": "10.117582",
+          "asset0Out": "503.134143",
+          "priceNative": "0.0201091143202340772170574001",
+          "metadata": {
+            "fees1In": "0.010117582"
+          },
+          "block": {
+            "blockNumber": 65666062,
+            "blockTimestamp": 1791125092
+          },
+          "eventType": "swap",
+          "txnId": "445QNYP5KCB46OQKZAA35T66VSEOWSFY5YGOX2NI5WC4AFHWXFOQ",
+          "txnIndex": 1,
+          "eventIndex": 1,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3725015704",
+          "reserves": {
+            "asset0": "360139.328239",
+            "asset1": "38.976709"
+          }
+        },
+        {
+          "asset1In": "1.846602",
+          "asset0Out": "1.639665",
+          "priceNative": "1.1262068776243927875511156242",
+          "metadata": {
+            "fees1In": "0.005539806"
+          },
+          "block": {
+            "blockNumber": 65666062,
+            "blockTimestamp": 1791125092
+          },
+          "eventType": "swap",
+          "txnId": "UPPTPKPHTNRJLVMPMW7LCYJ53YXLBLMAPFS5FOEZ2BSTD5ZEC3LA",
+          "txnIndex": 2,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3727377956",
+          "reserves": {
+            "asset0": "79.690091",
+            "asset1": "23.956991"
+          }
+        },
+        {
+          "asset0In": "41.489193",
+          "asset1Out": "6.287383",
+          "priceNative": "0.1515426679906741015666417035",
+          "metadata": {
+            "fees0In": "0.0041489193"
+          },
+          "block": {
+            "blockNumber": 65666064,
+            "blockTimestamp": 1791125098
+          },
+          "eventType": "swap",
+          "txnId": "CLPK3CYCWZMG5HKKIR2UN5Q5MW2ESVFWXMOOAS6UOR7QUWKRFEKA",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1060341.262012176",
+            "asset1": "234438.219086844"
+          }
+        },
+        {
+          "asset1In": "0.618903",
+          "asset0Out": "38.639691",
+          "priceNative": "0.0160172864736418311419726416",
+          "metadata": {
+            "fees1In": "0.000618903"
+          },
+          "block": {
+            "blockNumber": 65666065,
+            "blockTimestamp": 1791125101
+          },
+          "eventType": "swap",
+          "txnId": "TDDL2MUWCMWWAZRPYJ6AQOUX4O3LH2P44YSXWU3SPKF7MLZJMGTQ",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "V6AOXWRKSLOQV2WCHFY4AYAO6LFXNLUT2WDGQNUMO4IBA3CD5EQUOSBSUQ",
+          "pairId": "3728194240",
+          "reserves": {
+            "asset0": "642.038838",
+            "asset1": "21.163876"
+          }
+        },
+        {
+          "asset0In": "38.639691",
+          "asset1Out": "5.85555",
+          "priceNative": "0.1515423609365820239090421298",
+          "metadata": {
+            "fees0In": "0.0038639691"
+          },
+          "block": {
+            "blockNumber": 65666065,
+            "blockTimestamp": 1791125101
+          },
+          "eventType": "swap",
+          "txnId": "TDDL2MUWCMWWAZRPYJ6AQOUX4O3LH2P44YSXWU3SPKF7MLZJMGTQ",
+          "txnIndex": 1,
+          "eventIndex": 1,
+          "maker": "V6AOXWRKSLOQV2WCHFY4AYAO6LFXNLUT2WDGQNUMO4IBA3CD5EQUOSBSUQ",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1060379.901703176",
+            "asset1": "234432.363536844"
+          }
+        },
+        {
+          "asset1In": "10.057691",
+          "asset0Out": "499.644968",
+          "priceNative": "0.0201296753578032632162924135",
+          "metadata": {
+            "fees1In": "0.010057691"
+          },
+          "block": {
+            "blockNumber": 65666066,
+            "blockTimestamp": 1791125103
+          },
+          "eventType": "swap",
+          "txnId": "MGQ7PQTELPQTYY4VHSY3T4BZB72XLX4HMEKNIDE624LTNREHD7WA",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3725015704",
+          "reserves": {
+            "asset0": "359639.683271",
+            "asset1": "49.0344"
+          }
+        },
+        {
+          "asset0In": "499.644968",
+          "asset1Out": "75.716015",
+          "priceNative": "0.1515396328378513760995187287",
+          "metadata": {
+            "fees0In": "0.0499644968"
+          },
+          "block": {
+            "blockNumber": 65666066,
+            "blockTimestamp": 1791125103
+          },
+          "eventType": "swap",
+          "txnId": "MGQ7PQTELPQTYY4VHSY3T4BZB72XLX4HMEKNIDE624LTNREHD7WA",
+          "txnIndex": 1,
+          "eventIndex": 1,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1060971.551929176",
+            "asset1": "234342.704872844"
+          }
+        },
+        {
+          "asset0In": "92.005258",
+          "asset1Out": "13.942649",
+          "priceNative": "0.1515418716612913579352171373",
+          "metadata": {
+            "fees0In": "0.0092005258"
+          },
+          "block": {
+            "blockNumber": 65666066,
+            "blockTimestamp": 1791125103
+          },
+          "eventType": "swap",
+          "txnId": "OH2NFXJJIC2RNLMZHSDIG3OPP2M56QU5PCSKJPCMSGK3PWTHJNQQ",
+          "txnIndex": 2,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1060471.906961176",
+            "asset1": "234418.420887844"
+          }
+        },
+        {
+          "asset1In": "2.105183",
+          "asset0Out": "1.866478",
+          "priceNative": "1.1278906046575421730124866192",
+          "metadata": {
+            "fees1In": "0.006315549"
+          },
+          "block": {
+            "blockNumber": 65666070,
+            "blockTimestamp": 1791125115
+          },
+          "eventType": "swap",
+          "txnId": "4FC4I36P6YGVFAC65C557QQNIMBWU2HHN36PW4RPWV2Y5XZCM7VQ",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3727377956",
+          "reserves": {
+            "asset0": "77.823613",
+            "asset1": "26.062174"
+          }
+        },
+        {
+          "asset0In": "119.099714",
+          "asset1Out": "18.048045",
+          "priceNative": "0.1515372656562382677090223743",
+          "metadata": {
+            "fees0In": "0.0119099714"
+          },
+          "block": {
+            "blockNumber": 65666070,
+            "blockTimestamp": 1791125115
+          },
+          "eventType": "swap",
+          "txnId": "BBIMNWZHAJMYS5FQBEVEM5FP46B5W77OAUBFYEL2TEVS4HG42MUQ",
+          "txnIndex": 2,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1061090.651643176",
+            "asset1": "234324.656827844"
+          }
+        },
+        {
+          "asset1In": "0.266223",
+          "asset0Out": "0.00000312",
+          "priceNative": "85327.88461538461538461538462",
+          "metadata": {
+            "fees1In": "0.0000266223"
+          },
+          "block": {
+            "blockNumber": 65666071,
+            "blockTimestamp": 1791125118
+          },
+          "eventType": "swap",
+          "txnId": "5HCB4E5H75ER2TP2KVRMNM4JLNOYZYZRDZ75MQ744XWAE6FW7EFQ",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3726980707",
+          "reserves": {
+            "asset0": "0.00001584",
+            "asset1": "4.684771"
+          }
+        },
+        {
+          "asset1In": "10.605594",
+          "asset0Out": "1320.658717",
+          "priceNative": "0.008030533447802169771314204",
+          "metadata": {
+            "fees1In": "0.10605594"
+          },
+          "block": {
+            "blockNumber": 65666078,
+            "blockTimestamp": 1791125137
+          },
+          "eventType": "swap",
+          "txnId": "7VFRWM7DNA7ENAKQJZFOOBBJQWEEXANWWNWOOVZA23SX4THWSG4Q",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "NWV3BOSAYUZPCQDT44XHISKD27673UTD7WYHGEARAJZS3T2VDOPZWBXC4Y",
+          "pairId": "3720386195",
+          "reserves": {
+            "asset0": "5228.671637049",
+            "asset1": "931.966551185"
+          }
+        },
+        {
+          "asset0In": "1319.530629",
+          "asset1Out": "199.963463",
+          "priceNative": "0.1515413576655976206218097572",
+          "metadata": {
+            "fees0In": "0.1319530629"
+          },
+          "block": {
+            "blockNumber": 65666078,
+            "blockTimestamp": 1791125137
+          },
+          "eventType": "swap",
+          "txnId": "7VFRWM7DNA7ENAKQJZFOOBBJQWEEXANWWNWOOVZA23SX4THWSG4Q",
+          "txnIndex": 1,
+          "eventIndex": 1,
+          "maker": "NWV3BOSAYUZPCQDT44XHISKD27673UTD7WYHGEARAJZS3T2VDOPZWBXC4Y",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1063142.527832176",
+            "asset1": "234013.713557844"
+          }
+        },
+        {
+          "asset0In": "299.296592",
+          "asset1Out": "45.357659",
+          "priceNative": "0.151547529147942987603413807",
+          "metadata": {
+            "fees0In": "0.0299296592"
+          },
+          "block": {
+            "blockNumber": 65666078,
+            "blockTimestamp": 1791125137
+          },
+          "eventType": "swap",
+          "txnId": "R4P3IB2KCLM4A26GKYQOU7YOIFV4OPWBMBHA5ANSZUQVVYFEDQJA",
+          "txnIndex": 2,
+          "eventIndex": 0,
+          "maker": "NWV3BOSAYUZPCQDT44XHISKD27673UTD7WYHGEARAJZS3T2VDOPZWBXC4Y",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1061822.997203176",
+            "asset1": "234213.677020844"
+          }
+        },
+        {
+          "asset1In": "2.41269",
+          "asset0Out": "300.697423",
+          "priceNative": "0.0080236470799418856343175246",
+          "metadata": {
+            "fees1In": "0.0241269"
+          },
+          "block": {
+            "blockNumber": 65666078,
+            "blockTimestamp": 1791125137
+          },
+          "eventType": "swap",
+          "txnId": "R4P3IB2KCLM4A26GKYQOU7YOIFV4OPWBMBHA5ANSZUQVVYFEDQJA",
+          "txnIndex": 2,
+          "eventIndex": 1,
+          "maker": "NWV3BOSAYUZPCQDT44XHISKD27673UTD7WYHGEARAJZS3T2VDOPZWBXC4Y",
+          "pairId": "3720386195",
+          "reserves": {
+            "asset0": "6549.330354049",
+            "asset1": "921.360957185"
+          }
+        },
+        {
+          "asset0In": "239.523863",
+          "asset1Out": "4.812613",
+          "priceNative": "0.020092415593681369442509367",
+          "metadata": {
+            "fees0In": "0.239523863"
+          },
+          "block": {
+            "blockNumber": 65666082,
+            "blockTimestamp": 1791125148
+          },
+          "eventType": "swap",
+          "txnId": "LVSKXZNMREIVUCNFC76YYHQGUTGHAY4W4MAVJQT2BTWUQRRELOUQ",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "HLQCZ5ANL7PZERVGCPU7T4KCKRFHYZTFRULIHXMJJKDXZ2DTB5XUMXA3K4",
+          "pairId": "3725015704",
+          "reserves": {
+            "asset0": "359446.158166",
+            "asset1": "52.947217"
+          }
+        },
+        {
+          "asset1In": "1.925094",
+          "asset0Out": "239.523863",
+          "priceNative": "0.0080371699750016139310512039",
+          "metadata": {
+            "fees1In": "0.01925094"
+          },
+          "block": {
+            "blockNumber": 65666082,
+            "blockTimestamp": 1791125148
+          },
+          "eventType": "swap",
+          "txnId": "LVSKXZNMREIVUCNFC76YYHQGUTGHAY4W4MAVJQT2BTWUQRRELOUQ",
+          "txnIndex": 1,
+          "eventIndex": 1,
+          "maker": "HLQCZ5ANL7PZERVGCPU7T4KCKRFHYZTFRULIHXMJJKDXZ2DTB5XUMXA3K4",
+          "pairId": "3720386195",
+          "reserves": {
+            "asset0": "4989.147774049",
+            "asset1": "933.891645185"
+          }
+        },
+        {
+          "asset0In": "419.947246",
+          "asset1Out": "63.629689",
+          "priceNative": "0.1515182909426675940148920515",
+          "metadata": {
+            "fees0In": "0.0419947246"
+          },
+          "block": {
+            "blockNumber": 65666087,
+            "blockTimestamp": 1791125162
+          },
+          "eventType": "swap",
+          "txnId": "BF5IEDFR6EQLPCXFMQPIXGSOKL5B34TGVE343WOO6SR6HQMGMMXA",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1063729.480974176",
+            "asset1": "233924.779047844"
+          }
+        },
+        {
+          "asset1In": "8.464686",
+          "asset0Out": "419.947246",
+          "priceNative": "0.0201565460438809497514837852",
+          "metadata": {
+            "fees1In": "0.008464686"
+          },
+          "block": {
+            "blockNumber": 65666087,
+            "blockTimestamp": 1791125162
+          },
+          "eventType": "swap",
+          "txnId": "BF5IEDFR6EQLPCXFMQPIXGSOKL5B34TGVE343WOO6SR6HQMGMMXA",
+          "txnIndex": 1,
+          "eventIndex": 1,
+          "maker": "7YZORIFPVIGBU4Y2KPCKXYWDJE2VQT5EKFZ2NEYETMQGAHMQNJCBHIZPFU",
+          "pairId": "3725015704",
+          "reserves": {
+            "asset0": "359026.21092",
+            "asset1": "61.411903"
+          }
+        },
+        {
+          "asset1In": "0.00003969",
+          "asset0Out": "167.011231",
+          "priceNative": "0.0000002376486884286243001227",
+          "metadata": {
+            "fees1In": "0.00000003969"
+          },
+          "block": {
+            "blockNumber": 65666087,
+            "blockTimestamp": 1791125162
+          },
+          "eventType": "swap",
+          "txnId": "JQWJ7KGEI3CHZ7RQTJJIDHNGAWDKG7VGYUCGWTC7A4LYMIECRIFQ",
+          "txnIndex": 2,
+          "eventIndex": 0,
+          "maker": "KPGZQSROD2LMG2B5337IAUQVLVXTXUSCKP5YMYX6GHCTIE4CITQWVNVIKA",
+          "pairId": "3726984046",
+          "reserves": {
+            "asset0": "154478.422711",
+            "asset1": "0.00968445"
+          }
+        },
+        {
+          "asset0In": "167.005896",
+          "asset1Out": "25.304821",
+          "priceNative": "0.1515205247603952856850036001",
+          "metadata": {
+            "fees0In": "0.0167005896"
+          },
+          "block": {
+            "blockNumber": 65666087,
+            "blockTimestamp": 1791125162
+          },
+          "eventType": "swap",
+          "txnId": "VBGKEWWAIUF2FAHGT6ID3EETRHN33OWDMV65R4766242RH72GSXA",
+          "txnIndex": 3,
+          "eventIndex": 0,
+          "maker": "KPGZQSROD2LMG2B5337IAUQVLVXTXUSCKP5YMYX6GHCTIE4CITQWVNVIKA",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1063309.533728176",
+            "asset1": "233988.408736844"
+          }
+        },
+        {
+          "asset1In": "0.788262",
+          "asset0Out": "5.937497",
+          "priceNative": "0.1327599828682018702493660207",
+          "metadata": {
+            "fees1In": "0.002364786"
+          },
+          "block": {
+            "blockNumber": 65666101,
+            "blockTimestamp": 1791125200
+          },
+          "eventType": "swap",
+          "txnId": "EEYAHZB75R4DJMXQXBOXRQOUGUSGN545YMZOIRDROHT4IGCMXQPA",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "HLQCZ5ANL7PZERVGCPU7T4KCKRFHYZTFRULIHXMJJKDXZ2DTB5XUMXA3K4",
+          "pairId": "3725776533",
+          "reserves": {
+            "asset0": "286.481123323",
+            "asset1": "27.267890974"
+          }
+        }
+      ]
+    },
+    {
+      "name": "join/swap events, blocks 65661691-65662126",
+      "fromBlock": 65661691,
+      "toBlock": 65662126,
+      "events": [
+        {
+          "asset0In": "800.37205",
+          "asset1Out": "15.907077",
+          "priceNative": "0.0198746033172947506100444162",
+          "metadata": {
+            "fees0In": "0.80037205"
+          },
+          "block": {
+            "blockNumber": 65661691,
+            "blockTimestamp": 1791113024
+          },
+          "eventType": "swap",
+          "txnId": "BJ767PNT6CUYASE6ONUEYEW3G6RPTO5URSRWQOWWRFYWSIM2HIEQ",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "HLQCZ5ANL7PZERVGCPU7T4KCKRFHYZTFRULIHXMJJKDXZ2DTB5XUMXA3K4",
+          "pairId": "3725020876",
+          "reserves": {
+            "asset0": "3152.217945",
+            "asset1": "6024.150518"
+          }
+        },
+        {
+          "asset1In": "121.374572",
+          "asset0Out": "800.37205",
+          "priceNative": "0.1516476893464733057582408081",
+          "metadata": {
+            "fees1In": "0.0121374572"
+          },
+          "block": {
+            "blockNumber": 65661691,
+            "blockTimestamp": 1791113024
+          },
+          "eventType": "swap",
+          "txnId": "BJ767PNT6CUYASE6ONUEYEW3G6RPTO5URSRWQOWWRFYWSIM2HIEQ",
+          "txnIndex": 1,
+          "eventIndex": 1,
+          "maker": "HLQCZ5ANL7PZERVGCPU7T4KCKRFHYZTFRULIHXMJJKDXZ2DTB5XUMXA3K4",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1051987.688502159",
+            "asset1": "235653.618560588"
+          }
+        },
+        {
+          "asset0In": "0.005933",
+          "asset1Out": "0.005667",
+          "priceNative": "0.9551660205629529748862295635",
+          "metadata": {
+            "fees0In": "0.000005933"
+          },
+          "block": {
+            "blockNumber": 65662106,
+            "blockTimestamp": 1791114177
+          },
+          "eventType": "swap",
+          "txnId": "T7CLC2K52372O6DPI3MOSI7PNEMUON73IC4YBSRJW3PKJXZZG2IQ",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "USFJPKLPDKZOGA64GJ4ESBDHF3RHSQONSU6QGPDT7OOYN3DRYJLAWRNXLE",
+          "pairId": "3098469455",
+          "reserves": {
+            "asset0": "1.225918324",
+            "asset1": "1.586379572"
+          }
+        },
+        {
+          "asset1In": "0.044437",
+          "asset0Out": "0.293018",
+          "priceNative": "0.1516527994867209522964459521",
+          "metadata": {
+            "fees1In": "0.0000044437"
+          },
+          "block": {
+            "blockNumber": 65662106,
+            "blockTimestamp": 1791114177
+          },
+          "eventType": "swap",
+          "txnId": "T7CLC2K52372O6DPI3MOSI7PNEMUON73IC4YBSRJW3PKJXZZG2IQ",
+          "txnIndex": 1,
+          "eventIndex": 1,
+          "maker": "USFJPKLPDKZOGA64GJ4ESBDHF3RHSQONSU6QGPDT7OOYN3DRYJLAWRNXLE",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1051946.278031176",
+            "asset1": "235710.640748844"
+          }
+        },
+        {
+          "asset1In": "0.381333",
+          "asset0Out": "21.342621",
+          "priceNative": "0.017867205719484968598748954",
+          "metadata": {
+            "fees1In": "0.001143999"
+          },
+          "block": {
+            "blockNumber": 65662110,
+            "blockTimestamp": 1791114188
+          },
+          "eventType": "swap",
+          "txnId": "VBQL27UKZCKYFPIH3IVOPNOT7V2GTPU6ISPX4LFPMQ4CA5QL256A",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "USFJPKLPDKZOGA64GJ4ESBDHF3RHSQONSU6QGPDT7OOYN3DRYJLAWRNXLE",
+          "pairId": "3727171846",
+          "reserves": {
+            "asset0": "418.442825",
+            "asset1": "34.272122"
+          }
+        },
+        {
+          "asset1In": "0.427802",
+          "asset0Out": "0.381333",
+          "priceNative": "1.1218593722546960268321912869",
+          "metadata": {
+            "fees1In": "0.001283406"
+          },
+          "block": {
+            "blockNumber": 65662110,
+            "blockTimestamp": 1791114188
+          },
+          "eventType": "swap",
+          "txnId": "VBQL27UKZCKYFPIH3IVOPNOT7V2GTPU6ISPX4LFPMQ4CA5QL256A",
+          "txnIndex": 1,
+          "eventIndex": 1,
+          "maker": "USFJPKLPDKZOGA64GJ4ESBDHF3RHSQONSU6QGPDT7OOYN3DRYJLAWRNXLE",
+          "pairId": "3727377956",
+          "reserves": {
+            "asset0": "81.329756",
+            "asset1": "22.110389"
+          }
+        },
+        {
+          "asset1In": "8.168584",
+          "asset0Out": "0.007332",
+          "priceNative": "1114.1003818876159301691216585",
+          "metadata": {
+            "fees1In": "0.008168584"
+          },
+          "block": {
+            "blockNumber": 65662112,
+            "blockTimestamp": 1791114193
+          },
+          "eventType": "swap",
+          "txnId": "BTXYM764X3GWZB2UBLQJULVE4R7XDO6K7QY7OADOXX7WPWOXBPBA",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "USFJPKLPDKZOGA64GJ4ESBDHF3RHSQONSU6QGPDT7OOYN3DRYJLAWRNXLE",
+          "pairId": "3720804577",
+          "reserves": {
+            "asset0": "25.683391",
+            "asset1": "5856.893326"
+          }
+        },
+        {
+          "asset1In": "1.641162",
+          "asset0Out": "204.63964",
+          "priceNative": "0.0080197658674536370372817309",
+          "metadata": {
+            "fees1In": "0.01641162"
+          },
+          "block": {
+            "blockNumber": 65662114,
+            "blockTimestamp": 1791114199
+          },
+          "eventType": "swap",
+          "txnId": "4VUE5XYEXTS7AFYJRH3BBWYXEDDV76GM5WF2ZKMD3BHIQ23H45WQ",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "USFJPKLPDKZOGA64GJ4ESBDHF3RHSQONSU6QGPDT7OOYN3DRYJLAWRNXLE",
+          "pairId": "3720386195",
+          "reserves": {
+            "asset0": "7054.623115049",
+            "asset1": "917.307105185"
+          }
+        },
+        {
+          "asset0In": "190.626147",
+          "asset1Out": "28.902933",
+          "priceNative": "0.1516210312953553008654159075",
+          "metadata": {
+            "fees0In": "0.0190626147"
+          },
+          "block": {
+            "blockNumber": 65662116,
+            "blockTimestamp": 1791114204
+          },
+          "eventType": "swap",
+          "txnId": "2YTQ627K5O6BSGMBO7S4RELCTZQM7QTEJT2H3N2UXPSQNASQSYUA",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "USFJPKLPDKZOGA64GJ4ESBDHF3RHSQONSU6QGPDT7OOYN3DRYJLAWRNXLE",
+          "pairId": "3136517663",
+          "reserves": {
+            "asset0": "1052136.904178176",
+            "asset1": "235681.737815844"
+          }
+        },
+        {
+          "asset1In": "1.641162",
+          "asset0Out": "204.595338",
+          "priceNative": "0.0080215024254364974826552499",
+          "metadata": {
+            "fees1In": "0.01641162"
+          },
+          "block": {
+            "blockNumber": 65662116,
+            "blockTimestamp": 1791114204
+          },
+          "eventType": "swap",
+          "txnId": "2YTQ627K5O6BSGMBO7S4RELCTZQM7QTEJT2H3N2UXPSQNASQSYUA",
+          "txnIndex": 1,
+          "eventIndex": 1,
+          "maker": "USFJPKLPDKZOGA64GJ4ESBDHF3RHSQONSU6QGPDT7OOYN3DRYJLAWRNXLE",
+          "pairId": "3720386195",
+          "reserves": {
+            "asset0": "6850.027777049",
+            "asset1": "918.948267185"
+          }
+        },
+        {
+          "asset1In": "31.021232",
+          "asset0Out": "0.027838",
+          "priceNative": "1114.3484445721675407716071557",
+          "metadata": {
+            "fees1In": "0.031021232"
+          },
+          "block": {
+            "blockNumber": 65662116,
+            "blockTimestamp": 1791114204
+          },
+          "eventType": "swap",
+          "txnId": "2YTQ627K5O6BSGMBO7S4RELCTZQM7QTEJT2H3N2UXPSQNASQSYUA",
+          "txnIndex": 1,
+          "eventIndex": 2,
+          "maker": "USFJPKLPDKZOGA64GJ4ESBDHF3RHSQONSU6QGPDT7OOYN3DRYJLAWRNXLE",
+          "pairId": "3720804577",
+          "reserves": {
+            "asset0": "25.655553",
+            "asset1": "5887.914558"
+          }
+        },
+        {
+          "asset1In": "0.000014",
+          "asset0Out": "0.102657",
+          "priceNative": "0.0001363764770059518591036169",
+          "metadata": {
+            "fees1In": "0.000000014"
+          },
+          "block": {
+            "blockNumber": 65662118,
+            "blockTimestamp": 1791114210
+          },
+          "eventType": "swap",
+          "txnId": "WDQE5GSVRK4S2Y7G7KS72MAQTK2KLQSM22P6XV3CH7HCB5YMIIIQ",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "USFJPKLPDKZOGA64GJ4ESBDHF3RHSQONSU6QGPDT7OOYN3DRYJLAWRNXLE",
+          "pairId": "3721772702",
+          "reserves": {
+            "asset0": "162319.620013",
+            "asset1": "18.058417"
+          }
+        },
+        {
+          "asset1In": "0.000013",
+          "asset0Out": "0.129869",
+          "priceNative": "0.0001001008708775766349167238",
+          "metadata": {
+            "fees1In": "0.000000013"
+          },
+          "block": {
+            "blockNumber": 65662118,
+            "blockTimestamp": 1791114210
+          },
+          "eventType": "swap",
+          "txnId": "WDQE5GSVRK4S2Y7G7KS72MAQTK2KLQSM22P6XV3CH7HCB5YMIIIQ",
+          "txnIndex": 1,
+          "eventIndex": 1,
+          "maker": "USFJPKLPDKZOGA64GJ4ESBDHF3RHSQONSU6QGPDT7OOYN3DRYJLAWRNXLE",
+          "pairId": "3721772586",
+          "reserves": {
+            "asset0": "0.006351",
+            "asset1": "19.776527"
+          }
+        },
+        {
+          "amount0": "398.549045",
+          "amount1": "0.035351",
+          "block": {
+            "blockNumber": 65662126,
+            "blockTimestamp": 1791114232
+          },
+          "eventType": "join",
+          "txnId": "G77DGPNZK562IHIRSCEWSIP5UM4DYYVSO2T7T4735AHTMRWUDH5A",
+          "txnIndex": 1,
+          "eventIndex": 0,
+          "maker": "USFJPKLPDKZOGA64GJ4ESBDHF3RHSQONSU6QGPDT7OOYN3DRYJLAWRNXLE",
+          "pairId": "3721772702",
+          "reserves": {
+            "asset0": "162718.169058",
+            "asset1": "18.093768"
+          }
+        }
+      ]
+    }
+  ],
+  "pairs": [
+    {
+      "id": "3136517663",
+      "dexKey": "biatec",
+      "asset0Id": "452399768",
+      "asset1Id": "0",
+      "feeBps": 1
+    },
+    {
+      "id": "3720386195",
+      "dexKey": "biatec",
+      "asset0Id": "452399768",
+      "asset1Id": "3203964481",
+      "feeBps": 100
+    },
+    {
+      "id": "3720386326",
+      "dexKey": "biatec",
+      "asset0Id": "452399768",
+      "asset1Id": "3203964481",
+      "feeBps": 100
+    },
+    {
+      "id": "3725020876",
+      "dexKey": "biatec",
+      "asset0Id": "452399768",
+      "asset1Id": "31566704",
+      "feeBps": 10
+    },
+    {
+      "id": "3726984046",
+      "dexKey": "biatec",
+      "asset0Id": "452399768",
+      "asset1Id": "386192725",
+      "feeBps": 10
+    },
+    {
+      "id": "3725015704",
+      "dexKey": "biatec",
+      "asset0Id": "452399768",
+      "asset1Id": "31566704",
+      "feeBps": 10
+    },
+    {
+      "id": "3727377956",
+      "dexKey": "biatec",
+      "asset0Id": "227855942",
+      "asset1Id": "31566704",
+      "feeBps": 30
+    },
+    {
+      "id": "3728194240",
+      "dexKey": "biatec",
+      "asset0Id": "452399768",
+      "asset1Id": "971384592",
+      "feeBps": 10
+    },
+    {
+      "id": "3726980707",
+      "dexKey": "biatec",
+      "asset0Id": "1058926737",
+      "asset1Id": "31566704",
+      "feeBps": 1
+    },
+    {
+      "id": "3725776533",
+      "dexKey": "biatec",
+      "asset0Id": "0",
+      "asset1Id": "31566704",
+      "feeBps": 30
+    },
+    {
+      "id": "3098469455",
+      "dexKey": "biatec",
+      "asset0Id": "1241945177",
+      "asset1Id": "31566704",
+      "feeBps": 10
+    },
+    {
+      "id": "3727171846",
+      "dexKey": "biatec",
+      "asset0Id": "452399768",
+      "asset1Id": "227855942",
+      "feeBps": 30
+    },
+    {
+      "id": "3720804577",
+      "dexKey": "biatec",
+      "asset0Id": "1241944285",
+      "asset1Id": "0",
+      "feeBps": 10
+    },
+    {
+      "id": "3721772702",
+      "dexKey": "biatec",
+      "asset0Id": "452399768",
+      "asset1Id": "1241944285",
+      "feeBps": 10
+    },
+    {
+      "id": "3721772586",
+      "dexKey": "biatec",
+      "asset0Id": "452399768",
+      "asset1Id": "1241944285",
+      "feeBps": 10
+    }
+  ]
+}
