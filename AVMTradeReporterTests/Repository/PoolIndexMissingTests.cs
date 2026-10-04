@@ -3,7 +3,9 @@ using System.Net.Sockets;
 using System.Text;
 using AVMTradeReporter.Model.Configuration;
 using AVMTradeReporter.Repository;
+using AVMTradeReporter.Services.CoinGecko;
 using Elastic.Clients.Elasticsearch;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using PoolModel = AVMTradeReporter.Models.Data.Pool;
@@ -107,7 +109,7 @@ namespace AVMTradeReporterTests.Repository
             using var elastic = new FakeElastic(HttpStatusCode.NotFound, IndexNotFoundBody);
             var ex = await SearchPools(elastic.CreateClient());
             Assert.That(ex, Is.Not.Null, "ThrowExceptions() must throw for a 404");
-            Assert.That(PoolRepository.IsIndexNotFound(ex), Is.True, $"recognised: {ex}");
+            Assert.That(ElasticErrors.IsIndexNotFound(ex, "pools"), Is.True, $"recognised: {ex}");
         }
 
         [Test]
@@ -116,7 +118,7 @@ namespace AVMTradeReporterTests.Repository
             using var elastic = new FakeElastic(HttpStatusCode.NotFound, "<html>not found</html>");
             var ex = await SearchPools(elastic.CreateClient());
             Assert.That(ex, Is.Not.Null);
-            Assert.That(PoolRepository.IsIndexNotFound(ex), Is.False, $"a wrong URL must stay a failed load: {ex}");
+            Assert.That(ElasticErrors.IsIndexNotFound(ex, "pools"), Is.False, $"a wrong URL must stay a failed load: {ex}");
         }
 
         [Test]
@@ -125,7 +127,7 @@ namespace AVMTradeReporterTests.Repository
             using var elastic = new FakeElastic(HttpStatusCode.ServiceUnavailable, IndexNotFoundBody);
             var ex = await SearchPools(elastic.CreateClient());
             Assert.That(ex, Is.Not.Null);
-            Assert.That(PoolRepository.IsIndexNotFound(ex), Is.False, "only a 404 is the index-missing answer");
+            Assert.That(ElasticErrors.IsIndexNotFound(ex, "pools"), Is.False, "only a 404 is the index-missing answer");
         }
 
         [Test]
@@ -149,6 +151,32 @@ namespace AVMTradeReporterTests.Repository
             await repository.InitializeAsync(CancellationToken.None);
 
             Assert.That(repository.PoolLoadSucceeded, Is.False, "a proxy 404 is not Elasticsearch answering");
+        }
+
+        private static string IndexNotFoundFor(string index) => IndexNotFoundBody.Replace("pools", index);
+
+        [TestCase("trades")]
+        [TestCase("liquidity")]
+        public async Task EventSource_AgainstAMissingIndex_AnswersNoEvents_NotAFailure(string index)
+        {
+            // Voi: no trade / liquidity change was ever stored, so the index does not exist and events must be an empty list (200)
+            using var elastic = new FakeElastic(HttpStatusCode.NotFound, IndexNotFoundFor(index));
+            var services = new ServiceCollection().AddSingleton(elastic.CreateClient()).BuildServiceProvider();
+            var source = new ElasticCoinGeckoEventSource(services, Options.Create(new AppConfiguration()));
+
+            if (index == "trades") Assert.That(await source.GetTradesAsync(10, 20, 100, CancellationToken.None), Is.Empty);
+            else Assert.That(await source.GetLiquidityAsync(10, 20, 100, CancellationToken.None), Is.Empty);
+        }
+
+        [Test]
+        public async Task EventSource_AgainstAWrongUrl_StillFails()
+        {
+            using var elastic = new FakeElastic(HttpStatusCode.NotFound, "<html>not found</html>");
+            var services = new ServiceCollection().AddSingleton(elastic.CreateClient()).BuildServiceProvider();
+            var source = new ElasticCoinGeckoEventSource(services, Options.Create(new AppConfiguration()));
+
+            Assert.CatchAsync(() => source.GetTradesAsync(10, 20, 100, CancellationToken.None));
+            await Task.CompletedTask;
         }
     }
 }

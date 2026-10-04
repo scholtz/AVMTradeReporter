@@ -1,6 +1,7 @@
 using AVMTradeReporter.Model.Configuration;
 using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Models.Data.Enums;
+using AVMTradeReporter.Repository;
 using Elastic.Clients.Elasticsearch;
 using Elastic.Clients.Elasticsearch.Core.Search;
 using Microsoft.Extensions.Options;
@@ -50,16 +51,26 @@ namespace AVMTradeReporter.Services.CoinGecko
         private async Task<IReadOnlyList<T>> SearchRangeAsync<T>(string index, string stateField, Func<T, ulong> blockOf, ulong lo, ulong hi, int size, CancellationToken cancellationToken)
         {
             if (_elastic == null) throw new InvalidOperationException("Elasticsearch is not configured");
-            var response = await _elastic.SearchAsync<T>(s => s
-                .Indices(index)
-                .Size(size)
-                .TrackTotalHits(new TrackHits(false))
-                .Sort(so => so.Field(f => f.Field("blockId").Order(SortOrder.Asc)))
-                .Query(q => q.Bool(b => b.Filter(
-                    f => f.Range(r => r.Number(n => n.Field("blockId").Gte(lo).Lte(hi))),
-                    f => ElasticKeywordQuery.DualKeywordTerms(f, stateField, new[] { nameof(TxState.Confirmed) }),
-                    f => ElasticKeywordQuery.DualKeywordTerms(f, "protocol", _protocols)))),
-                cancellationToken);
+            SearchResponse<T> response;
+            try
+            {
+                response = await _elastic.SearchAsync<T>(s => s
+                    .Indices(index)
+                    .Size(size)
+                    .TrackTotalHits(new TrackHits(false))
+                    .Sort(so => so.Field(f => f.Field("blockId").Order(SortOrder.Asc)))
+                    .Query(q => q.Bool(b => b.Filter(
+                        f => f.Range(r => r.Number(n => n.Field("blockId").Gte(lo).Lte(hi))),
+                        f => ElasticKeywordQuery.DualKeywordTerms(f, stateField, new[] { nameof(TxState.Confirmed) }),
+                        f => ElasticKeywordQuery.DualKeywordTerms(f, "protocol", _protocols)))),
+                    cancellationToken);
+            }
+            catch (Exception ex) when (ElasticErrors.IsIndexNotFound(ex, index))
+            {
+                // The client throws for a missing index (ThrowExceptions in Program.cs). A network the DEX has no trade / liquidity
+                // change on yet (Voi) has no such index: Elasticsearch answered, there simply are no events - not a failure.
+                return Array.Empty<T>();
+            }
             if (!response.IsValidResponse) throw new InvalidOperationException($"Elasticsearch {index} query failed: {response.DebugInformation}");
             // The bisection in CoinGeckoService relies on every document being inside [lo, hi] AND on the page size telling
             // whether the page may be truncated - silently dropping a stray document would hide a full page. A document
