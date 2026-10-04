@@ -3,7 +3,9 @@ using System.Net.Sockets;
 using System.Text;
 using AVMTradeReporter.Model.Configuration;
 using AVMTradeReporter.Repository;
+using AVMTradeReporter.Services.CoinGecko;
 using Elastic.Clients.Elasticsearch;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using PoolModel = AVMTradeReporter.Models.Data.Pool;
@@ -107,7 +109,7 @@ namespace AVMTradeReporterTests.Repository
             using var elastic = new FakeElastic(HttpStatusCode.NotFound, IndexNotFoundBody);
             var ex = await SearchPools(elastic.CreateClient());
             Assert.That(ex, Is.Not.Null, "ThrowExceptions() must throw for a 404");
-            Assert.That(PoolRepository.IsIndexNotFound(ex), Is.True, $"recognised: {ex}");
+            Assert.That(ElasticErrors.IsIndexNotFound(ex, "pools"), Is.True, $"recognised: {ex}");
         }
 
         [Test]
@@ -116,7 +118,7 @@ namespace AVMTradeReporterTests.Repository
             using var elastic = new FakeElastic(HttpStatusCode.NotFound, "<html>not found</html>");
             var ex = await SearchPools(elastic.CreateClient());
             Assert.That(ex, Is.Not.Null);
-            Assert.That(PoolRepository.IsIndexNotFound(ex), Is.False, $"a wrong URL must stay a failed load: {ex}");
+            Assert.That(ElasticErrors.IsIndexNotFound(ex, "pools"), Is.False, $"a wrong URL must stay a failed load: {ex}");
         }
 
         [Test]
@@ -125,7 +127,7 @@ namespace AVMTradeReporterTests.Repository
             using var elastic = new FakeElastic(HttpStatusCode.ServiceUnavailable, IndexNotFoundBody);
             var ex = await SearchPools(elastic.CreateClient());
             Assert.That(ex, Is.Not.Null);
-            Assert.That(PoolRepository.IsIndexNotFound(ex), Is.False, "only a 404 is the index-missing answer");
+            Assert.That(ElasticErrors.IsIndexNotFound(ex, "pools"), Is.False, "only a 404 is the index-missing answer");
         }
 
         [Test]
@@ -149,6 +151,34 @@ namespace AVMTradeReporterTests.Repository
             await repository.InitializeAsync(CancellationToken.None);
 
             Assert.That(repository.PoolLoadSucceeded, Is.False, "a proxy 404 is not Elasticsearch answering");
+        }
+
+        private static string IndexNotFoundFor(string index) => IndexNotFoundBody.Replace("[pools]", $"[{index}]").Replace("\"pools\"", $"\"{index}\"");
+
+        [TestCase("trades")]
+        [TestCase("liquidity")]
+        public void EventSource_AgainstAMissingIndex_ThrowsTheRecognisableAnswer(string index)
+        {
+            // the source does not decide what a missing index means (no data on Voi, lost data elsewhere): it lets CoinGeckoService see it
+            using var elastic = new FakeElastic(HttpStatusCode.NotFound, IndexNotFoundFor(index));
+            var services = new ServiceCollection().AddSingleton(elastic.CreateClient()).BuildServiceProvider();
+            var source = new ElasticCoinGeckoEventSource(services, Options.Create(new AppConfiguration()));
+
+            var ex = index == "trades"
+                ? Assert.CatchAsync(() => source.GetTradesAsync(10, 20, 100, CancellationToken.None))
+                : Assert.CatchAsync(() => source.GetLiquidityAsync(10, 20, 100, CancellationToken.None));
+            Assert.That(ElasticErrors.IsIndexNotFound(ex, index), Is.True, $"recognised: {ex}");
+        }
+
+        [Test]
+        public void EventSource_AgainstAWrongUrl_StillFails()
+        {
+            using var elastic = new FakeElastic(HttpStatusCode.NotFound, "<html>not found</html>");
+            var services = new ServiceCollection().AddSingleton(elastic.CreateClient()).BuildServiceProvider();
+            var source = new ElasticCoinGeckoEventSource(services, Options.Create(new AppConfiguration()));
+
+            var ex = Assert.CatchAsync(() => source.GetTradesAsync(10, 20, 100, CancellationToken.None));
+            Assert.That(ElasticErrors.IsIndexNotFound(ex, "trades"), Is.False, "a proxy 404 is a failure, not an empty result");
         }
     }
 }

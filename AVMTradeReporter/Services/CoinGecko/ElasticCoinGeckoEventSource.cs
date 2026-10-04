@@ -50,6 +50,8 @@ namespace AVMTradeReporter.Services.CoinGecko
         private async Task<IReadOnlyList<T>> SearchRangeAsync<T>(string index, string stateField, Func<T, ulong> blockOf, ulong lo, ulong hi, int size, CancellationToken cancellationToken)
         {
             if (_elastic == null) throw new InvalidOperationException("Elasticsearch is not configured");
+            // A missing index is thrown (ThrowExceptions in Program.cs) and propagates: only CoinGeckoService knows whether "no
+            // index" means "no data" (a network without any published pool: Voi) or "data lost" (it has pools), see ComputeAndCacheAsync.
             var response = await _elastic.SearchAsync<T>(s => s
                 .Indices(index)
                 .Size(size)

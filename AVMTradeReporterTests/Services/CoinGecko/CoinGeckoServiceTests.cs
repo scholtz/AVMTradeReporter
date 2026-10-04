@@ -32,7 +32,8 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             public List<Trade> Trades { get; } = new();
             public List<Liquidity> Liquidity { get; } = new();
             public bool IsAvailable { get; set; } = true;
-            public Exception? Failure { get; set; }
+            public Exception? TradesFailure { get; set; }
+            public Exception? LiquidityFailure { get; set; }
             public TimeSpan QueryDelay { get; set; }
             public int TradeCalls;
             private int _inFlight;
@@ -43,7 +44,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             public Task<IReadOnlyList<Trade>> GetTradesAsync(ulong lo, ulong hi, int size, CancellationToken cancellationToken)
             {
                 Interlocked.Increment(ref TradeCalls);
-                if (Failure != null) throw Failure;
+                if (TradesFailure != null) throw TradesFailure;
                 lock (TradeQueries) TradeQueries.Add((lo, hi, size));
                 return RunAsync(() => (IReadOnlyList<Trade>)Trades.Where(t => t.BlockId >= lo && t.BlockId <= hi).OrderBy(t => t.BlockId).Take(size).ToList());
             }
@@ -51,6 +52,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             public Task<IReadOnlyList<Liquidity>> GetLiquidityAsync(ulong lo, ulong hi, int size, CancellationToken cancellationToken)
             {
                 Interlocked.Increment(ref LiquidityCalls);
+                if (LiquidityFailure != null) throw LiquidityFailure;
                 return RunAsync(() => (IReadOnlyList<Liquidity>)Liquidity.Where(t => t.BlockId >= lo && t.BlockId <= hi).OrderBy(t => t.BlockId).Take(size).ToList());
             }
 
@@ -511,12 +513,12 @@ namespace AVMTradeReporterTests.Services.CoinGecko
         public async Task Events_StorageFailure_IsRetryable503_AndNotCached()
         {
             _source.Trades.Add(Swap("S", 10, 1, 0));
-            _source.Failure = new InvalidOperationException("Elasticsearch trades query failed");
+            _source.TradesFailure = new InvalidOperationException("Elasticsearch trades query failed");
             var service = Create();
 
             Assert.That((await service.GetEventsJsonAsync(10, 10, default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
 
-            _source.Failure = null;
+            _source.TradesFailure = null;
             Assert.That(Events(await service.GetEventsJsonAsync(10, 10, default)), Has.Length.EqualTo(1), "recovers once storage is back, the failure was not remembered");
         }
 
@@ -716,6 +718,78 @@ namespace AVMTradeReporterTests.Services.CoinGecko
 
             Assert.That(Events(await service.GetEventsJsonAsync(10, 10, default)), Has.Length.EqualTo(50));
             Assert.That(calls.Value, Is.EqualTo(1), "one snapshot load, not one per event");
+        }
+
+        private static Exception ElasticIndexMissing(string index) =>
+            new InvalidOperationException($"Request failed to execute. Call: Status code 404 from: POST /{index}/_search. ServerError: Type: index_not_found_exception Reason: \"no such index [{index}]\"");
+
+        [Test]
+        public async Task Events_MissingEventIndices_OnANetworkWithoutPools_AreAnEmptyRange()
+        {
+            // Voi: no pool, so no trades / liquidity index. Elasticsearch answered - there are no events (200, empty).
+            _pools = new MockPoolRepository { PoolLoadSucceeded = true };
+            _source.TradesFailure = ElasticIndexMissing("trades");
+            _source.LiquidityFailure = ElasticIndexMissing("liquidity");
+            var service = Create();
+
+            var result = await service.GetEventsJsonAsync(10, 20, default);
+
+            Assert.That(result.Outcome, Is.EqualTo(CoinGeckoOutcome.Ok));
+            Assert.That(Events(result), Is.Empty);
+        }
+
+        [Test]
+        public async Task Events_OnlyTheTradesIndexMissing_KeepsWhatTheOtherSourceHas()
+        {
+            // the missing source is empty, the other source is NOT discarded
+            _source.TradesFailure = ElasticIndexMissing("trades");
+            _source.Liquidity.Add(new Liquidity
+            {
+                Direction = LiquidityDirection.DepositLiquidity, AssetIdA = 0, AssetIdB = 31566704, AssetAmountA = 2_000_000, AssetAmountB = 300_000,
+                A = 1_000_000_000, B = 2_000_000_000, TxId = "L1", TopTxId = "TOP-L1", BlockId = 12, Timestamp = Time, LiquidityProvider = "LP",
+                PoolAppId = PoolAppId, TxnIndex = 2, EventIndex = 0,
+            });
+            var service = Create(); // a pool exists, only the trades index does not (a pool with liquidity but no swap yet)
+
+            var events = Events(await service.GetEventsJsonAsync(10, 20, default));
+
+            Assert.That(events, Has.Length.EqualTo(1), "the liquidity source is kept, the missing trades source is empty");
+        }
+
+        [Test]
+        public async Task Events_OnlyTheLiquidityIndexMissing_KeepsTheSwaps()
+        {
+            _source.LiquidityFailure = ElasticIndexMissing("liquidity");
+            _source.Trades.Add(Swap("S1", 12, txn: 9, ev: 0));
+            var service = Create();
+
+            Assert.That(Events(await service.GetEventsJsonAsync(10, 20, default)), Has.Length.EqualTo(1));
+        }
+
+        [Test]
+        public async Task Events_AMissingIndexDoesNotHideARealFailureOfTheOtherSource()
+        {
+            _pools = new MockPoolRepository { PoolLoadSucceeded = true };
+            _source.TradesFailure = ElasticIndexMissing("trades");
+            _source.LiquidityFailure = new InvalidOperationException("connection refused");
+            var service = Create();
+
+            Assert.That((await service.GetEventsJsonAsync(10, 20, default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
+        }
+
+        [Test]
+        public async Task Events_MissingEventIndices_OnANetworkWithPools_StayARetryable503()
+        {
+            // data that should exist is gone / not restored: an empty answer would be cached and skipped for good
+            _source.TradesFailure = ElasticIndexMissing("trades");
+            _source.LiquidityFailure = ElasticIndexMissing("liquidity");
+            var service = Create();
+
+            Assert.That((await service.GetEventsJsonAsync(10, 20, default)).Outcome, Is.EqualTo(CoinGeckoOutcome.Unavailable));
+            _source.TradesFailure = null;
+            _source.LiquidityFailure = null;
+            _source.Trades.Add(Swap("T1", 10, 1, 0));
+            Assert.That(Events(await service.GetEventsJsonAsync(10, 20, default)), Has.Length.EqualTo(1), "nothing was cached as final");
         }
 
         [Test]
