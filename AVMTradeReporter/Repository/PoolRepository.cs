@@ -315,7 +315,9 @@ namespace AVMTradeReporter.Repository
             {
                 // The client is built with ThrowExceptions() (Program.cs), so a missing 'pools' index does NOT come back as an
                 // invalid response above - it is thrown. This is the normal state of a network the DEX has no pool on yet (Voi):
-                // the backend answered, there is simply nothing stored.
+                // the backend answered, there is simply nothing stored. Deliberate trade-off: a wiped / wrong cluster reads the
+                // same way and is not retried (pools written later still enter the cache); PoolIndexMissingTests pin the
+                // recognition against the real client, including the EnableDebugMode text it relies on.
                 _backendAnswered = true;
                 _logger.LogWarning("Elasticsearch has no 'pools' index yet - no pool has ever been stored");
                 return 0;

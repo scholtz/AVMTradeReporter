@@ -30,13 +30,25 @@ namespace AVMTradeReporterTests.Repository
 
             public FakeElastic(HttpStatusCode searchStatus, string searchBody)
             {
-                var probe = new TcpListener(IPAddress.Loopback, 0); // a free port chosen by the OS: no collisions between parallel runs
-                probe.Start();
-                var port = ((IPEndPoint)probe.LocalEndpoint).Port;
-                probe.Stop();
-                Url = new Uri($"http://127.0.0.1:{port}");
-                _listener.Prefixes.Add($"http://127.0.0.1:{port}/");
-                _listener.Start();
+                // a port the OS hands out, bound for real by the HttpListener; another process can steal it in between, so retry
+                for (var attempt = 0; ; attempt++)
+                {
+                    var probe = new TcpListener(IPAddress.Loopback, 0);
+                    probe.Start();
+                    var port = ((IPEndPoint)probe.LocalEndpoint).Port;
+                    probe.Stop();
+                    try
+                    {
+                        _listener.Prefixes.Clear();
+                        _listener.Prefixes.Add($"http://127.0.0.1:{port}/");
+                        _listener.Start();
+                        Url = new Uri($"http://127.0.0.1:{port}");
+                        break;
+                    }
+                    catch (HttpListenerException) when (attempt < 5)
+                    {
+                    }
+                }
                 _serve = Task.Run(async () =>
                 {
                     while (_listener.IsListening)
@@ -47,7 +59,7 @@ namespace AVMTradeReporterTests.Repository
                         var bytes = Encoding.UTF8.GetBytes(isSearch ? searchBody : "{\"acknowledged\":true}");
                         ctx.Response.StatusCode = isSearch ? (int)searchStatus : 200;
                         ctx.Response.ContentType = "application/json";
-                        ctx.Response.Headers.Add("X-Elastic-Product", "Elasticsearch");
+                        ctx.Response.Headers.Set("X-Elastic-Product", "Elasticsearch");
                         ctx.Response.ContentLength64 = bytes.Length;
                         await ctx.Response.OutputStream.WriteAsync(bytes);
                         ctx.Response.Close();

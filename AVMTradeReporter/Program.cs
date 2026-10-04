@@ -218,6 +218,8 @@ namespace AVMTradeReporter
                 var settings = new ElasticsearchClientSettings(new Uri(appConfig.Elastic.Host))
                 .Authentication(new Elastic.Transport.ApiKey(appConfig.Elastic.ApiKey ?? throw new Exception("Api key for elastic is null")))
                 .ThrowExceptions()
+                // PoolRepository.IsIndexNotFound reads the server error from the thrown exception text, which carries it only in
+                // debug mode - keep PoolIndexMissingTests green when changing either
                 .EnableDebugMode()
                 .EnableHttpCompression()
                 .PrettyJson()
