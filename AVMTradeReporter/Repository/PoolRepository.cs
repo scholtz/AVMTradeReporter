@@ -311,11 +311,40 @@ namespace AVMTradeReporter.Repository
                 _logger.LogError("Failed to load pools from Elasticsearch: {error}", searchResponse.DebugInformation);
                 return 0;
             }
+            catch (Exception ex) when (IsIndexNotFound(ex))
+            {
+                // The client is built with ThrowExceptions() (Program.cs), so a missing 'pools' index does NOT come back as an
+                // invalid response above - it is thrown. This is the normal state of a network the DEX has no pool on yet (Voi):
+                // the backend answered, there is simply nothing stored. Deliberate trade-off: a wiped / wrong cluster reads the
+                // same way and is not retried (pools written later still enter the cache); PoolIndexMissingTests pin the
+                // recognition against the real client, including the EnableDebugMode text it relies on.
+                _backendAnswered = true;
+                _logger.LogWarning("Elasticsearch has no 'pools' index yet - no pool has ever been stored");
+                return 0;
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to load pools from Elasticsearch");
                 return 0;
             }
+        }
+
+        /// <summary>
+        /// True when the exception (or an inner one) is Elasticsearch's own "index_not_found_exception" answer for the pool index -
+        /// the server replied 404, the index does not exist. Anything else (connection refused, timeout, auth, a 503, a bare 404
+        /// from a proxy) is a failed load, not an answer. The thrown client exception exposes the server error only through its
+        /// message (EnableDebugMode), so the text is matched; the status code is checked structurally when the exception has one.
+        /// </summary>
+        public static bool IsIndexNotFound(Exception? ex)
+        {
+            for (var depth = 0; ex != null && depth < 8; ex = ex.InnerException, depth++)
+            {
+                if (ex is Elastic.Transport.TransportException transport && transport.ApiCallDetails?.HttpStatusCode is int status && status != 404)
+                    continue; // another status can quote the token without being the answer
+                if (ex.Message.Contains("index_not_found_exception", StringComparison.Ordinal)
+                    && ex.Message.Contains("[pools]", StringComparison.Ordinal)) return true;
+            }
+            return false;
         }
 
         private async Task SaveAllPoolsToRedis(CancellationToken cancellationToken)
