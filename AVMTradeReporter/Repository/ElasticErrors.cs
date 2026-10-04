@@ -8,8 +8,9 @@ namespace AVMTradeReporter.Repository
         /// <paramref name="index"/> - the server replied 404, the index does not exist (a network the DEX has no pool / trade on
         /// yet: Voi). Anything else (connection refused, timeout, auth, a 503, a bare 404 from a proxy) is a failed call, not an
         /// answer. The thrown client exception exposes the server error only through its message (EnableDebugMode in Program.cs),
-        /// so the text is matched; the status code is checked structurally when the exception has one. ElasticErrorsTests pin
-        /// this against the real client.
+        /// so the text is matched; the status code is checked structurally when the exception has one. PoolIndexMissingTests pin
+        /// this against the real client (and ElasticErrorsTests the edge cases). Deliberate trade-off: callers read a missing index as
+        /// "nothing stored", so a wiped cluster looks the same on a network that does have data.
         /// </summary>
         public static bool IsIndexNotFound(Exception? ex, string index)
         {

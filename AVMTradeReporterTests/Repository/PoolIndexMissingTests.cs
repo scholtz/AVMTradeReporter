@@ -153,7 +153,7 @@ namespace AVMTradeReporterTests.Repository
             Assert.That(repository.PoolLoadSucceeded, Is.False, "a proxy 404 is not Elasticsearch answering");
         }
 
-        private static string IndexNotFoundFor(string index) => IndexNotFoundBody.Replace("pools", index);
+        private static string IndexNotFoundFor(string index) => IndexNotFoundBody.Replace("[pools]", $"[{index}]").Replace("\"pools\"", $"\"{index}\"");
 
         [TestCase("trades")]
         [TestCase("liquidity")]
@@ -169,14 +169,14 @@ namespace AVMTradeReporterTests.Repository
         }
 
         [Test]
-        public async Task EventSource_AgainstAWrongUrl_StillFails()
+        public void EventSource_AgainstAWrongUrl_StillFails()
         {
             using var elastic = new FakeElastic(HttpStatusCode.NotFound, "<html>not found</html>");
             var services = new ServiceCollection().AddSingleton(elastic.CreateClient()).BuildServiceProvider();
             var source = new ElasticCoinGeckoEventSource(services, Options.Create(new AppConfiguration()));
 
-            Assert.CatchAsync(() => source.GetTradesAsync(10, 20, 100, CancellationToken.None));
-            await Task.CompletedTask;
+            var ex = Assert.CatchAsync(() => source.GetTradesAsync(10, 20, 100, CancellationToken.None));
+            Assert.That(ElasticErrors.IsIndexNotFound(ex, "trades"), Is.False, "a proxy 404 is a failure, not an empty result");
         }
     }
 }
