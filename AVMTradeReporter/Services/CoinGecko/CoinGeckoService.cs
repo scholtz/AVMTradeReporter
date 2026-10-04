@@ -297,9 +297,9 @@ namespace AVMTradeReporter.Services.CoinGecko
         /// <summary>The pool cache loaded fine and holds no pool of a published protocol (not even an undescribable one): no event can exist.</summary>
         private async Task<bool> HasNoPublishedPoolsAsync(CancellationToken cancellationToken)
         {
-            // fresh enough to see a pool created moments ago (rate limited, in memory only, like an unknown pool id lookup)
-            var snapshot = await GetSnapshotAsync(MissingPoolRefreshInterval, cancellationToken);
-            return !snapshot.PoolCacheEmpty && snapshot.Pairs.Count == 0 && snapshot.Unresolved.Count == 0;
+            // forced fresh (only reached when both event indices are missing, which is rare): a pool created moments ago must be seen
+            var snapshot = await GetSnapshotAsync(TimeSpan.Zero, cancellationToken);
+            return !snapshot.PoolCacheEmpty && snapshot.Pairs.Count == 0 && snapshot.Unresolved.Count == 0 && snapshot.Excluded.Count == 0;
         }
 
         /// <summary>The source's result, or null when Elasticsearch answered that the source's index does not exist; every other failure propagates.</summary>
@@ -589,11 +589,13 @@ namespace AVMTradeReporter.Services.CoinGecko
             }
 
             // Elasticsearch has no trades and / or liquidity index. On a network without any published pool (Voi) that is simply
-            // "no events" for that source; on a network WITH pools it means the data is gone or not restored yet - answering an
+            // "no events"; on a network WITH pools, both indices missing means the data is gone or not restored yet - answering an
             // empty range would be cached and the consumer would skip it for good, so that stays a retryable 503. Checked after the
             // gate slot is released (the snapshot may wait for a rebuild) and against a fresh snapshot (a pool created moments ago).
-            if ((tradesOrMissing == null || liquidityOrMissing == null) && !await HasNoPublishedPoolsAsync(cancellationToken))
-                throw new TransientDataException("the Elasticsearch " + (tradesOrMissing == null ? "trades" : "liquidity") + " index is missing although pools exist");
+            // One missing index next to a working one is normal (an index is created by its first document: a pool with liquidity
+            // but no swap yet) - that source simply has no events. Both missing next to pools is lost data.
+            if (tradesOrMissing == null && liquidityOrMissing == null && !await HasNoPublishedPoolsAsync(cancellationToken))
+                throw new TransientDataException("the Elasticsearch trades and liquidity indices are both missing although pools exist");
             var trades = (tradesOrMissing ?? new List<Trade>()).DistinctBy(t => t.TxId).ToList();
             var liquidity = (liquidityOrMissing ?? new List<Liquidity>()).DistinctBy(l => l.TxId).ToList();
 
