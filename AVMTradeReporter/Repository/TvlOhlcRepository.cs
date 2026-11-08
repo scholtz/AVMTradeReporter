@@ -97,6 +97,16 @@ namespace AVMTradeReporter.Repository
             return result;
         }
 
+        /// <summary>Allowed distance between a tick's timestamp and the wall clock (clock skew / scheduling jitter).</summary>
+        internal static readonly TimeSpan LiveTickTolerance = TimeSpan.FromMinutes(5);
+
+        /// <summary>
+        /// True when <paramref name="timestamp"/> is the compute time of a live TVL observation, i.e. within
+        /// <see cref="LiveTickTolerance"/> of <paramref name="now"/>. Pure/synchronous so it is unit-testable.
+        /// </summary>
+        internal static bool IsLiveTickTimestamp(DateTimeOffset timestamp, DateTimeOffset now)
+            => (now - timestamp).Duration() <= LiveTickTolerance;
+
         /// <summary>
         /// Builds the single real-time tick for a TVL update. Unlike price OHLC (which can fan out
         /// into an asset-valuation tick plus up to two USD-valuation ticks per trade), a TVL change is
@@ -137,6 +147,17 @@ namespace AVMTradeReporter.Repository
         /// </summary>
         public async Task UpdateFromTvlChangeAsync(ulong assetId, decimal tvlUsd, DateTimeOffset timestamp, CancellationToken cancellationToken)
         {
+            // Enforce the contract above in the repository, not only at the one call site: a stale
+            // timestamp would permanently pollute a historical candle (high/low only ever widen).
+            if (!IsLiveTickTimestamp(timestamp, DateTimeOffset.UtcNow))
+            {
+                _logger.LogWarning(
+                    "Ignoring TVL tick for asset {assetId}: timestamp {timestamp:O} is not the compute time (now {now:O}). " +
+                    "A TVL value is 'as of now' - writing it into an older bucket would corrupt that candle.",
+                    assetId, timestamp, DateTimeOffset.UtcNow);
+                return;
+            }
+
             var buckets = GetIntervalBuckets(assetId, tvlUsd, timestamp);
             if (buckets.Count == 0) return;
 
