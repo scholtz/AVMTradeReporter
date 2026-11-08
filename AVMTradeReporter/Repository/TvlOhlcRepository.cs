@@ -129,6 +129,11 @@ namespace AVMTradeReporter.Repository
         /// updates are not blocked on ES, same ordering as <see cref="OHLCRepository.UpdateFromTradeAsync"/>),
         /// then upserts one bucket document per interval via a painless script (open set only once,
         /// high/low widen, close overwrites, lastUpdated stamped).
+        ///
+        /// <paramref name="timestamp"/> must be the moment <paramref name="tvlUsd"/> was computed (i.e. now
+        /// for the live path). A TVL value is "as of now"; passing an older time (e.g. an aggregated pair's
+        /// last-trade time) writes today's TVL into a historical bucket, whose high/low can only ever widen
+        /// and never recover - that is what made the 7d Real TVL chart stripy.
         /// </summary>
         public async Task UpdateFromTvlChangeAsync(ulong assetId, decimal tvlUsd, DateTimeOffset timestamp, CancellationToken cancellationToken)
         {

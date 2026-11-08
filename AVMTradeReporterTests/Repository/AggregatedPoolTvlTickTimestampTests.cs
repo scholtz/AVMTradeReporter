@@ -63,13 +63,18 @@ namespace AVMTradeReporterTests.Repository
             await repository.UpdateForPairAsync(ALGO, USDC, new[] { pool });
             var after = DateTimeOffset.UtcNow;
 
-            var algoTicks = ticks.Where(t => t.AssetId == ALGO).ToList();
-            Assert.That(algoTicks, Is.Not.Empty, "the recompute must emit an ALGO TVL tick for this test to be meaningful");
-            foreach (var tick in algoTicks)
+            // Both always-affected series: ALGO (trusted USDC side = $100k) and the USD reference asset
+            // (trusted ALGO side = 1M ALGO x $0.10 = $100k).
+            foreach (var assetId in new[] { ALGO, USDC })
             {
-                Assert.That(tick.Timestamp, Is.InRange(before.ToUnixTimeSeconds() - 1, after.ToUnixTimeSeconds() + 1),
-                    "A TVL tick is the TVL as of the moment it was computed. Stamping it with the pair's last-trade time " +
-                    $"({staleTradeTime:O}) writes today's TVL into a historical candle and makes the 7d TVL chart stripy.");
+                var assetTicks = ticks.Where(t => t.AssetId == assetId).ToList();
+                Assert.That(assetTicks, Is.Not.Empty, $"the recompute must emit a TVL tick for asset {assetId} for this test to be meaningful");
+                foreach (var tick in assetTicks)
+                {
+                    Assert.That(tick.Timestamp, Is.InRange(before.ToUnixTimeSeconds() - 1, after.ToUnixTimeSeconds() + 1),
+                        "A TVL tick is the TVL as of the moment it was computed. Stamping it with the pair's last-trade time " +
+                        $"({staleTradeTime:O}) writes today's TVL into a historical candle and makes the 7d TVL chart stripy (asset {assetId}).");
+                }
             }
         }
 
