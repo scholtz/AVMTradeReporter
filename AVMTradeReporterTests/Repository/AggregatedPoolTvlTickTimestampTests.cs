@@ -1,12 +1,9 @@
-using AVMTradeReporter.Hubs;
 using AVMTradeReporter.Model.Configuration;
 using AVMTradeReporter.Model.DTO.TVL;
 using AVMTradeReporter.Repository;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Moq;
 using PoolModel = AVMTradeReporter.Models.Data.Pool;
 
 namespace AVMTradeReporterTests.Repository
@@ -25,7 +22,8 @@ namespace AVMTradeReporterTests.Repository
     public class AggregatedPoolTvlTickTimestampTests
     {
         private const ulong ALGO = 0UL;
-        private const ulong USDC = 31566704UL; // AppConfiguration default UsdReferenceAssetId
+        // Never hardcode the per-network USD reference asset id: read the configured one.
+        private static readonly ulong USDC = new AppConfiguration().UsdReferenceAssetId;
 
         // 0 = a pair that just traded (normal live path); 400 = a dormant pair a full volume sweep re-stores.
         [TestCase(0)]
@@ -70,7 +68,7 @@ namespace AVMTradeReporterTests.Repository
         private static async Task<(AggregatedPoolRepository Repository, PoolModel Pool, List<TvlTickDto> Ticks)> CreateScenarioAsync(int pairAgeDays)
         {
             var ticks = new List<TvlTickDto>();
-            var hub = CreateCapturingHub(ticks);
+            var hub = TvlTickCapturingHub.Create(ticks);
             var tvlRepository = new TvlOhlcRepository(null!, new LoggerFactory().CreateLogger<TvlOhlcRepository>(), hub);
             var services = new ServiceCollection().AddSingleton(tvlRepository).BuildServiceProvider();
 
@@ -96,23 +94,6 @@ namespace AVMTradeReporterTests.Repository
                 Timestamp = DateTimeOffset.UtcNow.AddDays(-pairAgeDays),
             };
             return (repository, pool, ticks);
-        }
-
-        private static IHubContext<BiatecScanHub> CreateCapturingHub(List<TvlTickDto> sink)
-        {
-            var proxy = new Mock<IClientProxy>();
-            proxy.Setup(p => p.SendCoreAsync(It.IsAny<string>(), It.IsAny<object?[]>(), It.IsAny<CancellationToken>()))
-                .Callback<string, object?[], CancellationToken>((_, args, _) =>
-                {
-                    // IClientProxy delivers its payload as object?[]; the TVL stream always carries one TvlTickDto.
-                    if (args.Length == 1 && args[0] is TvlTickDto tick) lock (sink) sink.Add(tick);
-                })
-                .Returns(Task.CompletedTask);
-            var clients = new Mock<IHubClients>();
-            clients.Setup(c => c.Group(It.IsAny<string>())).Returns(proxy.Object);
-            var hub = new Mock<IHubContext<BiatecScanHub>>();
-            hub.SetupGet(h => h.Clients).Returns(clients.Object);
-            return hub.Object;
         }
     }
 }

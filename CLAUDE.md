@@ -59,19 +59,16 @@ dedicated established-price-gets-guarded-too test).
 
 `AggregatedPoolRepository.RecomputeSingleAssetAsync` writes a TVL tick to
 `TvlOhlcRepository` (ES `tvlohlc` + SignalR) whenever an asset's real TVL
-changes. The tick timestamp must be `DateTimeOffset.UtcNow` - NOT the `asOf`
-argument, which is the triggering pair's `LastUpdated` (its newest pool
-timestamp, i.e. its last trade). ALGO and the USD reference asset are in the
-`affected` set of EVERY aggregated-pool update, and
-`VolumeUpdateBackgroundService`'s periodic full sweep re-stores every pair in
-the system, including pairs untouched for months. Stamping with `asOf` dropped
-today's ALGO/USDC TVL into thousands of historical hourly buckets (observed
-via the SignalR `TVL` stream: tick timestamps 6, 33 and 452 days old), so
-those candles mixed values from different moments and the 7d "Real TVL"
-sparkline was stripy (median hourly high-low range of ALGO 8.4%, USDC 3.6%,
-every other asset <2%). Regression test: `AggregatedPoolTvlTickTimestampTests`.
-Candles polluted before the fix are not repaired (a TVL history cannot be
-reconstructed) - they roll out of the 7d window on their own.
+changes, and the tick timestamp must be `DateTimeOffset.UtcNow` - NOT the
+`asOf` argument, which is the triggering pair's `LastUpdated` (its last trade,
+possibly months old). ALGO and the USD reference asset are in the `affected`
+set of EVERY aggregated-pool update and `VolumeUpdateBackgroundService`'s
+periodic full sweep re-stores every pair, so stamping with `asOf` wrote today's
+ALGO/USDC TVL into historical hourly buckets and made the 7d "Real TVL"
+sparkline stripy (ES high/low only ever widen). `TvlOhlcRepository` enforces
+the contract itself (`IsLiveTickTimestamp`: within a few minutes of now, else
+the tick is dropped with a warning). Regression tests:
+`AggregatedPoolTvlTickTimestampTests`, `TvlOhlcRepositoryTests`.
 
 ## Local production API access for live-data debugging
 

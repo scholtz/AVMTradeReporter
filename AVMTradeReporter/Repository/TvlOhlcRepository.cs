@@ -149,12 +149,13 @@ namespace AVMTradeReporter.Repository
         {
             // Enforce the contract above in the repository, not only at the one call site: a stale
             // timestamp would permanently pollute a historical candle (high/low only ever widen).
-            if (!IsLiveTickTimestamp(timestamp, DateTimeOffset.UtcNow))
+            var now = DateTimeOffset.UtcNow;
+            if (!IsLiveTickTimestamp(timestamp, now))
             {
                 _logger.LogWarning(
                     "Ignoring TVL tick for asset {assetId}: timestamp {timestamp:O} is not the compute time (now {now:O}). " +
                     "A TVL value is 'as of now' - writing it into an older bucket would corrupt that candle.",
-                    assetId, timestamp, DateTimeOffset.UtcNow);
+                    assetId, timestamp, now);
                 return;
             }
 
@@ -166,7 +167,7 @@ namespace AVMTradeReporter.Repository
             if (_elasticClient == null) return;
 
             var bulkRequest = new BulkRequest(IndexName) { Operations = new BulkOperationsCollection() };
-            var now = DateTimeOffset.UtcNow.UtcDateTime;
+            var writeTime = DateTimeOffset.UtcNow.UtcDateTime;
             foreach (var b in buckets)
             {
                 var script = "if (ctx._source.open == null) { ctx._source.open = params.v; } else if (ctx._source.open == 0) { ctx._source.open = params.v; }" +
@@ -195,7 +196,7 @@ namespace AVMTradeReporter.Repository
                         Params = new Dictionary<string, object>
                         {
                             {"v", (double)b.TvlUsd},
-                            {"now", now}
+                            {"now", writeTime}
                         }
                     },
                     Upsert = upsert

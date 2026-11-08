@@ -1,6 +1,5 @@
 using AVMTradeReporter.Repository;
 using Microsoft.Extensions.Logging;
-using Moq;
 using NUnit.Framework;
 
 namespace AVMTradeReporterTests.Repository
@@ -61,22 +60,14 @@ namespace AVMTradeReporterTests.Repository
         public async Task UpdateFromTvlChangeAsync_IgnoresStaleTimestamp_AndPublishesNoTick()
         {
             // Null Elasticsearch client: the only observable side effect of an accepted update is the SignalR tick.
-            var published = 0;
-            var proxy = new Mock<Microsoft.AspNetCore.SignalR.IClientProxy>();
-            proxy.Setup(p => p.SendCoreAsync(It.IsAny<string>(), It.IsAny<object?[]>(), It.IsAny<CancellationToken>()))
-                .Callback(() => Interlocked.Increment(ref published))
-                .Returns(Task.CompletedTask);
-            var clients = new Mock<Microsoft.AspNetCore.SignalR.IHubClients>();
-            clients.Setup(c => c.Group(It.IsAny<string>())).Returns(proxy.Object);
-            var hub = new Mock<Microsoft.AspNetCore.SignalR.IHubContext<AVMTradeReporter.Hubs.BiatecScanHub>>();
-            hub.SetupGet(h => h.Clients).Returns(clients.Object);
-            var repository = new TvlOhlcRepository(null!, new LoggerFactory().CreateLogger<TvlOhlcRepository>(), hub.Object);
+            var ticks = new List<AVMTradeReporter.Model.DTO.TVL.TvlTickDto>();
+            var repository = new TvlOhlcRepository(null!, new LoggerFactory().CreateLogger<TvlOhlcRepository>(), TvlTickCapturingHub.Create(ticks));
 
             await repository.UpdateFromTvlChangeAsync(1UL, 100m, DateTimeOffset.UtcNow.AddDays(-3), CancellationToken.None);
-            Assert.That(published, Is.EqualTo(0), "a tick stamped days ago must be dropped, not written into a historical candle");
+            Assert.That(ticks.Count, Is.EqualTo(0), "a tick stamped days ago must be dropped, not written into a historical candle");
 
             await repository.UpdateFromTvlChangeAsync(1UL, 100m, DateTimeOffset.UtcNow, CancellationToken.None);
-            Assert.That(published, Is.EqualTo(1), "a tick stamped now is accepted");
+            Assert.That(ticks.Count, Is.EqualTo(1), "a tick stamped now is accepted");
         }
 
         [Test]
