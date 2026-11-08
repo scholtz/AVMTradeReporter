@@ -55,6 +55,21 @@ untrusted-with-established-price + still-unpriced bootstrap cases),
 never-priced asset for the bootstrap case it was actually testing, added a
 dedicated established-price-gets-guarded-too test).
 
+## TVL OHLC ticks are stamped with the compute time, never the pair's `LastUpdated`
+
+`AggregatedPoolRepository.RecomputeSingleAssetAsync` writes a TVL tick to
+`TvlOhlcRepository` (ES `tvlohlc` + SignalR) whenever an asset's real TVL
+changes, and the tick timestamp must be `DateTimeOffset.UtcNow` - NOT the
+`asOf` argument, which is the triggering pair's `LastUpdated` (its last trade,
+possibly months old). ALGO and the USD reference asset are in the `affected`
+set of EVERY aggregated-pool update and `VolumeUpdateBackgroundService`'s
+periodic full sweep re-stores every pair, so stamping with `asOf` wrote today's
+ALGO/USDC TVL into historical hourly buckets and made the 7d "Real TVL"
+sparkline stripy (ES high/low only ever widen). `TvlOhlcRepository` enforces
+the contract itself (`IsLiveTickTimestamp`: within a few minutes of now, else
+the tick is dropped with a warning). Regression tests:
+`AggregatedPoolTvlTickTimestampTests`, `TvlOhlcRepositoryTests`.
+
 ## Local production API access for live-data debugging
 
 `../biatec-scan-web` has `arc14`/`arc76`/`algosdk` in `package.json` (used

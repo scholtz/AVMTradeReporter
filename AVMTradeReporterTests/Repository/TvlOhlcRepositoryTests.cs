@@ -1,4 +1,5 @@
 using AVMTradeReporter.Repository;
+using Microsoft.Extensions.Logging;
 using NUnit.Framework;
 
 namespace AVMTradeReporterTests.Repository
@@ -41,6 +42,32 @@ namespace AVMTradeReporterTests.Repository
                 var expected = OHLCRepository.GetBucketStart(ts, span);
                 Assert.That(tvlBuckets[code], Is.EqualTo(expected), $"interval {code} bucket start mismatch");
             }
+        }
+
+        [Test]
+        public void IsLiveTickTimestamp_AcceptsComputeTime_RejectsHistoricalAndFutureTimes()
+        {
+            var now = DateTimeOffset.Parse("2026-11-08T18:00:00Z");
+            Assert.That(TvlOhlcRepository.IsLiveTickTimestamp(now, now), Is.True);
+            Assert.That(TvlOhlcRepository.IsLiveTickTimestamp(now.AddSeconds(-30), now), Is.True, "scheduling jitter");
+            Assert.That(TvlOhlcRepository.IsLiveTickTimestamp(now.AddSeconds(30), now), Is.True, "clock skew");
+            Assert.That(TvlOhlcRepository.IsLiveTickTimestamp(now.AddHours(-1), now), Is.False, "previous hourly bucket");
+            Assert.That(TvlOhlcRepository.IsLiveTickTimestamp(now.AddDays(-400), now), Is.False, "a dormant pair's last-trade time");
+            Assert.That(TvlOhlcRepository.IsLiveTickTimestamp(now.AddHours(2), now), Is.False, "future bucket");
+        }
+
+        [Test]
+        public async Task UpdateFromTvlChangeAsync_IgnoresStaleTimestamp_AndPublishesNoTick()
+        {
+            // Null Elasticsearch client: the only observable side effect of an accepted update is the SignalR tick.
+            var ticks = new List<AVMTradeReporter.Model.DTO.TVL.TvlTickDto>();
+            var repository = new TvlOhlcRepository(null!, new LoggerFactory().CreateLogger<TvlOhlcRepository>(), TvlTickCapturingHub.Create(ticks));
+
+            await repository.UpdateFromTvlChangeAsync(1UL, 100m, DateTimeOffset.UtcNow.AddDays(-3), CancellationToken.None);
+            Assert.That(ticks.Count, Is.EqualTo(0), "a tick stamped days ago must be dropped, not written into a historical candle");
+
+            await repository.UpdateFromTvlChangeAsync(1UL, 100m, DateTimeOffset.UtcNow, CancellationToken.None);
+            Assert.That(ticks.Count, Is.EqualTo(1), "a tick stamped now is accepted");
         }
 
         [Test]

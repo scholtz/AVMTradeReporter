@@ -689,7 +689,9 @@ namespace AVMTradeReporter.Repository
                         var tvlOhlcRepository = _serviceProvider?.GetService<TvlOhlcRepository>();
                         if (tvlOhlcRepository != null)
                         {
-                            await tvlOhlcRepository.UpdateFromTvlChangeAsync(assetId, realTvlUsd, asOf, cancellationToken);
+                            // Compute time, never `asOf` (the pair's last-trade time): see CLAUDE.md
+                            // "TVL OHLC ticks are stamped with the compute time".
+                            await tvlOhlcRepository.UpdateFromTvlChangeAsync(assetId, realTvlUsd, DateTimeOffset.UtcNow, cancellationToken);
                         }
                     }
                 }
