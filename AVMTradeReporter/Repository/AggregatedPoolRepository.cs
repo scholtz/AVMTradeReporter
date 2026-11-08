@@ -689,7 +689,14 @@ namespace AVMTradeReporter.Repository
                         var tvlOhlcRepository = _serviceProvider?.GetService<TvlOhlcRepository>();
                         if (tvlOhlcRepository != null)
                         {
-                            await tvlOhlcRepository.UpdateFromTvlChangeAsync(assetId, realTvlUsd, asOf, cancellationToken);
+                            // Stamp the tick with the moment this TVL was COMPUTED, never with `asOf`.
+                            // `asOf` is the triggering pair's LastUpdated (its newest pool timestamp, i.e.
+                            // its last trade) - for a quiet pair that is days or months old. Every aggregated
+                            // pair is re-stored by VolumeUpdateBackgroundService's periodic full sweep, and
+                            // ALGO + the USD reference asset are recomputed on EVERY such update, so stamping
+                            // with `asOf` wrote today's ALGO/USDC TVL into thousands of historical hourly
+                            // buckets and made the 7d "Real TVL" chart stripy (a TVL figure is "as of now").
+                            await tvlOhlcRepository.UpdateFromTvlChangeAsync(assetId, realTvlUsd, DateTimeOffset.UtcNow, cancellationToken);
                         }
                     }
                 }
