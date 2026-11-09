@@ -73,7 +73,7 @@ the tick is dropped with a warning). Regression tests:
 ## TVL excludes dust pools (< 0.5% of the asset's biggest pair)
 
 `RecomputeSingleAssetAsync` collects per-pair (real, total) USD contributions
-and `SumTvlExcludingDustPools` drops every pair whose total valuation is below
+and `SumTvlExcludingDustPools` drops every pair whose trusted-side valuation (not total - a lopsided pool must not inflate the threshold) is below
 `DustPoolTvlFraction` (0.5%) of the asset's biggest pair before summing - for
 BOTH Real and Total TVL. `PoolsCount` still counts all pairs. Documented in
 `AVMTradeReporter/doc/TVL_CALCULATION.md`; tests in

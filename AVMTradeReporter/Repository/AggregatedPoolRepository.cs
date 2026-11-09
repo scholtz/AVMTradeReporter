@@ -521,26 +521,28 @@ namespace AVMTradeReporter.Repository
         }
 
         /// <summary>
-        /// A pair whose total USD valuation is below this fraction of the asset's biggest pair is
-        /// "dust" and excluded from both Real and Total TVL (0.5%).
+        /// A pair whose valuation is below this fraction of the asset's biggest pair is "dust" and
+        /// excluded from both Real and Total TVL (0.5%).
         /// </summary>
         internal const decimal DustPoolTvlFraction = 0.005m;
 
         /// <summary>
-        /// Sums per-pair TVL contributions of one asset, skipping dust pairs: any pair whose total
-        /// USD valuation is below <see cref="DustPoolTvlFraction"/> of the biggest pair's total
-        /// valuation. Tiny pools are noise (and a manipulation vector - cheap to create, mispriced),
-        /// and their appearing/disappearing made the TVL series jump. The biggest pair itself is
-        /// always kept, so a non-empty input with any value never sums to zero.
+        /// Sums per-pair TVL contributions of one asset, skipping dust pairs: any pair whose
+        /// valuation is below <see cref="DustPoolTvlFraction"/> of the biggest pair's. A pair is
+        /// valued by its trusted-reference side (<c>RealUsd</c>) - the only side that can be priced
+        /// confidently. Using the total (which values the asset's own side at its own price) would
+        /// let one lopsided or depleted pool inflate the threshold and wipe out genuine pools.
+        /// Tiny pools are noise (and cheap to create/mispriced), and their appearing/disappearing
+        /// made the TVL series jump. The biggest pair itself is always kept.
         /// </summary>
         internal static (decimal RealUsd, decimal TotalUsd) SumTvlExcludingDustPools(IReadOnlyCollection<(decimal RealUsd, decimal TotalUsd)> pairs)
         {
             if (pairs.Count == 0) return (0m, 0m);
-            var threshold = pairs.Max(p => p.TotalUsd) * DustPoolTvlFraction;
+            var threshold = pairs.Max(p => p.RealUsd) * DustPoolTvlFraction;
             decimal real = 0m, total = 0m;
             foreach (var p in pairs)
             {
-                if (p.TotalUsd < threshold) continue;
+                if (p.RealUsd < threshold) continue;
                 real += p.RealUsd;
                 total += p.TotalUsd;
             }
