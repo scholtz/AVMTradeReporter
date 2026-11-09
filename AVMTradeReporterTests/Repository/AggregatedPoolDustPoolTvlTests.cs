@@ -29,7 +29,7 @@ namespace AVMTradeReporterTests.Repository
         [Test]
         public void PairExactlyAtThreshold_IsKept()
         {
-            // 0.5% of 1,000,000 = 5,000 -> exactly at the threshold stays; below it goes.
+            // Biggest trusted side = 500,000 -> threshold 0.5% = 2,500: exactly at it stays, below it goes.
             var pairs = new[] { (500_000m, 1_000_000m), (2_500m, 5_000m), (2_499m, 4_999m) };
             var (real, total) = AggregatedPoolRepository.SumTvlExcludingDustPools(pairs);
             Assert.That(total, Is.EqualTo(1_005_000m));
@@ -85,7 +85,7 @@ namespace AVMTradeReporterTests.Repository
             var before = (await assets.GetAssetAsync(0UL))!;
             var realBefore = before.TVL_USD;
             var totalBefore = before.TotalTVLAssetInUSD;
-            Assert.That(realBefore, Is.GreaterThan(100_000m), "both the big and the $1,000 pair count");
+            Assert.That(realBefore, Is.EqualTo(101_000m), "both the $100,000 and the $1,000 pair count");
 
             await repository.UpdateForPairAsync(0UL, Ref2, new[] { Pool(Ref2, 1_000_000_000, 100_000_000) });         // $100 < $500 threshold - dust
 

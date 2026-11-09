@@ -69,7 +69,7 @@ Why: tiny pools are noise and a manipulation vector (cheap to create, easily mis
 
 Example: trusted sides worth $500,000, $200,000 and $1,500. Threshold = 0.5% x $500,000 = $2,500, so the $1,500 pair is excluded from both sums.
 
-Notes: the dust test is a hard cutoff (no hysteresis); pool-level and aggregated-pool TVL fields are unchanged and still include dust pools; the pair count (`PoolsCount`) still includes dust pools; only the TVL sums skip them.
+Notes: the threshold is relative to the single biggest pair, so one abnormally large pair raises it for all others; a pair with no trusted-side liquidity (e.g. a one-sided out-of-range pool) is dust by definition and its asset-side balance is not counted in Total TVL either; the dust test is a hard cutoff (no hysteresis); pool-level and aggregated-pool TVL fields are unchanged and still include dust pools; the pair count (`PoolsCount`) still includes dust pools; only the TVL sums skip them.
 
 ## Implementation Details
 
