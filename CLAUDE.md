@@ -70,6 +70,15 @@ the contract itself (`IsLiveTickTimestamp`: within a few minutes of now, else
 the tick is dropped with a warning). Regression tests:
 `AggregatedPoolTvlTickTimestampTests`, `TvlOhlcRepositoryTests`.
 
+## TVL excludes dust pools (< 0.5% of the asset's biggest pair)
+
+`RecomputeSingleAssetAsync` collects per-pair (real, total) USD contributions
+and `SumTvlExcludingDustPools` drops every pair whose trusted-side valuation (not total - a lopsided pool must not inflate the threshold) is below
+`DustPoolTvlFraction` (0.5%) of the asset's biggest pair before summing - for
+BOTH Real and Total TVL. `PoolsCount` still counts all pairs. Documented in
+`AVMTradeReporter/doc/TVL_CALCULATION.md`; tests in
+`AggregatedPoolDustPoolTvlTests`.
+
 ## Local production API access for live-data debugging
 
 `../biatec-scan-web` has `arc14`/`arc76`/`algosdk` in `package.json` (used

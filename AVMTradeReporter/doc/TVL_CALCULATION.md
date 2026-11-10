@@ -61,6 +61,16 @@ Using the same pools as above (assume XYZ price = $0.40):
 ### Why Total TVL?
 Total TVL shows the complete pool value and total liquidity available for the asset. This is useful for understanding the full market depth.
 
+## Dust Pool Exclusion (applies to Real TVL and Total TVL)
+
+Before summing, every pair of the asset is valued by its **trusted-reference side in USD** (the side that can be priced confidently; using the total would let one lopsided pool with a huge balance of the asset itself inflate the threshold). Any pair valued **below 0.5% of the asset's biggest pair** (`AggregatedPoolRepository.DustPoolTvlFraction = 0.005`) is a *dust pool* and is excluded from **both** Real TVL and Total TVL. The biggest pair is always kept.
+
+Why: tiny pools are noise and a manipulation vector (cheap to create, easily mispriced), and their appearing or disappearing made the TVL series jump.
+
+Example: trusted sides worth $500,000, $200,000 and $1,500. Threshold = 0.5% x $500,000 = $2,500, so the $1,500 pair is excluded from both sums.
+
+Notes: the threshold is relative to the single biggest pair, so one abnormally large pair raises it for all others; a pair with no trusted-side liquidity (e.g. a one-sided out-of-range pool) is dust by definition and its asset-side balance is not counted in Total TVL either; the dust test is a hard cutoff (no hysteresis); pool-level and aggregated-pool TVL fields are unchanged and still include dust pools; the pair count (`PoolsCount`) still includes dust pools; only the TVL sums skip them.
+
 ## Implementation Details
 
 ### Location
@@ -74,6 +84,7 @@ The calculations are implemented in:
    - Find all aggregated pools where it's paired with a trusted reference
    - For Real TVL: Sum only the trusted token side values
    - For Total TVL: Sum both sides of the pools
+   - Drop dust pairs (< 0.5% of the biggest pair, see above)
    - Update the asset's `TVL_USD` and `TotalTVLAssetInUSD` fields
 
 ### Deduplication

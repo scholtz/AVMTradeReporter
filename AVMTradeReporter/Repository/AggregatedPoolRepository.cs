@@ -521,6 +521,35 @@ namespace AVMTradeReporter.Repository
         }
 
         /// <summary>
+        /// A pair whose valuation is below this fraction of the asset's biggest pair is "dust" and
+        /// excluded from both Real and Total TVL (0.5%).
+        /// </summary>
+        internal const decimal DustPoolTvlFraction = 0.005m;
+
+        /// <summary>
+        /// Sums per-pair TVL contributions of one asset, skipping dust pairs: any pair whose
+        /// valuation is below <see cref="DustPoolTvlFraction"/> of the biggest pair's. A pair is
+        /// valued by its trusted-reference side (<c>RealUsd</c>) - the only side that can be priced
+        /// confidently. Using the total (which values the asset's own side at its own price) would
+        /// let one lopsided or depleted pool inflate the threshold and wipe out genuine pools.
+        /// Tiny pools are noise (and cheap to create/mispriced), and their appearing/disappearing
+        /// made the TVL series jump. The biggest pair itself is always kept.
+        /// </summary>
+        internal static (decimal RealUsd, decimal TotalUsd) SumTvlExcludingDustPools(IReadOnlyCollection<(decimal RealUsd, decimal TotalUsd)> pairs)
+        {
+            if (pairs.Count == 0) return (0m, 0m);
+            var threshold = pairs.Max(p => p.RealUsd) * DustPoolTvlFraction;
+            decimal real = 0m, total = 0m;
+            foreach (var p in pairs)
+            {
+                if (p.RealUsd < threshold) continue;
+                real += p.RealUsd;
+                total += p.TotalUsd;
+            }
+            return (real, total);
+        }
+
+        /// <summary>
         /// Recomputes price/TVL/PoolsCount for one asset. <paramref name="emitTvlTick"/> gates whether
         /// a real-time TVL SignalR tick (and durable ES TVL-OHLC bucket write) is emitted when
         /// TVL_USD actually changes - true only from the live per-trade path
@@ -617,8 +646,9 @@ namespace AVMTradeReporter.Repository
                 // Trusted reference tokens: ALGO=0, this network's usdRef, and configured
                 // other stablecoins/major tokens (AppConfiguration.TrustedReferenceAssetIds).
                 HashSet<ulong> refs = new HashSet<ulong>(_appConfig.TrustedReferenceAssetIds) { 0UL, usdRef }; // duplicates automatically removed by HashSet
-                decimal realTvlUsd = 0m;    // Real TVL: sum of trusted token values only
-                decimal totalTvlUsd = 0m;   // Total TVL: sum of all asset values
+                // Per-pair (realUsd, totalUsd) contributions, summed only after dust pools are dropped
+                // (see SumTvlExcludingDustPools).
+                var pairTvls = new List<(decimal RealUsd, decimal TotalUsd)>();
 
                 // Sum USD value of all aggregated pools where the other asset is trusted reference
                 var processedPairs = new HashSet<string>();
@@ -663,7 +693,6 @@ namespace AVMTradeReporter.Repository
                         // Asset is on side B, trusted token is on side A
                         trustedTokenValue = ap.TVL_A * otherPrice;
                     }
-                    if (trustedTokenValue > 0) realTvlUsd += trustedTokenValue;
 
                     // Calculate Total TVL: both sides of the pool
                     decimal poolTotalUsd;
@@ -675,8 +704,11 @@ namespace AVMTradeReporter.Repository
                     {
                         poolTotalUsd = ap.TVL_B * priceAssetCurrent + ap.TVL_A * otherPrice;
                     }
-                    if (poolTotalUsd > 0) totalTvlUsd += poolTotalUsd;
+
+                    pairTvls.Add((Math.Max(trustedTokenValue, 0m), Math.Max(poolTotalUsd, 0m)));
                 }
+
+                var (realTvlUsd, totalTvlUsd) = SumTvlExcludingDustPools(pairTvls);
 
                 // Set Real TVL (TVL_USD) - only trusted tokens
                 if (realTvlUsd > 0 && realTvlUsd != asset.TVL_USD)
