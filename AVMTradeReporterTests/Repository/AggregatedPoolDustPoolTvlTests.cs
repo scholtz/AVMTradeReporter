@@ -1,5 +1,6 @@
 using AVMTradeReporter.Model.Configuration;
 using AVMTradeReporter.Repository;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using PoolModel = AVMTradeReporter.Models.Data.Pool;
@@ -73,7 +74,7 @@ namespace AVMTradeReporterTests.Repository
                 await assets.SetAssetAsync(a);
             }
             var repository = new AggregatedPoolRepository(null!, new LoggerFactory().CreateLogger<AggregatedPoolRepository>(), null!,
-                Options.Create(new AppConfiguration()), null, null, assets);
+                Options.Create(new AppConfiguration()), new ServiceCollection().BuildServiceProvider(), null, assets);
 
             PoolModel Pool(ulong other, ulong algoAmount, ulong otherAmount) => new()
             {
