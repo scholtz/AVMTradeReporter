@@ -724,8 +724,10 @@ namespace AVMTradeReporter.Repository
                     // (e.g. the indexer replaying blocks after a restart)
                     var rangesContainEvent = existingPool.LiquidityRanges != null && existingPool.LiquidityRangesReadAt.HasValue
                         && existingPool.LiquidityRangesReadAt.Value > liquidity.Timestamp.Value;
+                    // without ranges there is nothing to invalidate, the reload is just a retry of a failed read: throttled
                     if (existingPool.AMMType == AMMType.TickBasedCLAMM && !rangesContainEvent
-                        && existingPool.AssetADecimals.HasValue && existingPool.AssetBDecimals.HasValue)
+                        && existingPool.AssetADecimals.HasValue && existingPool.AssetBDecimals.HasValue
+                        && (existingPool.LiquidityRanges != null || ShouldAttemptTickPoolMigration(existingPool.PoolAddress)))
                     {
                         // trades and liquidity events are applied by independent batches, so a later swap can advance the
                         // timestamp first. Its amounts are not applied, but the liquidity change may be missing from the

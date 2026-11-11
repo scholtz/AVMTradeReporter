@@ -454,12 +454,14 @@ namespace AVMTradeReporter.Processors.Pool
                 _logger.LogInformation("Pact CLAMM pool {appId} got a liquidity event during the read, keeping the event state", appId);
                 return pool;
             }
-            if (pool != null && pool.EventVersion != versionBeforeRead)
+            // swaps applied during the read that never set a price (no current_price delta) did not move it: the read
+            // price is current then, the read applies as is
+            if (pool != null && pool.EventVersion != versionBeforeRead && pool.SqrtPriceX64.HasValue)
             {
                 // only swaps were applied meanwhile: their price / tick / origin are newer than the read and stay, but a
                 // swap never changes the per-tick liquidity, so the freshly read ranges are valid - reprice them at the
                 // pool's own (event) price; everything else (fees, hash, decimals) is refreshed from the read as usual
-                if (!freshRanges || ranges == null || !pool.SqrtPriceX64.HasValue) return pool;
+                if (!freshRanges || ranges == null) return pool;
                 sqrtPrice = pool.SqrtPriceX64.Value;
                 // a pool stored before the origin was tracked: the swaps did not cross price 1 (that sets it), so the read one holds
                 origin = pool.TickOrigin ?? origin;
@@ -508,7 +510,7 @@ namespace AVMTradeReporter.Processors.Pool
                 // the current price even when the bounds did not change.
                 if (!pool.TryReplaceLiquidityRanges(rangesBeforeUpdate, ranges))
                 {
-                    _logger.LogInformation("Pact CLAMM pool {appId} got a liquidity event during the update, keeping the event state", appId);
+                    _logger.LogInformation("Pact CLAMM pool {appId}: its liquidity ranges changed during the update (an event or another read), keeping them", appId);
                     return pool;
                 }
                 if (freshRanges && ranges != null) pool.LiquidityRangesReadAt = stateTimestamp;

@@ -65,7 +65,8 @@ namespace AVMTradeReporter.Models.Data
             // reprice a copy and swap the reference: the cached pool's list may be serialized concurrently (ES / Redis /
             // SignalR). A reload that replaced the list meanwhile is repriced in turn (the price is this swap's); ranges a
             // liquidity event invalidated are never put back - its reload reprices them.
-            for (var attempt = 0; attempt < 4; attempt++)
+            // lock free: every failed swap of the reference means another writer made progress
+            while (true)
             {
                 var current = pool.LiquidityRanges;
                 if (current == null) return;
