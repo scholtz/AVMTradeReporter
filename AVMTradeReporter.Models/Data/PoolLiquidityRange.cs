@@ -58,11 +58,20 @@ namespace AVMTradeReporter.Models.Data
                 TickLow = TickLow,
                 TickHigh = TickHigh,
                 Liquidity = Liquidity,
-                PMin = PMax == decimal.MaxValue || PMax == 0 ? 0 : 1 / PMax,
-                PMax = PMin == 0 ? decimal.MaxValue : 1 / PMin,
+                PMin = Invert(PMax),
+                PMax = Invert(PMin),
                 A = B,
                 B = A,
             };
+        }
+
+        public PoolLiquidityRange Clone() => (PoolLiquidityRange)MemberwiseClone();
+
+        private static decimal Invert(decimal price)
+        {
+            if (price == 0) return decimal.MaxValue;
+            if (price == decimal.MaxValue) return 0;
+            return 1 / price;
         }
     }
 }

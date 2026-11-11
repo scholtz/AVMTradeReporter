@@ -733,11 +733,12 @@ namespace AVMTradeReporter.Repository
                     }
                 }
 
-                await StorePoolAsync(existingPool, true, cancellationToken);
-
-                if (existingPool.AMMType == AMMType.TickBasedCLAMM)
+                // tick based CLAMM: reload the exact state from the box storage before storing, so subscribers never see the
+                // interim incrementally tracked reserves; those are only stored when the reload fails
+                var reloaded = existingPool.AMMType == AMMType.TickBasedCLAMM ? await ReloadTickBasedPoolAsync(existingPool) : null;
+                if (reloaded == null)
                 {
-                    await ReloadTickBasedPoolAsync(existingPool, cancellationToken);
+                    await StorePoolAsync(existingPool, true, cancellationToken);
                 }
 
                 _logger.LogDebug("Updated pool from liquidity: {poolAddress}_{poolAppId}_{protocol}",
@@ -954,35 +955,40 @@ namespace AVMTradeReporter.Repository
         }
 
         /// <summary>
-        /// Tries to enrich a pool with missing data by running the appropriate pool processor
-        /// </summary>
-        /// <summary>
         /// A liquidity add / remove changed the per-tick liquidity of a tick based CLAMM pool (and dropped its stale
         /// liquidity ranges, see <see cref="PoolReserveUpdater.ApplyLiquidity"/>): reload the ranges and the exact reserves
-        /// from the pool box storage. On failure the pool keeps the incrementally tracked reserves until the next refresh.
+        /// from the pool box storage. The processor stores the reloaded pool. Returns it when the ranges were loaded, null
+        /// when the reload failed (the caller then stores the incrementally tracked reserves).
         ///
-        /// The boxes and the global state are read at the chain tip, so the reloaded pool (ranges, price and reserves) is
-        /// the on-chain state as of now, and the processor stamps it with the wall clock time. That timestamp is what keeps
-        /// it consistent: every event whose block is older than the reload is already contained in that state, and the
-        /// timestamp guards of <see cref="UpdatePoolFromTrade"/> / <see cref="UpdatePoolFromLiquidity"/> skip exactly those.
-        /// While the indexer catches up on old blocks no historical swap is therefore ever applied to the newer ranges;
-        /// events from blocks after the reload apply normally.
+        /// The boxes and the global state are read at the chain tip, so the reloaded pool (ranges, price and reserves) is the
+        /// on-chain state as of the read, and the processor stamps it with the time the read started minus a safety margin
+        /// (<see cref="PactPoolProcessor.ReadTimestampSafetyMargin"/>). The timestamp guards of
+        /// <see cref="UpdatePoolFromTrade"/> / <see cref="UpdatePoolFromLiquidity"/> then skip the events of older blocks,
+        /// which that state already contains, so while the indexer catches up no historical swap is applied to the newer
+        /// ranges. Events of blocks near the read are applied rather than skipped: re-applying one is harmless (a liquidity
+        /// event reloads again, a swap reprices from its own post-swap price and the next swap corrects it), whereas skipping
+        /// a liquidity event the read did not include would leave stale ranges.
         /// </summary>
-        private async Task ReloadTickBasedPoolAsync(Pool pool, CancellationToken cancellationToken)
+        private async Task<Pool?> ReloadTickBasedPoolAsync(Pool pool)
         {
             try
             {
                 var processor = GetPoolProcessor(pool.Protocol);
-                if (processor == null) return;
-                await processor.LoadPoolAsync(pool.PoolAddress, pool.PoolAppId);
+                if (processor == null) return null;
+                var reloaded = await processor.LoadPoolAsync(pool.PoolAddress, pool.PoolAppId);
+                return reloaded?.LiquidityRanges != null ? reloaded : null;
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to reload liquidity ranges of tick based pool {poolAddress}_{poolAppId}, keeping event tracked reserves",
                     pool.PoolAddress, pool.PoolAppId);
+                return null;
             }
         }
 
+        /// <summary>
+        /// Tries to enrich a pool with missing data by running the appropriate pool processor
+        /// </summary>
         private async Task<Pool?> TryEnrichPoolWithProcessor(Pool pool, CancellationToken cancellationToken)
         {
             try

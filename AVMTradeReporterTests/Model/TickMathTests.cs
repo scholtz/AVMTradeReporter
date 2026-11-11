@@ -67,7 +67,7 @@ namespace AVMTradeReporterTests.Model
             // two mints into ticks [1000331, 1000396) - upper tick exclusive - (rounds 64139870 and 64139914) while current_price was 6261539103397907236:
             // 35682498 + 71364996 ALGO and 4999999 + 9999999 USDC. The tick boxes show liquidity 433647667 in every tick of the range.
             var ticks = Enumerable.Range(1000331, 65).Select(t => ((ulong)t, 433647667UL)).ToList();
-            var (a, b) = TickMath.ComputeReserves(ticks, 6261539103397907236UL, Spacing);
+            var (a, b) = Reserves(ticks, 6261539103397907236UL);
             Assert.That(a, Is.EqualTo(35682498UL + 71364996UL).Within(2000));
             Assert.That(b, Is.EqualTo(4999999UL + 9999999UL).Within(200));
         }
@@ -77,14 +77,21 @@ namespace AVMTradeReporterTests.Model
         {
             var ticks = Enumerable.Range(1000331, 66).Select(t => ((ulong)t, 433647667UL)).ToList();
             // price above the range (lower tick) -> everything in B; below the range -> everything in A
-            var (aAbove, bAbove) = TickMath.ComputeReserves(ticks, (ulong)(TickMath.TickToSqrtPrice(1000300, Spacing) * 18446744073709551616.0), Spacing);
+            var (aAbove, bAbove) = Reserves(ticks, (ulong)(TickMath.TickToSqrtPrice(1000300, Spacing) * 18446744073709551616.0));
             Assert.That(aAbove, Is.EqualTo(0));
             Assert.That(bAbove, Is.GreaterThan(0));
-            var (aBelow, bBelow) = TickMath.ComputeReserves(ticks, (ulong)(TickMath.TickToSqrtPrice(1000400, Spacing) * 18446744073709551616.0), Spacing);
+            var (aBelow, bBelow) = Reserves(ticks, (ulong)(TickMath.TickToSqrtPrice(1000400, Spacing) * 18446744073709551616.0));
             Assert.That(aBelow, Is.GreaterThan(0));
             Assert.That(bBelow, Is.EqualTo(0));
-            Assert.That(TickMath.ActiveLiquidity(ticks, 1000361), Is.EqualTo(433647667));
-            Assert.That(TickMath.ActiveLiquidity(ticks, 1000500), Is.EqualTo(0));
+            var ranges = TickMath.BuildRanges(ticks);
+            Assert.That(TickMath.LiquidityAtTick(ranges, 1000361), Is.EqualTo(433647667));
+            Assert.That(TickMath.LiquidityAtTick(ranges, 1000500), Is.EqualTo(0));
+        }
+
+        private static (ulong A, ulong B) Reserves(IEnumerable<(ulong Tick, ulong Liquidity)> ticks, ulong sqrtPriceX64)
+        {
+            var (a, b, _) = TickMath.ApplyPrice(TickMath.BuildRanges(ticks), sqrtPriceX64, Spacing, 0, 0);
+            return (a, b);
         }
 
         [Test]

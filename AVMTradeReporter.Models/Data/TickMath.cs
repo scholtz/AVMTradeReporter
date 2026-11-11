@@ -9,7 +9,8 @@ namespace AVMTradeReporter.Models.Data
     ///   so tick t covers the B/A price range [1.0001^(-spacing*(t+1-1e6)), 1.0001^(-spacing*(t-1e6))]
     ///   (the price of A in B decreases with the tick)
     /// - liquidity per tick is stored in boxes named by an 8 byte "word" w (100 ticks per word, tick = 1e6 + (w - 1e6) * 100 + i)
-    ///   as 100 records of 10 bytes: big endian uint80 liquidity active in that tick
+    ///   as 100 records of 10 bytes: big endian uint80 liquidity active in that tick (the mint logs carry the position
+    ///   liquidity as uint80 too; the two high bytes are 0 in every record of both the testnet and the mainnet pool)
     /// - a position minted over (tick_low, tick_high) adds its liquidity to the ticks [tick_low, tick_high) - tick_high is
     ///   exclusive (verified on mainnet pool 3762241535: the C3OJVQPD... mint deposit matches the formula to 1 base unit)
     /// - verified on mainnet ALGO/USDC pool 3762241535 (contract of factory 3656084442): the reserves summed over the
@@ -77,25 +78,12 @@ namespace AVMTradeReporter.Models.Data
         }
 
         /// <summary>
-        /// Computes the amounts of A and B (base units) held by the given per-tick liquidity at the current sqrt price.
+        /// Liquidity of the range containing the tick (0 when no range does). With the contract's current_tick this is the
+        /// liquidity active at the current price - the contract's own answer, also on a tick boundary.
         /// </summary>
-        public static (ulong A, ulong B) ComputeReserves(IEnumerable<(ulong Tick, ulong Liquidity)> ticks, ulong sqrtPriceX64, ulong tickSpacing)
+        public static ulong LiquidityAtTick(IEnumerable<PoolLiquidityRange> ranges, ulong tick)
         {
-            var ranges = BuildRanges(ticks);
-            var (a, b, _) = ApplyPrice(ranges, sqrtPriceX64, tickSpacing, 0, 0);
-            return (a, b);
-        }
-
-        /// <summary>
-        /// Liquidity active at the current tick.
-        /// </summary>
-        public static ulong ActiveLiquidity(IEnumerable<(ulong Tick, ulong Liquidity)> ticks, ulong currentTick)
-        {
-            foreach (var (tick, liquidity) in ticks)
-            {
-                if (tick == currentTick) return liquidity;
-            }
-            return 0;
+            return ranges.FirstOrDefault(r => r.TickLow <= tick && tick <= r.TickHigh)?.Liquidity ?? 0;
         }
 
         /// <summary>
@@ -171,16 +159,7 @@ namespace AVMTradeReporter.Models.Data
         /// </summary>
         public static List<PoolLiquidityRange> CloneRanges(IEnumerable<PoolLiquidityRange> ranges)
         {
-            return ranges.Select(r => new PoolLiquidityRange
-            {
-                TickLow = r.TickLow,
-                TickHigh = r.TickHigh,
-                Liquidity = r.Liquidity,
-                PMin = r.PMin,
-                PMax = r.PMax,
-                A = r.A,
-                B = r.B,
-            }).ToList();
+            return ranges.Select(r => r.Clone()).ToList();
         }
 
         /// <summary>

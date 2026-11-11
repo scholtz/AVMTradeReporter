@@ -212,6 +212,26 @@ namespace AVMTradeReporterTests.Model
             Assert.That(reversed.B, Is.EqualTo(1));
             Assert.That(new PoolLiquidityRange { PMin = 0, PMax = 4 }.Reverse().PMax, Is.EqualTo(decimal.MaxValue));
             Assert.That(new PoolLiquidityRange { PMin = 0, PMax = 4 }.Reverse().PMin, Is.EqualTo(0.25m));
+            // a range clamped entirely below (both bounds 0) is entirely above once reversed, not the whole price axis
+            var degenerate = new PoolLiquidityRange { PMin = 0, PMax = 0 }.Reverse();
+            Assert.That(degenerate.PMin, Is.EqualTo(decimal.MaxValue));
+            Assert.That(degenerate.PMax, Is.EqualTo(decimal.MaxValue));
+        }
+
+        [Test]
+        public void ActiveLiquidityFollowsTheContractTick()
+        {
+            // the price says tick 1000401, but the contract's current_tick is authoritative (e.g. on a tick boundary)
+            var pool = MakePool(TickMath.BuildRanges(LoadTicks()));
+            pool.CurrentTick = 1000400;
+
+            PoolReserveUpdater.ApplyTrade(pool, new Trade { AssetIdIn = 0, AssetIdOut = 31566704, AssetAmountIn = 10, AssetAmountOut = 1, PoolSqrtPriceX64 = SqrtPriceAfterSwap });
+            Assert.That(pool.L, Is.EqualTo(TickMath.LiquidityAtTick(pool.LiquidityRanges!, 1000400)));
+            Assert.That(pool.L, Is.Not.EqualTo(337_594_319_121UL));
+
+            // a trade that moved the tick carries it in the global delta
+            PoolReserveUpdater.ApplyTrade(pool, new Trade { AssetIdIn = 0, AssetIdOut = 31566704, AssetAmountIn = 10, AssetAmountOut = 1, PoolSqrtPriceX64 = SqrtPriceAfterSwap, PoolTick = 1000401 });
+            Assert.That(pool.L, Is.EqualTo(337_594_319_121UL));
         }
 
         [Test]

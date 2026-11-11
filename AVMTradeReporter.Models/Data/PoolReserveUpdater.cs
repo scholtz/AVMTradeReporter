@@ -28,6 +28,11 @@ namespace AVMTradeReporter.Models.Data
                     ApplyRanges(pool, trade.PoolSqrtPriceX64.Value);
                 }
                 ApplyPrice(pool, trade);
+                if (pool.CurrentTick.HasValue && pool.LiquidityRanges != null)
+                {
+                    // the active liquidity is the liquidity of the contract's current tick (exact also on a tick boundary)
+                    pool.L = TickMath.LiquidityAtTick(pool.LiquidityRanges, pool.CurrentTick.Value);
+                }
                 return;
             }
             if (!IsDeltaTracked(pool, trade.A, trade.B))

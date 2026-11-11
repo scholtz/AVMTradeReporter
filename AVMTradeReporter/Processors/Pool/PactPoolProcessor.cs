@@ -26,8 +26,16 @@ namespace AVMTradeReporter.Processors.Pool
             _assetRepository = assetRepository;
         }
 
+        /// <summary>
+        /// A tick based CLAMM pool read from the chain is stamped with the time the read started minus this margin, see
+        /// <see cref="LoadClammPoolAsync"/>.
+        /// </summary>
+        public static readonly TimeSpan ReadTimestampSafetyMargin = TimeSpan.FromMinutes(1);
+
         public async Task<AVMTradeReporter.Models.Data.Pool> LoadPoolAsync(string address, ulong appId)
         {
+            // before any algod read: the state read below contains at least every block committed before this instant
+            var readStartedAt = DateTimeOffset.Now;
             using var cancelationTokenSource = new CancellationTokenSource();
             var pool = await _poolRepository.GetPoolAsync(address, cancelationTokenSource.Token);
             var app = await _algod.GetApplicationByIDAsync(appId);
@@ -40,7 +48,7 @@ namespace AVMTradeReporter.Processors.Pool
             if (GetGlobalState(app, PactClammHelper.KeyCurrentPrice) != null)
             {
                 // Pact CLAMM (tick based concentrated liquidity, ARC4 contract)
-                return await LoadClammPoolAsync(pool, address, appId, app, cancelationTokenSource.Token);
+                return await LoadClammPoolAsync(pool, address, appId, app, readStartedAt, cancelationTokenSource.Token);
             }
 
             var A = app.Params.GlobalState.FirstOrDefault(p => p.Key == Convert.ToBase64String(Encoding.ASCII.GetBytes("A")));
@@ -331,10 +339,18 @@ namespace AVMTradeReporter.Processors.Pool
 
         /// <summary>
         /// Loads the Pact CLAMM pool (tick based concentrated liquidity). See <see cref="PactClammHelper"/> for the layout.
-        /// The contract does not expose reserves, so A / B are kept from the stored pool and updated incrementally from events.
+        /// The reserves are derived from the liquidity ranges read from the tick boxes.
+        ///
+        /// The pool is stamped with <paramref name="readStartedAt"/> minus <see cref="ReadTimestampSafetyMargin"/> (never
+        /// moving an existing timestamp backwards): the timestamp guards of the pool repository skip the events of older
+        /// blocks, which the read state already contains, while events of blocks near the read - possibly not contained in
+        /// it, given the time the reads take and block timestamp skew - are applied rather than skipped. Re-applying one is
+        /// harmless (a liquidity event reloads again, a swap reprices from its own post-swap price), skipping a liquidity
+        /// event the read missed would leave stale ranges.
         /// </summary>
-        private async Task<AVMTradeReporter.Models.Data.Pool> LoadClammPoolAsync(AVMTradeReporter.Models.Data.Pool? pool, string address, ulong appId, Algorand.Algod.Model.Application app, CancellationToken cancellationToken)
+        private async Task<AVMTradeReporter.Models.Data.Pool> LoadClammPoolAsync(AVMTradeReporter.Models.Data.Pool? pool, string address, ulong appId, Algorand.Algod.Model.Application app, DateTimeOffset readStartedAt, CancellationToken cancellationToken)
         {
+            var stateTimestamp = readStartedAt - ReadTimestampSafetyMargin;
             var assetA = GetGlobalState(app, "a");
             if (assetA == null) throw new Exception("a (asset A id) is missing in global params");
             var assetB = GetGlobalState(app, "b");
@@ -368,9 +384,9 @@ namespace AVMTradeReporter.Processors.Pool
             // reserves are not in the global state: split the pool into its liquidity ranges (contiguous ticks of equal
             // liquidity, read from the tick word boxes) and sum what every range holds at the current sqrt price.
             // The ranges are kept on the pool so every later swap can recompute the reserves exactly from its post-swap
-            // price. When the boxes cannot be read the stored ranges are kept if there are any - they are still valid, as
-            // every liquidity event drops them (PoolReserveUpdater.ApplyLiquidity) - and repriced; without them the stored
-            // (event tracked) reserves are kept.
+            // price. When the boxes cannot be read the stored ranges are kept if there are any and repriced - every indexed
+            // liquidity event drops them (PoolReserveUpdater.ApplyLiquidity), so they are as current as the event tracking
+            // could make the reserves; without them the stored (event tracked) reserves are kept.
             ulong reserveA = pool?.A ?? 0;
             ulong reserveB = pool?.B ?? 0;
             ulong activeLiquidity = pool?.L ?? 0;
@@ -389,6 +405,11 @@ namespace AVMTradeReporter.Processors.Pool
             if (ranges != null)
             {
                 (reserveA, reserveB, activeLiquidity) = TickMath.ApplyPrice(ranges, currentPrice.Value.Uint, spacing ?? 1, assetADecimals ?? 0, assetBDecimals ?? 0);
+                if (tick.HasValue)
+                {
+                    // the contract's current tick decides the active liquidity (exact also on a tick boundary)
+                    activeLiquidity = TickMath.LiquidityAtTick(ranges, tick.Value);
+                }
             }
 
             _logger.LogInformation("Processing Pact CLAMM pool {appId}", appId);
@@ -410,7 +431,7 @@ namespace AVMTradeReporter.Processors.Pool
                     CurrentTick = tick,
                     TickSpacing = spacing,
                     LiquidityRanges = ranges,
-                    Timestamp = DateTimeOffset.Now,
+                    Timestamp = stateTimestamp,
                     ApprovalProgramHash = hash,
                     LPFee = lpFee,
                     ProtocolFeePortion = protocolFeePortion,
@@ -446,7 +467,7 @@ namespace AVMTradeReporter.Processors.Pool
                 pool.LiquidityRanges = ranges;
                 if (updated)
                 {
-                    pool.Timestamp = DateTimeOffset.Now;
+                    pool.Timestamp = pool.Timestamp.HasValue && pool.Timestamp.Value > stateTimestamp ? pool.Timestamp : stateTimestamp;
                 }
             }
             if (updated)
