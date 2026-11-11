@@ -21,6 +21,20 @@ namespace AVMTradeReporter.Processors
         public const string MintSelector = "0ab9446c"; // mint(uint64,uint64,txn,txn)void
         public const string BurnSelector = "db75d435"; // burn(uint64,uint64)void
 
+        // The mainnet contract version (factory 3656084442, e.g. ALGO/USDC pool 3762241535) has a different liquidity ABI;
+        // swap and the vault calls are unchanged. Both versions are indexed.
+        /// <summary>
+        /// Mainnet mint: 4 uint64 args (tick_low, tick_high, two amounts); the A / B deposits to the vault are the two
+        /// transactions preceding the call (as with <see cref="MintSelector"/>) and the pool calls vault deposit.
+        /// Exact ABI signature not published - identified from the on-chain calls (e.g. tx RSTTQCD22Z6FYXZNP7M6IHUCGK6JPKPEO6U66UBG44OGBCWYSSGA).
+        /// </summary>
+        public const string MintV2Selector = "4d17cf3e";
+        /// <summary>
+        /// Mainnet burn(uint64,uint64,uint64,uint64)void: tick_low, tick_high, min A, min B; the pool calls vault withdraw
+        /// (e.g. tx V72L26OJRAONOULX4DZFMWAG7J4Y5RZZYCYH5M5YCVS674IQGFNQ).
+        /// </summary>
+        public const string BurnV2Selector = "2b3b3ec8";
+
         public const string VaultDepositSelector = "7da0eaa3";
         public const string VaultSwapSelector = "e7b7bb26";
         public const string VaultWithdrawSelector = "7864bf12";

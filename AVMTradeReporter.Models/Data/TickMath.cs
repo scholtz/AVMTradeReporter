@@ -9,7 +9,11 @@ namespace AVMTradeReporter.Models.Data
     ///   so tick t covers the B/A price range [1.0001^(-spacing*(t+1-1e6)), 1.0001^(-spacing*(t-1e6))]
     ///   (the price of A in B decreases with the tick)
     /// - liquidity per tick is stored in boxes named by an 8 byte "word" w (100 ticks per word, tick = 1e6 + (w - 1e6) * 100 + i)
-    ///   as 100 records of 10 bytes: uint16 flags + uint64 liquidity active in that tick
+    ///   as 100 records of 10 bytes: big endian uint80 liquidity active in that tick
+    /// - a position minted over (tick_low, tick_high) adds its liquidity to the ticks [tick_low, tick_high) - tick_high is
+    ///   exclusive (verified on mainnet pool 3762241535: the C3OJVQPD... mint deposit matches the formula to 1 base unit)
+    /// - verified on mainnet ALGO/USDC pool 3762241535 (contract of factory 3656084442): the reserves summed over the
+    ///   tick boxes equal the TVL Pact reports for the pool
     /// </summary>
     public static class TickMath
     {
@@ -56,6 +60,12 @@ namespace AVMTradeReporter.Models.Data
             {
                 var offset = i * TickRecordSize;
                 if (offset + TickRecordSize > value.Length) yield break;
+                // the record is a big endian uint80 (the mint / burn logs carry the position liquidity as uint80 too);
+                // a value that does not fit uint64 cannot be represented - fail the read so the caller falls back
+                if (value[offset] != 0 || value[offset + 1] != 0)
+                {
+                    throw new OverflowException($"Liquidity of tick {WordToTick(word, i)} exceeds uint64");
+                }
                 ulong liquidity = 0;
                 for (var j = 2; j < TickRecordSize; j++)
                 {
@@ -71,27 +81,9 @@ namespace AVMTradeReporter.Models.Data
         /// </summary>
         public static (ulong A, ulong B) ComputeReserves(IEnumerable<(ulong Tick, ulong Liquidity)> ticks, ulong sqrtPriceX64, ulong tickSpacing)
         {
-            var sqrtP = sqrtPriceX64 / TwoPow64;
-            double totalA = 0, totalB = 0;
-            foreach (var (tick, liquidity) in ticks)
-            {
-                var sa = TickToSqrtPrice(tick + 1, tickSpacing); // lower price boundary
-                var sb = TickToSqrtPrice(tick, tickSpacing);     // upper price boundary
-                if (sqrtP <= sa)
-                {
-                    totalA += liquidity * (1 / sa - 1 / sb);
-                }
-                else if (sqrtP >= sb)
-                {
-                    totalB += liquidity * (sb - sa);
-                }
-                else
-                {
-                    totalA += liquidity * (1 / sqrtP - 1 / sb);
-                    totalB += liquidity * (sqrtP - sa);
-                }
-            }
-            return (ToUlong(totalA), ToUlong(totalB));
+            var ranges = BuildRanges(ticks);
+            var (a, b, _) = ApplyPrice(ranges, sqrtPriceX64, tickSpacing, 0, 0);
+            return (a, b);
         }
 
         /// <summary>
@@ -104,6 +96,98 @@ namespace AVMTradeReporter.Models.Data
                 if (tick == currentTick) return liquidity;
             }
             return 0;
+        }
+
+        /// <summary>
+        /// Splits the per-tick liquidity into contiguous ranges of equal liquidity (adjacent ticks with the same liquidity
+        /// are merged), ordered by tick. Each range acts as a standalone concentrated liquidity position, see
+        /// <see cref="PoolLiquidityRange"/>. Amounts and prices are filled by <see cref="ApplyPrice"/>.
+        /// </summary>
+        public static List<PoolLiquidityRange> BuildRanges(IEnumerable<(ulong Tick, ulong Liquidity)> ticks)
+        {
+            var result = new List<PoolLiquidityRange>();
+            PoolLiquidityRange? current = null;
+            foreach (var (tick, liquidity) in ticks.Where(t => t.Liquidity > 0).OrderBy(t => t.Tick))
+            {
+                if (current != null && current.Liquidity == liquidity && current.TickHigh + 1 == tick)
+                {
+                    current.TickHigh = tick;
+                    continue;
+                }
+                current = new PoolLiquidityRange { TickLow = tick, TickHigh = tick, Liquidity = liquidity };
+                result.Add(current);
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Fills the amounts held by every range at the given sqrt price (Q64.64) and the decimals adjusted price bounds,
+        /// and returns the pool totals and the liquidity active at that price.
+        ///
+        /// The ticks of a range cover the sqrt price interval [sqrt(TickHigh + 1), sqrt(TickLow)] (the price of A in B
+        /// decreases with the tick). Below the interval the range holds only A, above it only B, inside both:
+        /// A = L * (1/sqrtP - 1/sqrtUpper), B = L * (sqrtP - sqrtLower) - the standard concentrated liquidity formula.
+        /// </summary>
+        public static (ulong A, ulong B, ulong ActiveLiquidity) ApplyPrice(List<PoolLiquidityRange> ranges, ulong sqrtPriceX64, ulong tickSpacing, ulong assetADecimals, ulong assetBDecimals)
+        {
+            var sqrtP = sqrtPriceX64 / TwoPow64;
+            var decimalsShift = Math.Pow(10, (double)assetADecimals - (double)assetBDecimals);
+            double totalA = 0, totalB = 0;
+            ulong active = 0;
+            foreach (var range in ranges)
+            {
+                var sa = TickToSqrtPrice(range.TickHigh + 1, tickSpacing); // lower price boundary
+                var sb = TickToSqrtPrice(range.TickLow, tickSpacing);      // upper price boundary
+                double a, b;
+                if (sqrtP <= sa)
+                {
+                    a = range.Liquidity * (1 / sa - 1 / sb);
+                    b = 0;
+                }
+                else if (sqrtP >= sb)
+                {
+                    a = 0;
+                    b = range.Liquidity * (sb - sa);
+                }
+                else
+                {
+                    a = range.Liquidity * (1 / sqrtP - 1 / sb);
+                    b = range.Liquidity * (sqrtP - sa);
+                    active = range.Liquidity;
+                }
+                range.A = ToUlong(a);
+                range.B = ToUlong(b);
+                range.PMin = ToDecimalPrice(sa * sa * decimalsShift);
+                range.PMax = ToDecimalPrice(sb * sb * decimalsShift);
+                totalA += a;
+                totalB += b;
+            }
+            return (ToUlong(totalA), ToUlong(totalB), active);
+        }
+
+        /// <summary>
+        /// Same ranges (tick bounds and liquidity) - amounts and prices are derived and ignored.
+        /// </summary>
+        public static bool SameRanges(IReadOnlyList<PoolLiquidityRange>? left, IReadOnlyList<PoolLiquidityRange>? right)
+        {
+            if (left == null || right == null) return left == null && right == null;
+            if (left.Count != right.Count) return false;
+            for (var i = 0; i < left.Count; i++)
+            {
+                if (left[i].TickLow != right[i].TickLow || left[i].TickHigh != right[i].TickHigh || left[i].Liquidity != right[i].Liquidity) return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Converts the decimals adjusted price to decimal; prices outside of the decimal range (extreme ticks) are clamped,
+        /// 0 meaning "unbounded below" and <see cref="decimal.MaxValue"/> "unbounded above".
+        /// </summary>
+        private static decimal ToDecimalPrice(double price)
+        {
+            if (double.IsNaN(price) || price <= 1e-28) return 0;
+            if (double.IsInfinity(price) || price >= (double)decimal.MaxValue) return decimal.MaxValue;
+            return Convert.ToDecimal(price);
         }
 
         private static ulong ToUlong(double value)

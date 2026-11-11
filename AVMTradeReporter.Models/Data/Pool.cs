@@ -39,6 +39,13 @@ namespace AVMTradeReporter.Models.Data
         /// Tick spacing of the tick based CLAMM pool.
         /// </summary>
         public ulong? TickSpacing { get; set; }
+        /// <summary>
+        /// Liquidity distribution of the tick based CLAMM pool: contiguous tick ranges of equal liquidity loaded from the pool
+        /// box storage, each acting as a standalone concentrated liquidity position (see <see cref="PoolLiquidityRange"/>).
+        /// A / B are the sums of the ranges' amounts at the current price. Null when the boxes were not (successfully) read,
+        /// in which case the reserves are tracked incrementally from the events.
+        /// </summary>
+        public List<PoolLiquidityRange>? LiquidityRanges { get; set; }
         // protocol fees in A asset
         public ulong? AF { get; set; }
         // protocol fees in B asset
@@ -473,6 +480,7 @@ namespace AVMTradeReporter.Models.Data
                 CurrentPrice = CurrentPrice == null || CurrentPrice == 0 ? null : 1 / CurrentPrice,
                 CurrentTick = CurrentTick,
                 TickSpacing = TickSpacing,
+                LiquidityRanges = LiquidityRanges?.Select(r => r.Reverse()).ToList(),
                 AF = BF,
                 BF = AF,
                 L = L,

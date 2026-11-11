@@ -18,6 +18,18 @@ namespace AVMTradeReporter.Models.Data
 
         public static void ApplyTrade(Pool pool, Trade trade)
         {
+            if (pool.AMMType == AMMType.TickBasedCLAMM && pool.LiquidityRanges != null && trade.A == 0 && trade.B == 0)
+            {
+                // a swap moves only the price, never the per-tick liquidity: the reserves follow exactly from the loaded
+                // liquidity ranges at the post-swap price. A swap that left the price untouched (no current_price in the
+                // global delta) left the reserves untouched too.
+                if (trade.PoolSqrtPriceX64.HasValue && trade.PoolSqrtPriceX64.Value > 0)
+                {
+                    ApplyRanges(pool, trade.PoolSqrtPriceX64.Value);
+                }
+                ApplyPrice(pool, trade);
+                return;
+            }
             if (!IsDeltaTracked(pool, trade.A, trade.B))
             {
                 pool.A = trade.A;
@@ -38,6 +50,19 @@ namespace AVMTradeReporter.Models.Data
         }
 
         /// <summary>
+        /// Recomputes the reserves (A, B), the active liquidity (L) and the per-range amounts of a tick based CLAMM pool
+        /// from its liquidity ranges at the given sqrt price (Q64.64).
+        /// </summary>
+        public static void ApplyRanges(Pool pool, ulong sqrtPriceX64)
+        {
+            if (pool.LiquidityRanges == null) return;
+            var (a, b, active) = TickMath.ApplyPrice(pool.LiquidityRanges, sqrtPriceX64, pool.TickSpacing ?? 1, pool.AssetADecimals ?? 0, pool.AssetBDecimals ?? 0);
+            pool.A = a;
+            pool.B = b;
+            pool.L = active;
+        }
+
+        /// <summary>
         /// Updates the pool price / tick from the post-swap state carried by the trade (tick based CLAMM pools).
         /// </summary>
         public static void ApplyPrice(Pool pool, Trade trade)
@@ -54,6 +79,12 @@ namespace AVMTradeReporter.Models.Data
 
         public static void ApplyLiquidity(Pool pool, Liquidity liquidity)
         {
+            if (pool.AMMType == AMMType.TickBasedCLAMM)
+            {
+                // the event changed the per-tick liquidity, so the loaded ranges are stale: fall back to the incremental
+                // tracking below until the ranges are reloaded from the box storage (PoolRepository reloads them right away)
+                pool.LiquidityRanges = null;
+            }
             if (!IsDeltaTracked(pool, liquidity.A, liquidity.B))
             {
                 pool.A = liquidity.A;

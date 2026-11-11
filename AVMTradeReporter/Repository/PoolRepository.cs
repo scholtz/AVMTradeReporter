@@ -381,7 +381,10 @@ namespace AVMTradeReporter.Repository
                             { "l", new LongNumberProperty() },
                             { "protocol", new KeywordProperty() },
                             { "scamRating", new IntegerNumberProperty() },
-                            { "timestamp", new DateProperty() }
+                            { "timestamp", new DateProperty() },
+                            // tick based CLAMM liquidity distribution: kept in _source only (never queried), so uint64
+                            // liquidity values above long.MaxValue can never get the pool document rejected by the mapping
+                            { "liquidityRanges", new ObjectProperty { Enabled = false } }
                         }
                     }
                 }
@@ -699,6 +702,11 @@ namespace AVMTradeReporter.Repository
 
                 await StorePoolAsync(existingPool, true, cancellationToken);
 
+                if (existingPool.AMMType == AMMType.TickBasedCLAMM)
+                {
+                    await ReloadTickBasedPoolAsync(existingPool, cancellationToken);
+                }
+
                 _logger.LogDebug("Updated pool from liquidity: {poolAddress}_{poolAppId}_{protocol}",
                     liquidity.PoolAddress, liquidity.PoolAppId, liquidity.Protocol);
             }
@@ -915,6 +923,28 @@ namespace AVMTradeReporter.Repository
         /// <summary>
         /// Tries to enrich a pool with missing data by running the appropriate pool processor
         /// </summary>
+        /// <summary>
+        /// A liquidity add / remove changed the per-tick liquidity of a tick based CLAMM pool (and dropped its stale
+        /// liquidity ranges, see <see cref="PoolReserveUpdater.ApplyLiquidity"/>): reload the ranges and the exact reserves
+        /// from the pool box storage. On failure the pool keeps the incrementally tracked reserves until the next refresh.
+        /// The boxes hold the current on-chain state, so while the indexer catches up on old blocks the reload is ahead of
+        /// the processed history; it converges once the indexer reaches the chain tip.
+        /// </summary>
+        private async Task ReloadTickBasedPoolAsync(Pool pool, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var processor = GetPoolProcessor(pool.Protocol);
+                if (processor == null) return;
+                await processor.LoadPoolAsync(pool.PoolAddress, pool.PoolAppId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to reload liquidity ranges of tick based pool {poolAddress}_{poolAppId}, keeping event tracked reserves",
+                    pool.PoolAddress, pool.PoolAppId);
+            }
+        }
+
         private async Task<Pool?> TryEnrichPoolWithProcessor(Pool pool, CancellationToken cancellationToken)
         {
             try

@@ -365,19 +365,24 @@ namespace AVMTradeReporter.Processors.Pool
             ulong? tick = currentTick?.Value.Uint;
             ulong? spacing = tickSpacing?.Value.Uint;
 
-            // reserves are not in the global state: sum the liquidity of every tick (stored in the tick word boxes)
-            // at the current sqrt price. Falls back to the stored (event tracked) reserves when the boxes cannot be read.
+            // reserves are not in the global state: split the pool into its liquidity ranges (contiguous ticks of equal
+            // liquidity, read from the tick word boxes) and sum what every range holds at the current sqrt price.
+            // The ranges are kept on the pool so every later swap can recompute the reserves exactly from its post-swap
+            // price. Falls back to the stored (event tracked) reserves - and drops the ranges, which can no longer be
+            // trusted - when the boxes cannot be read.
             ulong reserveA = pool?.A ?? 0;
             ulong reserveB = pool?.B ?? 0;
             ulong activeLiquidity = pool?.L ?? 0;
+            List<PoolLiquidityRange>? ranges = null;
             try
             {
                 var ticks = await LoadClammTicksAsync(appId);
-                (reserveA, reserveB) = TickMath.ComputeReserves(ticks, currentPrice.Value.Uint, spacing ?? 1);
-                activeLiquidity = tick.HasValue ? TickMath.ActiveLiquidity(ticks, tick.Value) : 0;
+                ranges = TickMath.BuildRanges(ticks);
+                (reserveA, reserveB, activeLiquidity) = TickMath.ApplyPrice(ranges, currentPrice.Value.Uint, spacing ?? 1, assetADecimals ?? 0, assetBDecimals ?? 0);
             }
             catch (Exception ex)
             {
+                ranges = null;
                 _logger.LogWarning(ex, "Failed to compute reserves of Pact CLAMM pool {appId} from tick boxes, keeping stored reserves", appId);
             }
 
@@ -399,6 +404,7 @@ namespace AVMTradeReporter.Processors.Pool
                     CurrentPrice = price,
                     CurrentTick = tick,
                     TickSpacing = spacing,
+                    LiquidityRanges = ranges,
                     Timestamp = DateTimeOffset.Now,
                     ApprovalProgramHash = hash,
                     LPFee = lpFee,
@@ -430,6 +436,9 @@ namespace AVMTradeReporter.Processors.Pool
                 if (pool.CurrentPrice != price) { pool.CurrentPrice = price; updated = true; }
                 if (pool.CurrentTick != tick) { pool.CurrentTick = tick; updated = true; }
                 if (pool.TickSpacing != spacing) { pool.TickSpacing = spacing; updated = true; }
+                if (!TickMath.SameRanges(pool.LiquidityRanges, ranges)) { updated = true; }
+                // always take the freshly priced ranges: their amounts follow the current price even when the bounds did not change
+                pool.LiquidityRanges = ranges;
                 if (updated)
                 {
                     pool.Timestamp = DateTimeOffset.Now;
