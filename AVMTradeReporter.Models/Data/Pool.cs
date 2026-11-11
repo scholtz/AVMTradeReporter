@@ -55,7 +55,10 @@ namespace AVMTradeReporter.Models.Data
         /// <summary>
         /// Raw contract current_price (Q64.64 sqrt price in the orientation of <see cref="TickOrigin"/>) of a tick based
         /// CLAMM pool - <see cref="CurrentPrice"/> is derived from it. Raw contract value, unaffected by <see cref="Reverse"/>.
+        /// In memory only (re-read from chain / set by the next swap after a restart): a Q64.64 value above long.MaxValue
+        /// would be rejected by the dynamically mapped pools index, see <see cref="Trade.PoolSqrtPriceX64"/>.
         /// </summary>
+        [JsonIgnore]
         public ulong? SqrtPriceX64 { get; set; }
         /// <summary>
         /// In-memory counter of the events applied to this pool instance (<see cref="PoolReserveUpdater"/>), never

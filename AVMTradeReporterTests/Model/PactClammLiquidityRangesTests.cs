@@ -399,5 +399,24 @@ namespace AVMTradeReporterTests.Model
             Assert.That(pool.CurrentPrice, Is.EqualTo(0.98675m).Within(0.0001m));
             Assert.That(pool.SqrtPriceX64, Is.EqualTo(18324627607556582812UL));
         }
+
+        [Test]
+        public void RawSqrtPricesAreNeverSerialized()
+        {
+            // a Q64.64 sqrt price above 0.5 exceeds long.MaxValue: the dynamically (long) mapped trades / pools indexes
+            // rejected the whole document (USDC/POW 3764749314 lost the trades of rounds 66736698 and 66736741)
+            var trade = new Trade { TxId = "T", PoolSqrtPriceX64 = 18324627607556582812UL, PoolTick = 1000000 };
+            var tradeJson = System.Text.Json.JsonSerializer.Serialize(trade);
+            Assert.That(tradeJson, Does.Not.Contain("SqrtPrice").IgnoreCase);
+            Assert.That(tradeJson, Does.Not.Contain("18324627607556582812"));
+            Assert.That(tradeJson, Does.Contain("1000000"));
+
+            var pool = MakePool(TickMath.BuildRanges(LoadTicks()));
+            pool.SqrtPriceX64 = 18324627607556582812UL;
+            var poolJson = System.Text.Json.JsonSerializer.Serialize(pool);
+            Assert.That(poolJson, Does.Not.Contain("SqrtPrice").IgnoreCase);
+            Assert.That(poolJson, Does.Not.Contain("EventVersion"));
+            Assert.That(poolJson, Does.Contain("LiquidityRanges"));
+        }
 }
 }

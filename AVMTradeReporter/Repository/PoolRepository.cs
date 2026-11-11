@@ -967,21 +967,6 @@ namespace AVMTradeReporter.Repository
             }
         }
 
-        /// <summary>
-        /// A liquidity add / remove changed the per-tick liquidity of a tick based CLAMM pool (and dropped its stale
-        /// liquidity ranges, see <see cref="PoolReserveUpdater.ApplyLiquidity"/>): reload the ranges and the exact reserves
-        /// from the pool box storage. Returns the reloaded pool when the ranges were loaded, null when the reload failed;
-        /// the caller stores the result either way.
-        ///
-        /// The boxes and the global state are read at the chain tip, so the reloaded pool (ranges, price and reserves) is the
-        /// on-chain state as of the read, and the processor stamps it with the time the read started minus a safety margin
-        /// (<see cref="PactPoolProcessor.ReadTimestampSafetyMargin"/>). The timestamp guards of
-        /// <see cref="UpdatePoolFromTrade"/> / <see cref="UpdatePoolFromLiquidity"/> then skip the events of older blocks,
-        /// which that state already contains, so while the indexer catches up no historical swap is applied to the newer
-        /// ranges. Events of blocks near the read are applied rather than skipped: re-applying one is harmless (a liquidity
-        /// event reloads again, a swap reprices from its own post-swap price and the next swap corrects it), whereas skipping
-        /// a liquidity event the read did not include would leave stale ranges.
-        /// </summary>
         private static readonly ConcurrentDictionary<string, DateTimeOffset> _tickPoolMigrationAttempts = new();
         private static readonly TimeSpan TickPoolMigrationRetryInterval = TimeSpan.FromMinutes(10);
 
@@ -998,19 +983,37 @@ namespace AVMTradeReporter.Repository
             return _tickPoolMigrationAttempts.TryUpdate(poolAddress, now, last);
         }
 
+        /// <summary>
+        /// A liquidity add / remove changed the per-tick liquidity of a tick based CLAMM pool (and dropped its stale
+        /// liquidity ranges, see <see cref="PoolReserveUpdater.ApplyLiquidity"/>): reload the ranges and the exact reserves
+        /// from the pool box storage. Returns the reloaded pool when the ranges were loaded, null when the reload failed;
+        /// the caller stores the result either way.
+        ///
+        /// The boxes and the global state are read at the chain tip, so the reloaded pool (ranges, price and reserves) is the
+        /// on-chain state as of the read, and the processor stamps it with the time the read started minus a safety margin
+        /// (<see cref="PactPoolProcessor.ReadTimestampSafetyMargin"/>). The timestamp guards of
+        /// <see cref="UpdatePoolFromTrade"/> / <see cref="UpdatePoolFromLiquidity"/> then skip the events of older blocks,
+        /// which that state already contains, so while the indexer catches up no historical swap is applied to the newer
+        /// ranges. Events of blocks near the read are applied rather than skipped: re-applying one is harmless (a liquidity
+        /// event reloads again, a swap reprices from its own post-swap price and the next swap corrects it), whereas skipping
+        /// a liquidity event the read did not include would leave stale ranges.
+        /// </summary>
         private async Task<Pool?> ReloadTickBasedPoolAsync(Pool pool)
         {
             try
             {
                 var processor = GetPoolProcessor(pool.Protocol);
                 if (processor == null) return null;
-                // another event applied while the chain was read makes the processor keep the event state (no ranges yet):
-                // read again, a few times at most - a box read failure ends the same way
+                // a liquidity event applied while the chain was read makes the processor keep the event state (no ranges
+                // yet): read again, a few times at most. A read that failed on its own (no concurrent liquidity event) is
+                // not retried - the next event or refresh tries again.
                 for (var attempt = 0; attempt < 3; attempt++)
                 {
+                    var liquidityVersion = pool.LiquidityVersion;
                     var reloaded = await processor.LoadPoolAsync(pool.PoolAddress, pool.PoolAppId);
                     // a scam-zeroed pool never keeps ranges (ScamRatingPolicy), its reload succeeded nevertheless
                     if (reloaded != null && (reloaded.LiquidityRanges != null || ScamRatingPolicy.ShouldZeroBalances(reloaded.ScamRating))) return reloaded;
+                    if (pool.LiquidityVersion == liquidityVersion) return null;
                 }
                 return null;
             }

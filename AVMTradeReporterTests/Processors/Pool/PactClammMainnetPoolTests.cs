@@ -211,6 +211,7 @@ namespace AVMTradeReporterTests.Processors.Pool
             var pool = await processor.LoadPoolAsync(Address, AppId);
             var timestamp = pool.Timestamp;
             pool.LiquidityRanges = null; // e.g. dropped by a mint whose reload this is - a swap must not starve the reload
+            pool.LPFee = 0.5m; // stale metadata is still refreshed from the read
             const ulong swapSqrtPrice = 5537708898821207296UL;
             handler.OnBoxListing = () => PoolReserveUpdater.ApplyTrade(pool, new Trade { AssetIdIn = 0, AssetIdOut = 31566704, PoolSqrtPriceX64 = swapSqrtPrice });
             var expectedPrice = TickMath.SqrtPriceX64ToPrice(swapSqrtPrice, 6, 6);
@@ -219,7 +220,8 @@ namespace AVMTradeReporterTests.Processors.Pool
 
             Assert.That(refreshed, Is.SameAs(pool));
             Assert.That(refreshed.CurrentPrice, Is.EqualTo(expectedPrice), "the read state overwrote the swap applied meanwhile");
-            Assert.That(refreshed.Timestamp, Is.EqualTo(timestamp));
+            Assert.That(refreshed.Timestamp, Is.GreaterThanOrEqualTo(timestamp));
+            Assert.That(refreshed.LPFee, Is.EqualTo(0.003m));
             // a swap never changes the per-tick liquidity: the fresh ranges are taken and priced at the swap's price
             Assert.That(refreshed.LiquidityRanges, Has.Count.EqualTo(50));
             var expected = TickMath.ApplyPrice(TickMath.CloneRanges(refreshed.LiquidityRanges!), swapSqrtPrice, 60, TickMath.TickBase, 6, 6);

@@ -402,7 +402,8 @@ namespace AVMTradeReporter.Processors.Pool
                 _logger.LogWarning("Pact CLAMM pool {appId} uses unexpected price scale {scale}; price conversion assumes Q64.64", appId, scale.Value.Uint);
             }
             ulong origin = tickOriginState?.Value.Uint ?? TickMath.TickBase;
-            var price = PactClammHelper.SqrtPriceX64ToPrice(currentPrice.Value.Uint, assetADecimals ?? 0, assetBDecimals ?? 0, origin);
+            ulong sqrtPrice = currentPrice.Value.Uint;
+            var price = PactClammHelper.SqrtPriceX64ToPrice(sqrtPrice, assetADecimals ?? 0, assetBDecimals ?? 0, origin);
             ulong? tick = currentTick?.Value.Uint;
             ulong? spacing = tickSpacing?.Value.Uint;
 
@@ -431,7 +432,7 @@ namespace AVMTradeReporter.Processors.Pool
             }
             if (ranges != null)
             {
-                (reserveA, reserveB, activeLiquidity) = TickMath.ApplyPrice(ranges, currentPrice.Value.Uint, spacing ?? 1, origin, assetADecimals ?? 0, assetBDecimals ?? 0);
+                (reserveA, reserveB, activeLiquidity) = TickMath.ApplyPrice(ranges, sqrtPrice, spacing ?? 1, origin, assetADecimals ?? 0, assetBDecimals ?? 0);
                 if (tick.HasValue)
                 {
                     // the contract's current tick decides the active liquidity (exact also on a tick boundary)
@@ -458,16 +459,15 @@ namespace AVMTradeReporter.Processors.Pool
             {
                 // only swaps were applied meanwhile: their price / tick / origin are newer than the read and stay, but a
                 // swap never changes the per-tick liquidity, so the freshly read ranges are valid - reprice them at the
-                // pool's own (event) price
-                if (freshRanges && ranges != null && pool.SqrtPriceX64.HasValue)
-                {
-                    // a pool stored before the origin was tracked: the swaps did not cross price 1 (that sets it), so the read one holds
-                    pool.TickOrigin ??= origin;
-                    pool.LiquidityRanges = ranges;
-                    PoolReserveUpdater.ApplyRanges(pool, pool.SqrtPriceX64.Value);
-                    await _poolRepository.StorePoolAsync(pool, true, cancellationToken);
-                }
-                return pool;
+                // pool's own (event) price; everything else (fees, hash, decimals) is refreshed from the read as usual
+                if (!freshRanges || ranges == null || !pool.SqrtPriceX64.HasValue) return pool;
+                sqrtPrice = pool.SqrtPriceX64.Value;
+                // a pool stored before the origin was tracked: the swaps did not cross price 1 (that sets it), so the read one holds
+                origin = pool.TickOrigin ?? origin;
+                tick = pool.CurrentTick ?? tick;
+                price = pool.CurrentPrice ?? price;
+                (reserveA, reserveB, activeLiquidity) = TickMath.ApplyPrice(ranges, sqrtPrice, spacing ?? 1, origin, assetADecimals ?? 0, assetBDecimals ?? 0);
+                if (tick.HasValue) activeLiquidity = TickMath.LiquidityAtTick(ranges, tick.Value);
             }
 
             var updated = false;
@@ -487,7 +487,7 @@ namespace AVMTradeReporter.Processors.Pool
                     CurrentTick = tick,
                     TickSpacing = spacing,
                     TickOrigin = origin,
-                    SqrtPriceX64 = currentPrice.Value.Uint,
+                    SqrtPriceX64 = sqrtPrice,
                     LiquidityRanges = ranges,
                     Timestamp = stateTimestamp,
                     ApprovalProgramHash = hash,
@@ -521,7 +521,7 @@ namespace AVMTradeReporter.Processors.Pool
                 if (pool.CurrentTick != tick) { pool.CurrentTick = tick; updated = true; }
                 if (pool.TickSpacing != spacing) { pool.TickSpacing = spacing; updated = true; }
                 if (pool.TickOrigin != origin) { pool.TickOrigin = origin; updated = true; }
-                if (pool.SqrtPriceX64 != currentPrice.Value.Uint) { pool.SqrtPriceX64 = currentPrice.Value.Uint; updated = true; }
+                if (pool.SqrtPriceX64 != sqrtPrice) { pool.SqrtPriceX64 = sqrtPrice; updated = true; }
                 if (!TickMath.SameRanges(pool.LiquidityRanges, ranges)) { updated = true; }
                 // always take the freshly priced ranges: their amounts follow the current price even when the bounds did not change
                 pool.LiquidityRanges = ranges;

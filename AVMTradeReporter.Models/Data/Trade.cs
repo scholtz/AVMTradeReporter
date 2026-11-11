@@ -98,7 +98,13 @@ namespace AVMTradeReporter.Models.Data
 
         /// <summary>
         /// Pool sqrt price after the swap (Q64.64, tick based CLAMM pools only). Used to update Pool.CurrentPrice.
+        ///
+        /// Never serialized: the raw Q64.64 value exceeds long.MaxValue whenever the sqrt price is above 0.5, and the
+        /// dynamically mapped (long) field of the trades index then rejected the whole trade document - those trades were
+        /// lost and did not update their pool (e.g. USDC/POW 3764749314 rounds 66736698 and 66736741). The value is only
+        /// needed in process (pool repricing), the trade is passed there as an object.
         /// </summary>
+        [System.Text.Json.Serialization.JsonIgnore]
         public ulong? PoolSqrtPriceX64 { get; set; }
 
         /// <summary>
