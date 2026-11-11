@@ -176,8 +176,42 @@ namespace AVMTradeReporterTests.Model
             Assert.That(pool.B, Is.EqualTo(expected.B));
             Assert.That(pool.L, Is.EqualTo(expected.ActiveLiquidity));
             Assert.That(pool.CurrentPrice, Is.EqualTo(TickMath.SqrtPriceX64ToPrice(SqrtPriceAfterSwap, 6, 6)));
-            Assert.That(pool.LiquidityRanges, Is.SameAs(ranges));
-            Assert.That(ranges.Single(r => r.TickLow == 1000401).A, Is.GreaterThan(0));
+            // the repriced ranges are a new list: the previous one (possibly being serialized) is left untouched
+            Assert.That(pool.LiquidityRanges, Is.Not.SameAs(ranges));
+            Assert.That(TickMath.SameRanges(pool.LiquidityRanges, ranges), Is.True);
+            Assert.That(pool.LiquidityRanges!.Single(r => r.TickLow == 1000401).A, Is.GreaterThan(0));
+            Assert.That(ranges.All(r => r.A == 0 && r.B == 0 && r.PMin == 0 && r.PMax == 0), Is.True);
+        }
+
+        [Test]
+        public void PriceOnRangeBoundaryBelongsToTheRangeStartingThere()
+        {
+            // the active tick 1000401 starts (lower sqrt price bound) at sqrt(1.0001^(-30 * 402)); a price exactly there is
+            // inside tick 1000401, not in a gap between ranges
+            var ranges = TickMath.BuildRanges(LoadTicks());
+            var lowerBound = TickMath.TickToSqrtPrice(1000402, TickSpacing);
+            // at ~5.5e18 a double is integer valued, so the Q64.64 value converts back to exactly the bound
+            var sqrtPriceX64 = (ulong)(lowerBound * 18446744073709551616.0);
+            Assert.That(sqrtPriceX64 / 18446744073709551616.0, Is.EqualTo(lowerBound));
+
+            var (_, _, active) = TickMath.ApplyPrice(ranges, sqrtPriceX64, TickSpacing, 6, 6);
+
+            Assert.That(active, Is.EqualTo(337_594_319_121UL));
+        }
+
+        [Test]
+        public void ReverseMapsUnboundedBoundsOntoEachOther()
+        {
+            var range = new PoolLiquidityRange { PMin = 0, PMax = decimal.MaxValue, A = 1, B = 2 };
+
+            var reversed = range.Reverse();
+
+            Assert.That(reversed.PMin, Is.EqualTo(0));
+            Assert.That(reversed.PMax, Is.EqualTo(decimal.MaxValue));
+            Assert.That(reversed.A, Is.EqualTo(2));
+            Assert.That(reversed.B, Is.EqualTo(1));
+            Assert.That(new PoolLiquidityRange { PMin = 0, PMax = 4 }.Reverse().PMax, Is.EqualTo(decimal.MaxValue));
+            Assert.That(new PoolLiquidityRange { PMin = 0, PMax = 4 }.Reverse().PMin, Is.EqualTo(0.25m));
         }
 
         [Test]

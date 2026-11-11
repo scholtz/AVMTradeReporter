@@ -368,8 +368,9 @@ namespace AVMTradeReporter.Processors.Pool
             // reserves are not in the global state: split the pool into its liquidity ranges (contiguous ticks of equal
             // liquidity, read from the tick word boxes) and sum what every range holds at the current sqrt price.
             // The ranges are kept on the pool so every later swap can recompute the reserves exactly from its post-swap
-            // price. Falls back to the stored (event tracked) reserves - and drops the ranges, which can no longer be
-            // trusted - when the boxes cannot be read.
+            // price. When the boxes cannot be read the stored ranges are kept if there are any - they are still valid, as
+            // every liquidity event drops them (PoolReserveUpdater.ApplyLiquidity) - and repriced; without them the stored
+            // (event tracked) reserves are kept.
             ulong reserveA = pool?.A ?? 0;
             ulong reserveB = pool?.B ?? 0;
             ulong activeLiquidity = pool?.L ?? 0;
@@ -378,12 +379,16 @@ namespace AVMTradeReporter.Processors.Pool
             {
                 var ticks = await LoadClammTicksAsync(appId);
                 ranges = TickMath.BuildRanges(ticks);
-                (reserveA, reserveB, activeLiquidity) = TickMath.ApplyPrice(ranges, currentPrice.Value.Uint, spacing ?? 1, assetADecimals ?? 0, assetBDecimals ?? 0);
             }
             catch (Exception ex)
             {
-                ranges = null;
-                _logger.LogWarning(ex, "Failed to compute reserves of Pact CLAMM pool {appId} from tick boxes, keeping stored reserves", appId);
+                ranges = pool?.LiquidityRanges == null ? null : TickMath.CloneRanges(pool.LiquidityRanges);
+                _logger.LogWarning(ex, "Failed to read the tick boxes of Pact CLAMM pool {appId}, {fallback}", appId,
+                    ranges == null ? "keeping the event tracked reserves" : "repricing the stored liquidity ranges");
+            }
+            if (ranges != null)
+            {
+                (reserveA, reserveB, activeLiquidity) = TickMath.ApplyPrice(ranges, currentPrice.Value.Uint, spacing ?? 1, assetADecimals ?? 0, assetBDecimals ?? 0);
             }
 
             _logger.LogInformation("Processing Pact CLAMM pool {appId}", appId);
@@ -461,14 +466,29 @@ namespace AVMTradeReporter.Processors.Pool
             var result = new List<(ulong Tick, ulong Liquidity)>();
             var boxes = await _algod.GetApplicationBoxesAsync(appId, null);
             if (boxes?.Boxes == null) return result;
-            foreach (var descriptor in boxes.Boxes)
+            var words = boxes.Boxes
+                .Where(d => d.Name != null && d.Name.Length == 8)
+                .Select(d => (Name: d.Name, Word: BitConverter.ToUInt64(d.Name.Reverse().ToArray(), 0)))
+                .Where(w => w.Word >= TickMath.TickBase)
+                .ToList();
+            // the word boxes are independent - read them concurrently (a handful per pool, bounded to stay polite to algod)
+            using var throttle = new SemaphoreSlim(8);
+            var reads = words.Select(async w =>
             {
-                if (descriptor.Name == null || descriptor.Name.Length != 8) continue;
-                var word = BitConverter.ToUInt64(descriptor.Name.Reverse().ToArray(), 0);
-                if (word < TickMath.TickBase) continue;
-                var box = await _algod.GetApplicationBoxByNameAsync(appId, "b64:" + Convert.ToBase64String(descriptor.Name));
-                if (box?.Value == null) continue;
-                result.AddRange(TickMath.ParseTickWord(word, box.Value));
+                await throttle.WaitAsync();
+                try
+                {
+                    var box = await _algod.GetApplicationBoxByNameAsync(appId, "b64:" + Convert.ToBase64String(w.Name));
+                    return box?.Value == null ? new List<(ulong Tick, ulong Liquidity)>() : TickMath.ParseTickWord(w.Word, box.Value).ToList();
+                }
+                finally
+                {
+                    throttle.Release();
+                }
+            });
+            foreach (var ticks in await Task.WhenAll(reads))
+            {
+                result.AddRange(ticks);
             }
             return result;
         }

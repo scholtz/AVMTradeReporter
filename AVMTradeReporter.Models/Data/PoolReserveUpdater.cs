@@ -22,7 +22,7 @@ namespace AVMTradeReporter.Models.Data
             {
                 // a swap moves only the price, never the per-tick liquidity: the reserves follow exactly from the loaded
                 // liquidity ranges at the post-swap price. A swap that left the price untouched (no current_price in the
-                // global delta) left the reserves untouched too.
+                // global delta - Algorand lists only the keys whose value changed) left the reserves untouched too.
                 if (trade.PoolSqrtPriceX64.HasValue && trade.PoolSqrtPriceX64.Value > 0)
                 {
                     ApplyRanges(pool, trade.PoolSqrtPriceX64.Value);
@@ -56,7 +56,10 @@ namespace AVMTradeReporter.Models.Data
         public static void ApplyRanges(Pool pool, ulong sqrtPriceX64)
         {
             if (pool.LiquidityRanges == null) return;
-            var (a, b, active) = TickMath.ApplyPrice(pool.LiquidityRanges, sqrtPriceX64, pool.TickSpacing ?? 1, pool.AssetADecimals ?? 0, pool.AssetBDecimals ?? 0);
+            // reprice a copy and swap the reference: the cached pool's list may be serialized concurrently (ES / Redis / SignalR)
+            var ranges = TickMath.CloneRanges(pool.LiquidityRanges);
+            var (a, b, active) = TickMath.ApplyPrice(ranges, sqrtPriceX64, pool.TickSpacing ?? 1, pool.AssetADecimals ?? 0, pool.AssetBDecimals ?? 0);
+            pool.LiquidityRanges = ranges;
             pool.A = a;
             pool.B = b;
             pool.L = active;

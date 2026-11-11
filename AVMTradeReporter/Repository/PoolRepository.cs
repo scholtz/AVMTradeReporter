@@ -381,10 +381,7 @@ namespace AVMTradeReporter.Repository
                             { "l", new LongNumberProperty() },
                             { "protocol", new KeywordProperty() },
                             { "scamRating", new IntegerNumberProperty() },
-                            { "timestamp", new DateProperty() },
-                            // tick based CLAMM liquidity distribution: kept in _source only (never queried), so uint64
-                            // liquidity values above long.MaxValue can never get the pool document rejected by the mapping
-                            { "liquidityRanges", new ObjectProperty { Enabled = false } }
+                            { "timestamp", new DateProperty() }
                         }
                     }
                 }
@@ -396,6 +393,42 @@ namespace AVMTradeReporter.Repository
             }
             var response = await _elasticClient.Indices.PutIndexTemplateAsync(templateRequest);
             Console.WriteLine($"Pool template created: {response.IsValidResponse}");
+            await EnsureLiquidityRangesMappingAsync();
+        }
+
+        /// <summary>
+        /// Maps <see cref="Pool.LiquidityRanges"/> as a non indexed object on the "pools" index (the template above only
+        /// matches "pools-*", which the pools are not written to). The ranges are never queried, and without this a dynamic
+        /// long / float mapping would reject the whole pool document for a uint64 liquidity above long.MaxValue or a
+        /// clamped decimal.MaxValue bound. Only this one field is mapped explicitly - the rest of the index keeps its dynamic
+        /// mapping, so existing queries are unaffected.
+        ///
+        /// Two parts, neither of which creates the index (a network without pools must keep having no "pools" index, see
+        /// PoolIndexMissingTests): a template matching exactly "pools" covers an index the first stored pool creates later,
+        /// and a mapping update covers the existing index. Both are idempotent.
+        /// </summary>
+        private async Task EnsureLiquidityRangesMappingAsync()
+        {
+            if (_elasticClient == null) return;
+            var properties = new Properties { { "liquidityRanges", new ObjectProperty { Enabled = false } } };
+            try
+            {
+                await _elasticClient.Indices.PutIndexTemplateAsync(new PutIndexTemplateRequest
+                {
+                    Name = "pools_liquidity_ranges_template",
+                    IndexPatterns = new[] { "pools" },
+                    Template = new IndexTemplateMapping { Mappings = new TypeMapping { Properties = properties } }
+                });
+                await _elasticClient.Indices.PutMappingAsync(new PutMappingRequest("pools") { Properties = properties });
+            }
+            catch (Exception ex) when (ElasticErrors.IsIndexNotFound(ex, "pools"))
+            {
+                // no pool stored yet - the template maps the field when the first pool creates the index
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to map pools.liquidityRanges - pool documents of tick based CLAMM pools may be rejected for out of range values");
+            }
         }
 
         public Pool? GetCachedPool(string poolAddress) => _poolsCache.TryGetValue(poolAddress, out var pool) ? pool : null;
@@ -927,8 +960,13 @@ namespace AVMTradeReporter.Repository
         /// A liquidity add / remove changed the per-tick liquidity of a tick based CLAMM pool (and dropped its stale
         /// liquidity ranges, see <see cref="PoolReserveUpdater.ApplyLiquidity"/>): reload the ranges and the exact reserves
         /// from the pool box storage. On failure the pool keeps the incrementally tracked reserves until the next refresh.
-        /// The boxes hold the current on-chain state, so while the indexer catches up on old blocks the reload is ahead of
-        /// the processed history; it converges once the indexer reaches the chain tip.
+        ///
+        /// The boxes and the global state are read at the chain tip, so the reloaded pool (ranges, price and reserves) is
+        /// the on-chain state as of now, and the processor stamps it with the wall clock time. That timestamp is what keeps
+        /// it consistent: every event whose block is older than the reload is already contained in that state, and the
+        /// timestamp guards of <see cref="UpdatePoolFromTrade"/> / <see cref="UpdatePoolFromLiquidity"/> skip exactly those.
+        /// While the indexer catches up on old blocks no historical swap is therefore ever applied to the newer ranges;
+        /// events from blocks after the reload apply normally.
         /// </summary>
         private async Task ReloadTickBasedPoolAsync(Pool pool, CancellationToken cancellationToken)
         {

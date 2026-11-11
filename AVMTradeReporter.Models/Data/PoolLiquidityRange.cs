@@ -47,6 +47,10 @@ namespace AVMTradeReporter.Models.Data
         /// </summary>
         public ulong B { get; set; }
 
+        /// <summary>
+        /// The same range seen from the other asset (prices inverted, amounts swapped). The clamped bounds of extreme ticks
+        /// map onto each other: 0 ("unbounded below") becomes <see cref="decimal.MaxValue"/> ("unbounded above") and back.
+        /// </summary>
         public PoolLiquidityRange Reverse()
         {
             return new PoolLiquidityRange
@@ -54,8 +58,8 @@ namespace AVMTradeReporter.Models.Data
                 TickLow = TickLow,
                 TickHigh = TickHigh,
                 Liquidity = Liquidity,
-                PMin = PMax == 0 ? 0 : 1 / PMax,
-                PMax = PMin == 0 ? 0 : 1 / PMin,
+                PMin = PMax == decimal.MaxValue || PMax == 0 ? 0 : 1 / PMax,
+                PMax = PMin == 0 ? decimal.MaxValue : 1 / PMin,
                 A = B,
                 B = A,
             };

@@ -139,7 +139,8 @@ namespace AVMTradeReporter.Models.Data
                 var sa = TickToSqrtPrice(range.TickHigh + 1, tickSpacing); // lower price boundary
                 var sb = TickToSqrtPrice(range.TickLow, tickSpacing);      // upper price boundary
                 double a, b;
-                if (sqrtP <= sa)
+                // a tick covers [lower, upper): a price exactly on a boundary belongs to the range starting there
+                if (sqrtP < sa)
                 {
                     a = range.Liquidity * (1 / sa - 1 / sb);
                     b = 0;
@@ -163,6 +164,23 @@ namespace AVMTradeReporter.Models.Data
                 totalB += b;
             }
             return (ToUlong(totalA), ToUlong(totalB), active);
+        }
+
+        /// <summary>
+        /// Copies the ranges, so a reprice never mutates a list another thread may be serializing.
+        /// </summary>
+        public static List<PoolLiquidityRange> CloneRanges(IEnumerable<PoolLiquidityRange> ranges)
+        {
+            return ranges.Select(r => new PoolLiquidityRange
+            {
+                TickLow = r.TickLow,
+                TickHigh = r.TickHigh,
+                Liquidity = r.Liquidity,
+                PMin = r.PMin,
+                PMax = r.PMax,
+                A = r.A,
+                B = r.B,
+            }).ToList();
         }
 
         /// <summary>

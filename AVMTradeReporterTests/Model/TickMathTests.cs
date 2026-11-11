@@ -51,7 +51,7 @@ namespace AVMTradeReporterTests.Model
         public void ParseTickWordReadsTenByteRecords()
         {
             var box = new byte[1000];
-            // record 31: uint16 flags + uint64 liquidity 433647667 (0x19d8f033)
+            // record 31: big endian uint80 liquidity 433647667 (0x19d8f033)
             var offset = 31 * TickMath.TickRecordSize + 2;
             var value = 433647667UL;
             for (var j = 7; j >= 0; j--) { box[offset + j] = (byte)(value & 0xff); value >>= 8; }
