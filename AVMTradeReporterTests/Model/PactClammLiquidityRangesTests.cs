@@ -418,5 +418,31 @@ namespace AVMTradeReporterTests.Model
             Assert.That(poolJson, Does.Not.Contain("EventVersion"));
             Assert.That(poolJson, Does.Contain("LiquidityRanges"));
         }
+
+        [Test]
+        public void LegacyPoolWithoutOriginIsOrientedByItsTick()
+        {
+            // stored before TickOrigin existed, above price 1 (tick 400 < 1e6): a swap carrying neither d nor a new tick
+            var pool = new AVMTradeReporter.Models.Data.Pool
+            {
+                PoolAddress = "2M75ASPFJ5YWJOYU676IOL3NX23H6R333RWX4WONRALEWTJA5FQWDOH4GQ",
+                Protocol = DEXProtocol.Pact,
+                AMMType = AMMType.TickBasedCLAMM,
+                AssetADecimals = 6,
+                AssetBDecimals = 6,
+                TickSpacing = 200,
+                CurrentTick = 400,
+            };
+            Assert.That(pool.EffectiveTickOrigin, Is.EqualTo(0));
+
+            PoolReserveUpdater.ApplyTrade(pool, new Trade { PoolSqrtPriceX64 = 337401751540031903UL });
+
+            // 1 USDC = ~2989 POW (sqrt of B in A stored while d = 0), not 1 / 2989
+            Assert.That((double)pool.CurrentPrice!.Value, Is.EqualTo(2989.1).Within(1));
+            var (lower, upper) = TickMath.TickBounds(400, 200);
+            Assert.That((double)pool.CurrentPrice!.Value, Is.InRange(lower * lower, upper * upper));
+            Assert.That(new AVMTradeReporter.Models.Data.Pool { CurrentTick = 1000401 }.EffectiveTickOrigin, Is.EqualTo(TickMath.TickBase));
+            Assert.That(new AVMTradeReporter.Models.Data.Pool().EffectiveTickOrigin, Is.EqualTo(TickMath.TickBase));
+        }
 }
 }

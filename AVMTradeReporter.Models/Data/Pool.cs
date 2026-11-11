@@ -46,6 +46,12 @@ namespace AVMTradeReporter.Models.Data
         /// </summary>
         public ulong? TickOrigin { get; set; }
         /// <summary>
+        /// <see cref="TickOrigin"/>, or for pools stored before it was tracked the side of price 1 shown by the current tick
+        /// (ticks >= 1e6 are prices &lt;= 1), else 1e6.
+        /// </summary>
+        [JsonIgnore]
+        public ulong EffectiveTickOrigin => TickOrigin ?? (CurrentTick.HasValue && CurrentTick.Value < TickMath.TickBase ? 0 : TickMath.TickBase);
+        /// <summary>
         /// Liquidity distribution of the tick based CLAMM pool: contiguous tick ranges of equal liquidity loaded from the pool
         /// box storage, each acting as a standalone concentrated liquidity position (see <see cref="PoolLiquidityRange"/>).
         /// A / B are the sums of the ranges' amounts at the current price. Null when the boxes were not (successfully) read,

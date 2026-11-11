@@ -418,6 +418,7 @@ namespace AVMTradeReporter.Processors.Pool
             ulong activeLiquidity = pool?.L ?? 0;
             List<PoolLiquidityRange>? ranges = null;
             var freshRanges = false;
+            var keepEventTimestamp = false;
             try
             {
                 var ticks = await LoadClammTicksAsync(appId);
@@ -432,12 +433,7 @@ namespace AVMTradeReporter.Processors.Pool
             }
             if (ranges != null)
             {
-                (reserveA, reserveB, activeLiquidity) = TickMath.ApplyPrice(ranges, sqrtPrice, spacing ?? 1, origin, assetADecimals ?? 0, assetBDecimals ?? 0);
-                if (tick.HasValue)
-                {
-                    // the contract's current tick decides the active liquidity (exact also on a tick boundary)
-                    activeLiquidity = TickMath.LiquidityAtTick(ranges, tick.Value);
-                }
+                (reserveA, reserveB, activeLiquidity) = TickMath.Reprice(ranges, sqrtPrice, spacing ?? 1, origin, tick, assetADecimals ?? 0, assetBDecimals ?? 0);
             }
 
             _logger.LogInformation("Processing Pact CLAMM pool {appId}", appId);
@@ -466,8 +462,9 @@ namespace AVMTradeReporter.Processors.Pool
                 origin = pool.TickOrigin ?? origin;
                 tick = pool.CurrentTick ?? tick;
                 price = pool.CurrentPrice ?? price;
-                (reserveA, reserveB, activeLiquidity) = TickMath.ApplyPrice(ranges, sqrtPrice, spacing ?? 1, origin, assetADecimals ?? 0, assetBDecimals ?? 0);
-                if (tick.HasValue) activeLiquidity = TickMath.LiquidityAtTick(ranges, tick.Value);
+                (reserveA, reserveB, activeLiquidity) = TickMath.Reprice(ranges, sqrtPrice, spacing ?? 1, origin, tick, assetADecimals ?? 0, assetBDecimals ?? 0);
+                // the price state is the swaps', not the read's: the pool keeps their timestamp
+                keepEventTimestamp = true;
             }
 
             var updated = false;
@@ -525,7 +522,7 @@ namespace AVMTradeReporter.Processors.Pool
                 if (!TickMath.SameRanges(pool.LiquidityRanges, ranges)) { updated = true; }
                 // always take the freshly priced ranges: their amounts follow the current price even when the bounds did not change
                 pool.LiquidityRanges = ranges;
-                if (updated)
+                if (updated && !keepEventTimestamp)
                 {
                     pool.Timestamp = pool.Timestamp.HasValue && pool.Timestamp.Value > stateTimestamp ? pool.Timestamp : stateTimestamp;
                 }

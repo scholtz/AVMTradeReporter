@@ -65,12 +65,11 @@ namespace AVMTradeReporter.Models.Data
             if (pool.LiquidityRanges == null) return;
             // reprice a copy and swap the reference: the cached pool's list may be serialized concurrently (ES / Redis / SignalR)
             var ranges = TickMath.CloneRanges(pool.LiquidityRanges);
-            var (a, b, active) = TickMath.ApplyPrice(ranges, sqrtPriceX64, pool.TickSpacing ?? 1, pool.TickOrigin ?? TickMath.TickBase, pool.AssetADecimals ?? 0, pool.AssetBDecimals ?? 0);
+            var (a, b, active) = TickMath.Reprice(ranges, sqrtPriceX64, pool.TickSpacing ?? 1, pool.EffectiveTickOrigin, pool.CurrentTick, pool.AssetADecimals ?? 0, pool.AssetBDecimals ?? 0);
             pool.LiquidityRanges = ranges;
             pool.A = a;
             pool.B = b;
-            // the contract's current tick decides the active liquidity (exact also on a tick boundary); the price is the fallback
-            pool.L = pool.CurrentTick.HasValue ? TickMath.LiquidityAtTick(ranges, pool.CurrentTick.Value) : active;
+            pool.L = active;
         }
 
         /// <summary>
@@ -91,7 +90,7 @@ namespace AVMTradeReporter.Models.Data
             if (trade.PoolSqrtPriceX64.HasValue && trade.PoolSqrtPriceX64.Value > 0)
             {
                 pool.SqrtPriceX64 = trade.PoolSqrtPriceX64.Value;
-                pool.CurrentPrice = TickMath.SqrtPriceX64ToPrice(trade.PoolSqrtPriceX64.Value, pool.AssetADecimals ?? 0, pool.AssetBDecimals ?? 0, pool.TickOrigin ?? TickMath.TickBase);
+                pool.CurrentPrice = TickMath.SqrtPriceX64ToPrice(trade.PoolSqrtPriceX64.Value, pool.AssetADecimals ?? 0, pool.AssetBDecimals ?? 0, pool.EffectiveTickOrigin);
             }
             if (trade.PoolTick.HasValue)
             {

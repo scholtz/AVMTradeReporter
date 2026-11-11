@@ -220,7 +220,7 @@ namespace AVMTradeReporterTests.Processors.Pool
 
             Assert.That(refreshed, Is.SameAs(pool));
             Assert.That(refreshed.CurrentPrice, Is.EqualTo(expectedPrice), "the read state overwrote the swap applied meanwhile");
-            Assert.That(refreshed.Timestamp, Is.GreaterThanOrEqualTo(timestamp));
+            Assert.That(refreshed.Timestamp, Is.EqualTo(timestamp)); // the price state is the swap's: no read-time stamp
             Assert.That(refreshed.LPFee, Is.EqualTo(0.003m));
             // a swap never changes the per-tick liquidity: the fresh ranges are taken and priced at the swap's price
             Assert.That(refreshed.LiquidityRanges, Has.Count.EqualTo(50));

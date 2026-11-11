@@ -183,6 +183,16 @@ namespace AVMTradeReporter.Models.Data
         }
 
         /// <summary>
+        /// <see cref="ApplyPrice"/> with the active liquidity taken from the contract's current tick when known (exact also
+        /// on a tick boundary; the price decides otherwise) - the one way the reserves of a tick pool are derived.
+        /// </summary>
+        public static (ulong A, ulong B, ulong ActiveLiquidity) Reprice(List<PoolLiquidityRange> ranges, ulong sqrtPriceX64, ulong tickSpacing, ulong tickOrigin, ulong? currentTick, ulong assetADecimals, ulong assetBDecimals)
+        {
+            var (a, b, active) = ApplyPrice(ranges, sqrtPriceX64, tickSpacing, tickOrigin, assetADecimals, assetBDecimals);
+            return (a, b, currentTick.HasValue ? LiquidityAtTick(ranges, currentTick.Value) : active);
+        }
+
+        /// <summary>
         /// Copies the ranges, so a reprice never mutates a list another thread may be serializing.
         /// </summary>
         public static List<PoolLiquidityRange> CloneRanges(IEnumerable<PoolLiquidityRange> ranges)
