@@ -3,6 +3,7 @@ using AVMTradeReporter.Extensions;
 using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Models.Data.Enums;
 using AVMTradeReporter.Repository;
+using AVMTradeReporter.Services.ScamRating;
 using System.Text;
 
 namespace AVMTradeReporter.Processors.Pool
@@ -26,10 +27,39 @@ namespace AVMTradeReporter.Processors.Pool
             _assetRepository = assetRepository;
         }
 
+        /// <summary>
+        /// A tick based CLAMM pool read from the chain is stamped with the time the read started minus this margin, see
+        /// <see cref="LoadClammPoolAsync"/>.
+        /// </summary>
+        public static readonly TimeSpan ReadTimestampSafetyMargin = TimeSpan.FromMinutes(1);
+
+        // one load per pool at a time (process wide - the processor may be resolved more than once): a refresh that read the
+        // tick boxes before a mint must not finish after - and overwrite - the reload triggered by that mint
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<ulong, SemaphoreSlim> _loadLocks = new();
+
         public async Task<AVMTradeReporter.Models.Data.Pool> LoadPoolAsync(string address, ulong appId)
         {
+            var loadLock = _loadLocks.GetOrAdd(appId, _ => new SemaphoreSlim(1, 1));
+            await loadLock.WaitAsync();
+            try
+            {
+                return await LoadPoolCoreAsync(address, appId);
+            }
+            finally
+            {
+                loadLock.Release();
+            }
+        }
+
+        private async Task<AVMTradeReporter.Models.Data.Pool> LoadPoolCoreAsync(string address, ulong appId)
+        {
+            // before any algod read: the state read below contains at least every block committed before this instant
+            var readStartedAt = DateTimeOffset.Now;
             using var cancelationTokenSource = new CancellationTokenSource();
             var pool = await _poolRepository.GetPoolAsync(address, cancelationTokenSource.Token);
+            // events keep updating the cached pool while the reads below run; its event version tells whether one did
+            var versionBeforeRead = pool?.EventVersion;
+            var liquidityVersionBeforeRead = pool?.LiquidityVersion;
             var app = await _algod.GetApplicationByIDAsync(appId);
 
             if (GetGlobalState(app, PactWeightedPoolHelper.KeyReserveA) != null)
@@ -40,7 +70,7 @@ namespace AVMTradeReporter.Processors.Pool
             if (GetGlobalState(app, PactClammHelper.KeyCurrentPrice) != null)
             {
                 // Pact CLAMM (tick based concentrated liquidity, ARC4 contract)
-                return await LoadClammPoolAsync(pool, address, appId, app, cancelationTokenSource.Token);
+                return await LoadClammPoolAsync(pool, address, appId, app, readStartedAt, versionBeforeRead, liquidityVersionBeforeRead, cancelationTokenSource.Token);
             }
 
             var A = app.Params.GlobalState.FirstOrDefault(p => p.Key == Convert.ToBase64String(Encoding.ASCII.GetBytes("A")));
@@ -331,10 +361,18 @@ namespace AVMTradeReporter.Processors.Pool
 
         /// <summary>
         /// Loads the Pact CLAMM pool (tick based concentrated liquidity). See <see cref="PactClammHelper"/> for the layout.
-        /// The contract does not expose reserves, so A / B are kept from the stored pool and updated incrementally from events.
+        /// The reserves are derived from the liquidity ranges read from the tick boxes.
+        ///
+        /// The pool is stamped with <paramref name="readStartedAt"/> minus <see cref="ReadTimestampSafetyMargin"/> (never
+        /// moving an existing timestamp backwards): the timestamp guards of the pool repository skip the events of older
+        /// blocks, which the read state already contains, while events of blocks near the read - possibly not contained in
+        /// it, given the time the reads take and block timestamp skew - are applied rather than skipped. Re-applying one is
+        /// harmless (a liquidity event reloads again, a swap reprices from its own post-swap price), skipping a liquidity
+        /// event the read missed would leave stale ranges.
         /// </summary>
-        private async Task<AVMTradeReporter.Models.Data.Pool> LoadClammPoolAsync(AVMTradeReporter.Models.Data.Pool? pool, string address, ulong appId, Algorand.Algod.Model.Application app, CancellationToken cancellationToken)
+        private async Task<AVMTradeReporter.Models.Data.Pool> LoadClammPoolAsync(AVMTradeReporter.Models.Data.Pool? pool, string address, ulong appId, Algorand.Algod.Model.Application app, DateTimeOffset readStartedAt, long? versionBeforeRead, long? liquidityVersionBeforeRead, CancellationToken cancellationToken)
         {
+            var stateTimestamp = readStartedAt - ReadTimestampSafetyMargin;
             var assetA = GetGlobalState(app, "a");
             if (assetA == null) throw new Exception("a (asset A id) is missing in global params");
             var assetB = GetGlobalState(app, "b");
@@ -343,6 +381,8 @@ namespace AVMTradeReporter.Processors.Pool
             if (currentPrice == null) throw new Exception("current_price is missing in global params");
             var currentTick = GetGlobalState(app, PactClammHelper.KeyCurrentTick);
             var tickSpacing = GetGlobalState(app, "tick_spacing");
+            // "d": which side of price 1 the current price is on, decides the orientation of current_price (see TickMath)
+            var tickOriginState = GetGlobalState(app, PactClammHelper.KeyTickOrigin);
             var feeBps = GetGlobalState(app, "fee_bps");
             var protocolFeeBps = GetGlobalState(app, "protocol_fee_bps");
 
@@ -361,27 +401,76 @@ namespace AVMTradeReporter.Processors.Pool
             {
                 _logger.LogWarning("Pact CLAMM pool {appId} uses unexpected price scale {scale}; price conversion assumes Q64.64", appId, scale.Value.Uint);
             }
-            var price = PactClammHelper.SqrtPriceX64ToPrice(currentPrice.Value.Uint, assetADecimals ?? 0, assetBDecimals ?? 0);
+            ulong origin = tickOriginState?.Value.Uint ?? TickMath.TickBase;
+            ulong sqrtPrice = currentPrice.Value.Uint;
+            var price = PactClammHelper.SqrtPriceX64ToPrice(sqrtPrice, assetADecimals ?? 0, assetBDecimals ?? 0, origin);
             ulong? tick = currentTick?.Value.Uint;
             ulong? spacing = tickSpacing?.Value.Uint;
 
-            // reserves are not in the global state: sum the liquidity of every tick (stored in the tick word boxes)
-            // at the current sqrt price. Falls back to the stored (event tracked) reserves when the boxes cannot be read.
+            // reserves are not in the global state: split the pool into its liquidity ranges (contiguous ticks of equal
+            // liquidity, read from the tick word boxes) and sum what every range holds at the current sqrt price.
+            // The ranges are kept on the pool so every later swap can recompute the reserves exactly from its post-swap
+            // price. When the boxes cannot be read the stored ranges are kept if there are any and repriced - every indexed
+            // liquidity event drops them (PoolReserveUpdater.ApplyLiquidity), so they are as current as the event tracking
+            // could make the reserves; without them the stored (event tracked) reserves are kept.
             ulong reserveA = pool?.A ?? 0;
             ulong reserveB = pool?.B ?? 0;
             ulong activeLiquidity = pool?.L ?? 0;
+            List<PoolLiquidityRange>? ranges = null;
+            var freshRanges = false;
+            var keepEventTimestamp = false;
             try
             {
                 var ticks = await LoadClammTicksAsync(appId);
-                (reserveA, reserveB) = TickMath.ComputeReserves(ticks, currentPrice.Value.Uint, spacing ?? 1);
-                activeLiquidity = tick.HasValue ? TickMath.ActiveLiquidity(ticks, tick.Value) : 0;
+                ranges = TickMath.BuildRanges(ticks);
+                freshRanges = true;
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to compute reserves of Pact CLAMM pool {appId} from tick boxes, keeping stored reserves", appId);
+                var stored = pool?.LiquidityRanges;
+                ranges = stored == null ? null : TickMath.CloneRanges(stored);
+                _logger.LogWarning(ex, "Failed to read the tick boxes of Pact CLAMM pool {appId}, {fallback}", appId,
+                    ranges == null ? "keeping the event tracked reserves" : "repricing the stored liquidity ranges");
+            }
+            if (ranges != null)
+            {
+                (reserveA, reserveB, activeLiquidity) = TickMath.Reprice(ranges, sqrtPrice, spacing ?? 1, origin, tick, assetADecimals ?? 0, assetBDecimals ?? 0);
             }
 
             _logger.LogInformation("Processing Pact CLAMM pool {appId}", appId);
+
+            if (pool != null && ScamRatingPolicy.ShouldZeroBalances(pool.ScamRating))
+            {
+                // a scam-zeroed pool never keeps ranges (ScamRatingPolicy.ApplyBalanceRule): keep them out of the comparison
+                // too, or every refresh would count as a change
+                ranges = null;
+            }
+            // the ranges the update below replaces - it only lands if no liquidity event invalidates them meanwhile
+            var rangesBeforeUpdate = pool?.LiquidityRanges;
+            if (pool != null && pool.LiquidityVersion != liquidityVersionBeforeRead)
+            {
+                // a liquidity event was applied while the chain was being read: the read ranges may predate it. Keep the
+                // event state - the event queued its own reload behind the load lock, which reads the boxes again.
+                _logger.LogInformation("Pact CLAMM pool {appId} got a liquidity event during the read, keeping the event state", appId);
+                return pool;
+            }
+            // swaps applied during the read that never set a price (no current_price delta) did not move it: the read
+            // price is current then, the read applies as is
+            if (pool != null && pool.EventVersion != versionBeforeRead && pool.SqrtPriceX64.HasValue)
+            {
+                // only swaps were applied meanwhile: their price / tick / origin are newer than the read and stay, but a
+                // swap never changes the per-tick liquidity, so the freshly read ranges are valid - reprice them at the
+                // pool's own (event) price; everything else (fees, hash, decimals) is refreshed from the read as usual
+                if (!freshRanges || ranges == null) return pool;
+                sqrtPrice = pool.SqrtPriceX64.Value;
+                // a pool stored before the origin was tracked: the swaps did not cross price 1 (that sets it), so the read one holds
+                origin = pool.TickOrigin ?? origin;
+                tick = pool.CurrentTick ?? tick;
+                price = pool.CurrentPrice ?? price;
+                (reserveA, reserveB, activeLiquidity) = TickMath.Reprice(ranges, sqrtPrice, spacing ?? 1, origin, tick, assetADecimals ?? 0, assetBDecimals ?? 0);
+                // the price state is the swaps', not the read's: the pool keeps their timestamp
+                keepEventTimestamp = true;
+            }
 
             var updated = false;
             if (pool == null)
@@ -399,7 +488,11 @@ namespace AVMTradeReporter.Processors.Pool
                     CurrentPrice = price,
                     CurrentTick = tick,
                     TickSpacing = spacing,
-                    Timestamp = DateTimeOffset.Now,
+                    TickOrigin = origin,
+                    SqrtPriceX64 = sqrtPrice,
+                    LiquidityRanges = ranges,
+                    LiquidityRangesReadAt = freshRanges && ranges != null ? stateTimestamp : null,
+                    Timestamp = stateTimestamp,
                     ApprovalProgramHash = hash,
                     LPFee = lpFee,
                     ProtocolFeePortion = protocolFeePortion,
@@ -412,6 +505,15 @@ namespace AVMTradeReporter.Processors.Pool
             }
             else
             {
+                // first the ranges, atomically: a liquidity event applied since the version checks above invalidated them
+                // and queued its own reload - keep the event state. Always the freshly priced ranges: their amounts follow
+                // the current price even when the bounds did not change.
+                if (!pool.TryReplaceLiquidityRanges(rangesBeforeUpdate, ranges))
+                {
+                    _logger.LogInformation("Pact CLAMM pool {appId}: its liquidity ranges changed during the update (an event or another read), keeping them", appId);
+                    return pool;
+                }
+                if (freshRanges && ranges != null) pool.LiquidityRangesReadAt = stateTimestamp;
                 if (pool.Protocol != DEXProtocol.Pact) { pool.Protocol = DEXProtocol.Pact; updated = true; }
                 if (pool.A != reserveA) { pool.A = reserveA; updated = true; }
                 if (pool.B != reserveB) { pool.B = reserveB; updated = true; }
@@ -430,9 +532,12 @@ namespace AVMTradeReporter.Processors.Pool
                 if (pool.CurrentPrice != price) { pool.CurrentPrice = price; updated = true; }
                 if (pool.CurrentTick != tick) { pool.CurrentTick = tick; updated = true; }
                 if (pool.TickSpacing != spacing) { pool.TickSpacing = spacing; updated = true; }
-                if (updated)
+                if (pool.TickOrigin != origin) { pool.TickOrigin = origin; updated = true; }
+                if (pool.SqrtPriceX64 != sqrtPrice) { pool.SqrtPriceX64 = sqrtPrice; updated = true; }
+                if (!TickMath.SameRanges(rangesBeforeUpdate, ranges)) { updated = true; }
+                if (updated && !keepEventTimestamp)
                 {
-                    pool.Timestamp = DateTimeOffset.Now;
+                    pool.Timestamp = pool.Timestamp.HasValue && pool.Timestamp.Value > stateTimestamp ? pool.Timestamp : stateTimestamp;
                 }
             }
             if (updated)
@@ -445,21 +550,38 @@ namespace AVMTradeReporter.Processors.Pool
 
         /// <summary>
         /// Reads the per-tick liquidity of the Pact CLAMM pool from its tick word boxes (8 byte box names).
-        /// Position ('u' + address + word) and other boxes are skipped.
+        /// Both tick regions are read (words below and above 1e6, see TickMath); position ('u' + address + word) and the
+        /// 'l' + word boxes are skipped by their name length.
         /// </summary>
         private async Task<List<(ulong Tick, ulong Liquidity)>> LoadClammTicksAsync(ulong appId)
         {
             var result = new List<(ulong Tick, ulong Liquidity)>();
             var boxes = await _algod.GetApplicationBoxesAsync(appId, null);
-            if (boxes?.Boxes == null) return result;
-            foreach (var descriptor in boxes.Boxes)
+            // a missing listing or box value is a failed read, never "no liquidity": a partial range list would be taken as exact
+            if (boxes?.Boxes == null) throw new InvalidOperationException($"algod returned no box listing for app {appId}");
+            var words = boxes.Boxes
+                .Where(d => d.Name != null && d.Name.Length == 8)
+                .Select(d => (Name: d.Name, Word: BitConverter.ToUInt64(d.Name.Reverse().ToArray(), 0)))
+                .ToList();
+            // the word boxes are independent - read them concurrently (a handful per pool, bounded to stay polite to algod)
+            using var throttle = new SemaphoreSlim(8);
+            var reads = words.Select(async w =>
             {
-                if (descriptor.Name == null || descriptor.Name.Length != 8) continue;
-                var word = BitConverter.ToUInt64(descriptor.Name.Reverse().ToArray(), 0);
-                if (word < TickMath.TickBase) continue;
-                var box = await _algod.GetApplicationBoxByNameAsync(appId, "b64:" + Convert.ToBase64String(descriptor.Name));
-                if (box?.Value == null) continue;
-                result.AddRange(TickMath.ParseTickWord(word, box.Value));
+                await throttle.WaitAsync();
+                try
+                {
+                    var box = await _algod.GetApplicationBoxByNameAsync(appId, "b64:" + Convert.ToBase64String(w.Name));
+                    if (box?.Value == null) throw new InvalidOperationException($"algod returned no value for tick word {w.Word} of app {appId}");
+                    return TickMath.ParseTickWord(w.Word, box.Value).ToList();
+                }
+                finally
+                {
+                    throttle.Release();
+                }
+            });
+            foreach (var ticks in await Task.WhenAll(reads))
+            {
+                result.AddRange(ticks);
             }
             return result;
         }

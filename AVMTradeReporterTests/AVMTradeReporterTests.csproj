@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -34,6 +34,18 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Update="Data\pact-clamm-3764749314-algod.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Data\pact-clamm-3764935215-algod.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Data\pact-clamm-3762241535-algod.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Data\pact-clamm-3762241535-ticks.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <None Update="Data\pool-3136517663.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

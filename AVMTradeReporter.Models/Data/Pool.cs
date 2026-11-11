@@ -39,6 +39,72 @@ namespace AVMTradeReporter.Models.Data
         /// Tick spacing of the tick based CLAMM pool.
         /// </summary>
         public ulong? TickSpacing { get; set; }
+        /// <summary>
+        /// Tick origin of the tick based CLAMM pool (contract global "d"): 1_000_000 while the price of A in B (base units)
+        /// is at most 1, 0 above it. It decides the orientation of the contract current_price, see <see cref="TickMath"/>.
+        /// Null (pools stored before it was tracked) is treated as 1_000_000.
+        /// </summary>
+        public ulong? TickOrigin { get; set; }
+        /// <summary>
+        /// <see cref="TickOrigin"/>, or for pools stored before it was tracked the side of price 1 shown by the current tick
+        /// (ticks >= 1e6 are prices &lt;= 1), else 1e6.
+        /// </summary>
+        [JsonIgnore]
+        public ulong EffectiveTickOrigin => TickOrigin ?? (CurrentTick.HasValue && CurrentTick.Value < TickMath.TickBase ? 0 : TickMath.TickBase);
+        /// <summary>
+        /// Liquidity distribution of the tick based CLAMM pool: contiguous tick ranges of equal liquidity loaded from the pool
+        /// box storage, each acting as a standalone concentrated liquidity position (see <see cref="PoolLiquidityRange"/>).
+        /// A / B are the sums of the ranges' amounts at the current price. Null when the boxes were not (successfully) read,
+        /// in which case the reserves are tracked incrementally from the events.
+        /// </summary>
+        public List<PoolLiquidityRange>? LiquidityRanges
+        {
+            get => System.Threading.Volatile.Read(ref _liquidityRanges);
+            set => System.Threading.Volatile.Write(ref _liquidityRanges, value);
+        }
+        private List<PoolLiquidityRange>? _liquidityRanges;
+
+        /// <summary>
+        /// When the current <see cref="LiquidityRanges"/> were read from the box storage (the read start minus the safety
+        /// margin), in memory only: a liquidity event of an older block is already contained in them.
+        /// </summary>
+        [JsonIgnore]
+        public DateTimeOffset? LiquidityRangesReadAt { get; set; }
+
+        /// <summary>
+        /// Replaces the liquidity ranges only when they are still <paramref name="expected"/> - i.e. no liquidity event
+        /// invalidated them and no reload replaced them meanwhile (events and chain reads run on different threads).
+        /// </summary>
+        public bool TryReplaceLiquidityRanges(List<PoolLiquidityRange>? expected, List<PoolLiquidityRange>? replacement)
+        {
+            return ReferenceEquals(System.Threading.Interlocked.CompareExchange(ref _liquidityRanges, replacement, expected), expected);
+        }
+        /// <summary>
+        /// Raw contract current_price (Q64.64 sqrt price in the orientation of <see cref="TickOrigin"/>) of a tick based
+        /// CLAMM pool - <see cref="CurrentPrice"/> is derived from it. Raw contract value, unaffected by <see cref="Reverse"/>.
+        /// In memory only (re-read from chain / set by the next swap after a restart): a Q64.64 value above long.MaxValue
+        /// would be rejected by the dynamically mapped pools index, see <see cref="Trade.PoolSqrtPriceX64"/>.
+        /// </summary>
+        [JsonIgnore]
+        public ulong? SqrtPriceX64 { get; set; }
+        /// <summary>
+        /// In-memory counter of the events applied to this pool instance (<see cref="PoolReserveUpdater"/>), never
+        /// serialized: lets a chain read detect an event applied meanwhile, also one with the same block timestamp.
+        /// </summary>
+        [JsonIgnore]
+        public long EventVersion => System.Threading.Interlocked.Read(ref _eventVersion);
+        /// <summary>
+        /// Like <see cref="EventVersion"/>, counting only the liquidity events (the only events changing the per-tick liquidity).
+        /// </summary>
+        [JsonIgnore]
+        public long LiquidityVersion => System.Threading.Interlocked.Read(ref _liquidityVersion);
+        private long _eventVersion;
+        private long _liquidityVersion;
+        internal void MarkEventApplied(bool liquidityEvent)
+        {
+            if (liquidityEvent) System.Threading.Interlocked.Increment(ref _liquidityVersion);
+            System.Threading.Interlocked.Increment(ref _eventVersion);
+        }
         // protocol fees in A asset
         public ulong? AF { get; set; }
         // protocol fees in B asset
@@ -473,6 +539,10 @@ namespace AVMTradeReporter.Models.Data
                 CurrentPrice = CurrentPrice == null || CurrentPrice == 0 ? null : 1 / CurrentPrice,
                 CurrentTick = CurrentTick,
                 TickSpacing = TickSpacing,
+                TickOrigin = TickOrigin,
+                // the raw contract price is meaningless in the reversed orientation (CurrentPrice is inverted instead)
+                SqrtPriceX64 = null,
+                LiquidityRanges = LiquidityRanges?.Select(r => r.Reverse()).ToList(),
                 AF = BF,
                 BF = AF,
                 L = L,

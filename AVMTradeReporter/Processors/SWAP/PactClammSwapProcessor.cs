@@ -114,7 +114,9 @@ namespace AVMTradeReporter.Processors.SWAP
                 L = 0,
                 // post-swap price / tick from the global state delta, used to keep Pool.CurrentPrice fresh between refreshes
                 PoolSqrtPriceX64 = PactClammHelper.GetGlobalDeltaUint(current, PactClammHelper.KeyCurrentPrice),
-                PoolTick = PactClammHelper.GetGlobalDeltaUint(current, PactClammHelper.KeyCurrentTick)
+                PoolTick = PactClammHelper.GetGlobalDeltaUint(current, PactClammHelper.KeyCurrentTick),
+                // set only by a swap crossing price 1 (the sign side of the tick encoding flips)
+                PoolTickOrigin = PactClammHelper.GetGlobalDeltaUint(current, PactClammHelper.KeyTickOrigin)
             };
         }
     }

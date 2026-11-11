@@ -21,12 +21,28 @@ namespace AVMTradeReporter.Processors
         public const string MintSelector = "0ab9446c"; // mint(uint64,uint64,txn,txn)void
         public const string BurnSelector = "db75d435"; // burn(uint64,uint64)void
 
+        // The mainnet contract version (factory 3656084442, e.g. ALGO/USDC pool 3762241535) has a different liquidity ABI;
+        // swap and the vault calls are unchanged. Both versions are indexed.
+        /// <summary>
+        /// Mainnet mint: 4 uint64 args (tick_low, tick_high, two amounts); the A / B deposits to the vault are the two
+        /// transactions preceding the call (as with <see cref="MintSelector"/>) and the pool calls vault deposit.
+        /// Exact ABI signature not published - identified from the on-chain calls (e.g. tx RSTTQCD22Z6FYXZNP7M6IHUCGK6JPKPEO6U66UBG44OGBCWYSSGA).
+        /// </summary>
+        public const string MintV2Selector = "4d17cf3e";
+        /// <summary>
+        /// Mainnet burn(uint64,uint64,uint64,uint64)void: tick_low, tick_high, min A, min B; the pool calls vault withdraw
+        /// (e.g. tx V72L26OJRAONOULX4DZFMWAG7J4Y5RZZYCYH5M5YCVS674IQGFNQ).
+        /// </summary>
+        public const string BurnV2Selector = "2b3b3ec8";
+
         public const string VaultDepositSelector = "7da0eaa3";
         public const string VaultSwapSelector = "e7b7bb26";
         public const string VaultWithdrawSelector = "7864bf12";
 
         public const string KeyCurrentPrice = "current_price";
         public const string KeyCurrentTick = "current_tick";
+        /// <summary>Tick origin "d": 1e6 while the price of A in B is at most 1, 0 above - see TickMath.</summary>
+        public const string KeyTickOrigin = "d";
 
         /// <summary>
         /// Finds the inner application call to the vault with the given ARC4 selector (searches nested inner transactions too).
@@ -64,9 +80,9 @@ namespace AVMTradeReporter.Processors
         /// <summary>
         /// Converts the contract sqrt price (Q64.64: sqrt(price in base units) * 2^64) to the decimal adjusted price of 1 A in B.
         /// </summary>
-        public static decimal SqrtPriceX64ToPrice(ulong sqrtPriceX64, ulong assetADecimals, ulong assetBDecimals)
+        public static decimal SqrtPriceX64ToPrice(ulong sqrtPriceX64, ulong assetADecimals, ulong assetBDecimals, ulong tickOrigin = AVMTradeReporter.Models.Data.TickMath.TickBase)
         {
-            return AVMTradeReporter.Models.Data.TickMath.SqrtPriceX64ToPrice(sqrtPriceX64, assetADecimals, assetBDecimals);
+            return AVMTradeReporter.Models.Data.TickMath.SqrtPriceX64ToPrice(sqrtPriceX64, assetADecimals, assetBDecimals, tickOrigin);
         }
 
         /// <summary>

@@ -393,6 +393,42 @@ namespace AVMTradeReporter.Repository
             }
             var response = await _elasticClient.Indices.PutIndexTemplateAsync(templateRequest);
             Console.WriteLine($"Pool template created: {response.IsValidResponse}");
+            await EnsureLiquidityRangesMappingAsync();
+        }
+
+        /// <summary>
+        /// Maps <see cref="Pool.LiquidityRanges"/> as a non indexed object on the "pools" index (the template above only
+        /// matches "pools-*", which the pools are not written to). The ranges are never queried, and without this a dynamic
+        /// long / float mapping would reject the whole pool document for a uint64 liquidity above long.MaxValue or a
+        /// clamped decimal.MaxValue bound. Only this one field is mapped explicitly - the rest of the index keeps its dynamic
+        /// mapping, so existing queries are unaffected.
+        ///
+        /// Two parts, neither of which creates the index (a network without pools must keep having no "pools" index, see
+        /// PoolIndexMissingTests): a template matching exactly "pools" covers an index the first stored pool creates later,
+        /// and a mapping update covers the existing index. Both are idempotent.
+        /// </summary>
+        private async Task EnsureLiquidityRangesMappingAsync()
+        {
+            if (_elasticClient == null) return;
+            var properties = new Properties { { "liquidityRanges", new ObjectProperty { Enabled = false } } };
+            try
+            {
+                await _elasticClient.Indices.PutIndexTemplateAsync(new PutIndexTemplateRequest
+                {
+                    Name = "pools_liquidity_ranges_template",
+                    IndexPatterns = new[] { "pools" },
+                    Template = new IndexTemplateMapping { Mappings = new TypeMapping { Properties = properties } }
+                });
+                await _elasticClient.Indices.PutMappingAsync(new PutMappingRequest("pools") { Properties = properties });
+            }
+            catch (Exception ex) when (ElasticErrors.IsIndexNotFound(ex, "pools"))
+            {
+                // no pool stored yet - the template maps the field when the first pool creates the index
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to map pools.liquidityRanges - pool documents of tick based CLAMM pools may be rejected for out of range values");
+            }
         }
 
         public Pool? GetCachedPool(string poolAddress) => _poolsCache.TryGetValue(poolAddress, out var pool) ? pool : null;
@@ -592,6 +628,10 @@ namespace AVMTradeReporter.Repository
                     return;
                 }
 
+                // a tick pool without liquidity ranges is on the inexact event tracking (stored before the ranges existed, a
+                // failed box read, or ranges dropped by a liquidity event whose reload lost) - scam-zeroed pools never keep them
+                var tickPoolWithoutRanges = existingPool.AMMType == AMMType.TickBasedCLAMM && existingPool.LiquidityRanges == null
+                    && !ScamRatingPolicy.ShouldZeroBalances(existingPool.ScamRating);
                 PoolReserveUpdater.ApplyTrade(existingPool, trade);
                 existingPool.Timestamp = trade.Timestamp;
                 if (!ScamRatingPolicy.IsProtocolLocked(existingPool))
@@ -618,7 +658,15 @@ namespace AVMTradeReporter.Repository
                 existingPool.Volume24H += trade.ValueUSD ?? 0;
                 existingPool.Volume7D += trade.ValueUSD ?? 0;
 
-                await StorePoolAsync(existingPool, true, cancellationToken);
+                // read such a pool from chain now (throttled per pool), before anything is published, instead of waiting for
+                // the periodic refresh - a pool stored before the tick origin was tracked may even show an inverted price
+                var migrated = tickPoolWithoutRanges
+                    && existingPool.AssetADecimals.HasValue && existingPool.AssetBDecimals.HasValue
+                    && ShouldAttemptTickPoolMigration(existingPool.PoolAddress)
+                    ? await ReloadTickBasedPoolAsync(existingPool)
+                    : null;
+                // the processor may not have stored the reloaded pool (nothing differed from the cache): always store the final state
+                await StorePoolAsync(migrated ?? existingPool, true, cancellationToken);
 
                 _logger.LogDebug("Updated pool from trade: {poolAddress}_{poolAppId}_{protocol}",
                     trade.PoolAddress, trade.PoolAppId, trade.Protocol);
@@ -672,6 +720,22 @@ namespace AVMTradeReporter.Repository
                 {
                     _logger.LogDebug("Skipping pool update - liquidity timestamp {liquidityTime} is older than pool timestamp {poolTime}",
                         liquidity.Timestamp.Value, existingPool.Timestamp.Value);
+                    // ...unless the ranges were read from the boxes after the event's block: then they already contain it
+                    // (e.g. the indexer replaying blocks after a restart)
+                    var rangesContainEvent = existingPool.LiquidityRanges != null && existingPool.LiquidityRangesReadAt.HasValue
+                        && existingPool.LiquidityRangesReadAt.Value > liquidity.Timestamp.Value;
+                    // without ranges there is nothing to invalidate, the reload is just a retry of a failed read: throttled
+                    if (existingPool.AMMType == AMMType.TickBasedCLAMM && !rangesContainEvent
+                        && existingPool.AssetADecimals.HasValue && existingPool.AssetBDecimals.HasValue
+                        && (existingPool.LiquidityRanges != null || ShouldAttemptTickPoolMigration(existingPool.PoolAddress)))
+                    {
+                        // trades and liquidity events are applied by independent batches, so a later swap can advance the
+                        // timestamp first. Its amounts are not applied, but the liquidity change may be missing from the
+                        // ranges: invalidate them and reload from the box storage (idempotent - the boxes are the truth)
+                        PoolReserveUpdater.InvalidateRanges(existingPool);
+                        var reread = await ReloadTickBasedPoolAsync(existingPool);
+                        await StorePoolAsync(reread ?? existingPool, true, cancellationToken);
+                    }
                     return;
                 }
 
@@ -697,7 +761,14 @@ namespace AVMTradeReporter.Repository
                     }
                 }
 
-                await StorePoolAsync(existingPool, true, cancellationToken);
+                // tick based CLAMM: reload the exact state from the box storage before storing, so subscribers never see the
+                // interim incrementally tracked reserves; those are only stored when the reload fails
+                // only with resolved decimals: otherwise the processor cannot reuse the cached pool (GetPoolAsync reports
+                // it "not ready") and would replace it with a fresh one, losing this pool's state
+                var canReload = existingPool.AMMType == AMMType.TickBasedCLAMM && existingPool.AssetADecimals.HasValue && existingPool.AssetBDecimals.HasValue;
+                var reloaded = canReload ? await ReloadTickBasedPoolAsync(existingPool) : null;
+                // the processor may not have stored the reloaded pool (nothing differed from the cache): always store the final state
+                await StorePoolAsync(reloaded ?? existingPool, true, cancellationToken);
 
                 _logger.LogDebug("Updated pool from liquidity: {poolAddress}_{poolAppId}_{protocol}",
                     liquidity.PoolAddress, liquidity.PoolAppId, liquidity.Protocol);
@@ -909,6 +980,64 @@ namespace AVMTradeReporter.Repository
             {
                 _logger.LogWarning(ex, "Failed to apply scam rating to pool {poolAddress}_{poolAppId}", pool.PoolAddress, pool.PoolAppId);
                 ScamRatingPolicy.Enforce(pool);
+            }
+        }
+
+        private static readonly ConcurrentDictionary<string, DateTimeOffset> _tickPoolMigrationAttempts = new();
+        private static readonly TimeSpan TickPoolMigrationRetryInterval = TimeSpan.FromMinutes(10);
+
+        /// <summary>
+        /// The reload of a tick pool without liquidity ranges on a swap runs at most once per
+        /// <see cref="TickPoolMigrationRetryInterval"/> per pool, so a pool whose chain read keeps failing never puts
+        /// algod reads on every swap.
+        /// </summary>
+        private static bool ShouldAttemptTickPoolMigration(string poolAddress)
+        {
+            var now = DateTimeOffset.UtcNow;
+            var last = _tickPoolMigrationAttempts.GetOrAdd(poolAddress, DateTimeOffset.MinValue);
+            if (now - last < TickPoolMigrationRetryInterval) return false;
+            return _tickPoolMigrationAttempts.TryUpdate(poolAddress, now, last);
+        }
+
+        /// <summary>
+        /// A liquidity add / remove changed the per-tick liquidity of a tick based CLAMM pool (and dropped its stale
+        /// liquidity ranges, see <see cref="PoolReserveUpdater.ApplyLiquidity"/>): reload the ranges and the exact reserves
+        /// from the pool box storage. Returns the reloaded pool when the ranges were loaded, null when the reload failed;
+        /// the caller stores the result either way.
+        ///
+        /// The boxes and the global state are read at the chain tip, so the reloaded pool (ranges, price and reserves) is the
+        /// on-chain state as of the read, and the processor stamps it with the time the read started minus a safety margin
+        /// (<see cref="PactPoolProcessor.ReadTimestampSafetyMargin"/>). The timestamp guards of
+        /// <see cref="UpdatePoolFromTrade"/> / <see cref="UpdatePoolFromLiquidity"/> then skip the events of older blocks,
+        /// which that state already contains, so while the indexer catches up no historical swap is applied to the newer
+        /// ranges. Events of blocks near the read are applied rather than skipped: re-applying one is harmless (a liquidity
+        /// event reloads again, a swap reprices from its own post-swap price and the next swap corrects it), whereas skipping
+        /// a liquidity event the read did not include would leave stale ranges.
+        /// </summary>
+        private async Task<Pool?> ReloadTickBasedPoolAsync(Pool pool)
+        {
+            try
+            {
+                var processor = GetPoolProcessor(pool.Protocol);
+                if (processor == null) return null;
+                // a liquidity event applied while the chain was read makes the processor keep the event state (no ranges
+                // yet): read again, a few times at most. A read that failed on its own (no concurrent liquidity event) is
+                // not retried - the next event or refresh tries again.
+                for (var attempt = 0; attempt < 3; attempt++)
+                {
+                    var liquidityVersion = pool.LiquidityVersion;
+                    var reloaded = await processor.LoadPoolAsync(pool.PoolAddress, pool.PoolAppId);
+                    // a scam-zeroed pool never keeps ranges (ScamRatingPolicy), its reload succeeded nevertheless
+                    if (reloaded != null && (reloaded.LiquidityRanges != null || ScamRatingPolicy.ShouldZeroBalances(reloaded.ScamRating))) return reloaded;
+                    if (pool.LiquidityVersion == liquidityVersion) return null;
+                }
+                return null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to reload liquidity ranges of tick based pool {poolAddress}_{poolAppId}, keeping event tracked reserves",
+                    pool.PoolAddress, pool.PoolAppId);
+                return null;
             }
         }
 

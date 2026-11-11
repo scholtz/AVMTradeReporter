@@ -40,6 +40,8 @@ namespace AVMTradeReporter.Services
             liquidityProcessors.Add(pactWeightedLAdd.AppArg.ToLower(), pactWeightedLAdd);
             var pactClammLAdd = new PactClammLiquidityAddProcessor(_logger);
             liquidityProcessors.Add(pactClammLAdd.AppArg.ToLower(), pactClammLAdd);
+            var pactClammLAddV2 = new PactClammLiquidityAddProcessor(_logger) { AppArg = PactClammHelper.MintV2Selector };
+            liquidityProcessors.Add(pactClammLAddV2.AppArg.ToLower(), pactClammLAddV2);
 
             var tinyLAdd = new TinyLiquidityAddProcessor(_logger);
             liquidityProcessors.Add(tinyLAdd.AppArg.ToLower(), tinyLAdd);
@@ -53,6 +55,8 @@ namespace AVMTradeReporter.Services
             liquidityProcessors.Add(pactWeightedLRem.AppArg.ToLower(), pactWeightedLRem);
             var pactClammLRem = new PactClammLiquidityRemoveProcessor(_logger);
             liquidityProcessors.Add(pactClammLRem.AppArg.ToLower(), pactClammLRem);
+            var pactClammLRemV2 = new PactClammLiquidityRemoveProcessor(_logger) { AppArg = PactClammHelper.BurnV2Selector };
+            liquidityProcessors.Add(pactClammLRemV2.AppArg.ToLower(), pactClammLRemV2);
 
             var tinyLRem = new TinyLiquidityRemoveProcessor(_logger);
             liquidityProcessors.Add(tinyLRem.AppArg.ToLower(), tinyLRem);
