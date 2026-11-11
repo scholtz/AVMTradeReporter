@@ -427,7 +427,8 @@ namespace AVMTradeReporter.Processors.Pool
             }
             catch (Exception ex)
             {
-                ranges = pool?.LiquidityRanges == null ? null : TickMath.CloneRanges(pool.LiquidityRanges);
+                var stored = pool?.LiquidityRanges;
+                ranges = stored == null ? null : TickMath.CloneRanges(stored);
                 _logger.LogWarning(ex, "Failed to read the tick boxes of Pact CLAMM pool {appId}, {fallback}", appId,
                     ranges == null ? "keeping the event tracked reserves" : "repricing the stored liquidity ranges");
             }
@@ -488,6 +489,7 @@ namespace AVMTradeReporter.Processors.Pool
                     TickOrigin = origin,
                     SqrtPriceX64 = sqrtPrice,
                     LiquidityRanges = ranges,
+                    LiquidityRangesReadAt = freshRanges && ranges != null ? stateTimestamp : null,
                     Timestamp = stateTimestamp,
                     ApprovalProgramHash = hash,
                     LPFee = lpFee,
@@ -509,6 +511,7 @@ namespace AVMTradeReporter.Processors.Pool
                     _logger.LogInformation("Pact CLAMM pool {appId} got a liquidity event during the update, keeping the event state", appId);
                     return pool;
                 }
+                if (freshRanges && ranges != null) pool.LiquidityRangesReadAt = stateTimestamp;
                 if (pool.Protocol != DEXProtocol.Pact) { pool.Protocol = DEXProtocol.Pact; updated = true; }
                 if (pool.A != reserveA) { pool.A = reserveA; updated = true; }
                 if (pool.B != reserveB) { pool.B = reserveB; updated = true; }

@@ -19,7 +19,7 @@ namespace AVMTradeReporter.Models.Data
         public static void ApplyTrade(Pool pool, Trade trade)
         {
             pool.MarkEventApplied(liquidityEvent: false);
-            if (pool.AMMType == AMMType.TickBasedCLAMM && pool.LiquidityRanges != null && trade.A == 0 && trade.B == 0)
+            if (pool.AMMType == AMMType.TickBasedCLAMM && pool.LiquidityRanges is { } loadedRanges && trade.A == 0 && trade.B == 0)
             {
                 // a swap moves only the price, never the per-tick liquidity: the reserves follow exactly from the loaded
                 // liquidity ranges at the post-swap price. A swap that left the price untouched (no current_price in the
@@ -33,7 +33,7 @@ namespace AVMTradeReporter.Models.Data
                 }
                 else if (pool.CurrentTick.HasValue)
                 {
-                    pool.L = TickMath.LiquidityAtTick(pool.LiquidityRanges, pool.CurrentTick.Value);
+                    pool.L = TickMath.LiquidityAtTick(pool.LiquidityRanges ?? loadedRanges, pool.CurrentTick.Value);
                 }
                 return;
             }
@@ -62,17 +62,21 @@ namespace AVMTradeReporter.Models.Data
         /// </summary>
         public static void ApplyRanges(Pool pool, ulong sqrtPriceX64)
         {
-            var current = pool.LiquidityRanges;
-            if (current == null) return;
-            // reprice a copy and swap the reference: the cached pool's list may be serialized concurrently (ES / Redis / SignalR)
-            var ranges = TickMath.CloneRanges(current);
-            var (a, b, active) = TickMath.Reprice(ranges, sqrtPriceX64, pool.TickSpacing ?? 1, pool.EffectiveTickOrigin, pool.CurrentTick, pool.AssetADecimals ?? 0, pool.AssetBDecimals ?? 0);
-            // a liquidity event invalidated (or a reload replaced) the ranges meanwhile: never put the old ones back, the
-            // writer of the newer ranges owns the reserves
-            if (!pool.TryReplaceLiquidityRanges(current, ranges)) return;
-            pool.A = a;
-            pool.B = b;
-            pool.L = active;
+            // reprice a copy and swap the reference: the cached pool's list may be serialized concurrently (ES / Redis /
+            // SignalR). A reload that replaced the list meanwhile is repriced in turn (the price is this swap's); ranges a
+            // liquidity event invalidated are never put back - its reload reprices them.
+            for (var attempt = 0; attempt < 4; attempt++)
+            {
+                var current = pool.LiquidityRanges;
+                if (current == null) return;
+                var ranges = TickMath.CloneRanges(current);
+                var (a, b, active) = TickMath.Reprice(ranges, sqrtPriceX64, pool.TickSpacing ?? 1, pool.EffectiveTickOrigin, pool.CurrentTick, pool.AssetADecimals ?? 0, pool.AssetBDecimals ?? 0);
+                if (!pool.TryReplaceLiquidityRanges(current, ranges)) continue;
+                pool.A = a;
+                pool.B = b;
+                pool.L = active;
+                return;
+            }
         }
 
         /// <summary>

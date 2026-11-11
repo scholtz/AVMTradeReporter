@@ -439,5 +439,38 @@ namespace AVMTradeReporterTests.Processors.Pool
             Assert.That(stored.RealAmountA, Is.EqualTo(169_922m).Within(1m));
             Assert.That(stored.Timestamp, Is.EqualTo(swapTime));
         }
+
+        [Test]
+        public async Task RepositorySkipsTheReloadForAnEventTheRangesAlreadyContain()
+        {
+            // the indexer replays blocks (e.g. after a restart): a liquidity event from before the ranges were read is
+            // already in them - no chain read per replayed event
+            var (repository, handler) = CreateRepository();
+            var loader = new PactPoolProcessor(
+                new DefaultApi(new HttpClient(new FakeAlgodHandler(AppId)) { BaseAddress = new Uri("http://algod.test") }),
+                new MockPoolRepository(), new LoggerFactory().CreateLogger<PactPoolProcessor>(), new MockAssetRepository());
+            var pool = await loader.LoadPoolAsync(Address, AppId);
+            pool.ApprovalProgramHash = "ec1899eb1b0ee0c6a4263e38dfab158f2cfa4c0942c0c92c0fb0001965760053";
+            Assert.That(pool.LiquidityRangesReadAt, Is.Not.Null);
+            await repository.StorePoolAsync(pool, false, CancellationToken.None);
+
+            await repository.UpdatePoolFromLiquidity(new Liquidity
+            {
+                Direction = LiquidityDirection.DepositLiquidity,
+                PoolAddress = Address,
+                PoolAppId = AppId,
+                Protocol = DEXProtocol.Pact,
+                AssetIdA = 0,
+                AssetIdB = 31566704,
+                AssetAmountA = 37_627_392,
+                AssetAmountB = 4_000_000,
+                TxState = TxState.Confirmed,
+                Timestamp = pool.LiquidityRangesReadAt!.Value.AddHours(-2),
+            }, CancellationToken.None);
+
+            var stored = await repository.GetPoolAsync(Address, CancellationToken.None);
+            Assert.That(handler.Requests, Is.EqualTo(0));
+            Assert.That(stored!.LiquidityRanges, Has.Count.EqualTo(50));
+        }
 }
 }

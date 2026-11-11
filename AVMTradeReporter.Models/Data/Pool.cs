@@ -65,6 +65,13 @@ namespace AVMTradeReporter.Models.Data
         private List<PoolLiquidityRange>? _liquidityRanges;
 
         /// <summary>
+        /// When the current <see cref="LiquidityRanges"/> were read from the box storage (the read start minus the safety
+        /// margin), in memory only: a liquidity event of an older block is already contained in them.
+        /// </summary>
+        [JsonIgnore]
+        public DateTimeOffset? LiquidityRangesReadAt { get; set; }
+
+        /// <summary>
         /// Replaces the liquidity ranges only when they are still <paramref name="expected"/> - i.e. no liquidity event
         /// invalidated them and no reload replaced them meanwhile (events and chain reads run on different threads).
         /// </summary>
