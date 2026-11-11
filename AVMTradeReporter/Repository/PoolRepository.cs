@@ -656,6 +656,14 @@ namespace AVMTradeReporter.Repository
 
                 await StorePoolAsync(existingPool, true, cancellationToken);
 
+                if (existingPool.AMMType == AMMType.TickBasedCLAMM && existingPool.TickOrigin == null
+                    && existingPool.AssetADecimals.HasValue && existingPool.AssetBDecimals.HasValue)
+                {
+                    // stored before the tick origin and the liquidity ranges were tracked: until read from chain its price may
+                    // be inverted (pools above price 1) - read it once now instead of waiting for the periodic refresh
+                    await ReloadTickBasedPoolAsync(existingPool);
+                }
+
                 _logger.LogDebug("Updated pool from trade: {poolAddress}_{poolAppId}_{protocol}",
                     trade.PoolAddress, trade.PoolAppId, trade.Protocol);
             }
@@ -978,9 +986,15 @@ namespace AVMTradeReporter.Repository
             {
                 var processor = GetPoolProcessor(pool.Protocol);
                 if (processor == null) return null;
-                var reloaded = await processor.LoadPoolAsync(pool.PoolAddress, pool.PoolAppId);
-                // a scam-zeroed pool never keeps ranges (ScamRatingPolicy), its reload succeeded nevertheless
-                return reloaded != null && (reloaded.LiquidityRanges != null || ScamRatingPolicy.ShouldZeroBalances(reloaded.ScamRating)) ? reloaded : null;
+                // another event applied while the chain was read makes the processor keep the event state (no ranges yet):
+                // read again, a few times at most - a box read failure ends the same way
+                for (var attempt = 0; attempt < 3; attempt++)
+                {
+                    var reloaded = await processor.LoadPoolAsync(pool.PoolAddress, pool.PoolAppId);
+                    // a scam-zeroed pool never keeps ranges (ScamRatingPolicy), its reload succeeded nevertheless
+                    if (reloaded != null && (reloaded.LiquidityRanges != null || ScamRatingPolicy.ShouldZeroBalances(reloaded.ScamRating))) return reloaded;
+                }
+                return null;
             }
             catch (Exception ex)
             {

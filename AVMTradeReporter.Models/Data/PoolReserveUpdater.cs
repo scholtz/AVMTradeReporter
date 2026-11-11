@@ -1,4 +1,4 @@
-﻿using AVMTradeReporter.Models.Data.Enums;
+using AVMTradeReporter.Models.Data.Enums;
 
 namespace AVMTradeReporter.Models.Data
 {

@@ -1,4 +1,4 @@
-﻿using Algorand;
+using Algorand;
 using Algorand.Algod.Model.Transactions;
 using AVM.ClientGenerator.Core;
 using AVMTradeReporter.Model;

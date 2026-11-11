@@ -1,4 +1,4 @@
-﻿namespace AVMTradeReporter.Models.Data
+namespace AVMTradeReporter.Models.Data
 {
     /// <summary>
     /// Math for tick based concentrated liquidity pools (Pact CLAMM).

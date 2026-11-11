@@ -1,4 +1,4 @@
-﻿using AVMTradeReporter.Models.Data;
+using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Models.Data.Enums;
 using Newtonsoft.Json.Linq;
 

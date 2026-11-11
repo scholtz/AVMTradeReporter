@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Text;
 using Algorand.Algod;
 using AVMTradeReporter.Models.Data;
@@ -26,6 +26,10 @@ namespace AVMTradeReporterTests.Processors.Pool
             private readonly ulong _appId;
             private readonly JObject _fixture;
             public bool FailBoxes { get; set; }
+            /// <summary>Answers the tick word boxes without a value (a broken node response).</summary>
+            public bool NullBoxValues { get; set; }
+            /// <summary>Runs when the box listing is requested, i.e. while the processor is reading the chain.</summary>
+            public Action? OnBoxListing { get; set; }
 
             public FakeAlgodHandler(ulong appId)
             {
@@ -37,13 +41,18 @@ namespace AVMTradeReporterTests.Processors.Pool
             {
                 var path = request.RequestUri!.AbsolutePath;
                 if (path == $"/v2/applications/{_appId}") return Json(_fixture["application"]!.ToString());
-                if (path == $"/v2/applications/{_appId}/boxes") return FailBoxes ? Error() : Json(_fixture["boxes"]!.ToString());
+                if (path == $"/v2/applications/{_appId}/boxes")
+                {
+                    OnBoxListing?.Invoke();
+                    return FailBoxes ? Error() : Json(_fixture["boxes"]!.ToString());
+                }
                 if (path == $"/v2/applications/{_appId}/box")
                 {
                     if (FailBoxes) return Error();
                     var name = WebUtility.UrlDecode(request.RequestUri.Query.Split("name=")[1].Split('&')[0]).Replace("b64:", "");
                     var value = _fixture["boxValues"]![name]?.ToString();
                     if (value == null) return Error(HttpStatusCode.NotFound);
+                    if (NullBoxValues) return Json(new JObject { ["name"] = name, ["round"] = 66847380 }.ToString());
                     return Json(new JObject { ["name"] = name, ["round"] = 66847380, ["value"] = value }.ToString());
                 }
                 return Error(HttpStatusCode.NotFound);
@@ -183,6 +192,47 @@ namespace AVMTradeReporterTests.Processors.Pool
             var active = pool.LiquidityRanges!.Single(r => r.TickLow <= pool.CurrentTick && pool.CurrentTick <= r.TickHigh);
             Assert.That(pool.CurrentPrice, Is.InRange(active.PMin, active.PMax));
             Assert.That(pool.L, Is.EqualTo(active.Liquidity));
+        }
+
+        [Test]
+        public async Task EventDuringTheReadKeepsTheEventState()
+        {
+            // a swap is applied to the cached pool while a refresh is reading the chain: the refresh's state may predate the
+            // swap and must not overwrite it
+            var (processor, _, handler) = Create();
+            var pool = await processor.LoadPoolAsync(Address, AppId);
+            var swapTimestamp = DateTimeOffset.Now;
+            handler.OnBoxListing = () =>
+            {
+                pool.A = 111;
+                pool.B = 222;
+                pool.Timestamp = swapTimestamp;
+            };
+
+            var refreshed = await processor.LoadPoolAsync(Address, AppId);
+
+            Assert.That(refreshed, Is.SameAs(pool));
+            Assert.That(refreshed.A, Is.EqualTo(111));
+            Assert.That(refreshed.B, Is.EqualTo(222));
+            Assert.That(refreshed.Timestamp, Is.EqualTo(swapTimestamp));
+        }
+
+        [Test]
+        public async Task MissingBoxValueIsAFailedReadNotEmptyLiquidity()
+        {
+            var (processor, _, handler) = Create();
+            var pool = await processor.LoadPoolAsync(Address, AppId);
+            pool.LiquidityRanges = null; // dropped by a liquidity event
+            pool.A = 170_000_000_000;
+            pool.B = 3_600_000_000;
+            handler.NullBoxValues = true;
+
+            var reloaded = await processor.LoadPoolAsync(Address, AppId);
+
+            // not an empty range list with zero reserves: the event tracked reserves stay
+            Assert.That(reloaded.LiquidityRanges, Is.Null);
+            Assert.That(reloaded.A, Is.EqualTo(170_000_000_000));
+            Assert.That(reloaded.B, Is.EqualTo(3_600_000_000));
         }
 }
 }

@@ -56,6 +56,8 @@ namespace AVMTradeReporter.Processors.Pool
             var readStartedAt = DateTimeOffset.Now;
             using var cancelationTokenSource = new CancellationTokenSource();
             var pool = await _poolRepository.GetPoolAsync(address, cancelationTokenSource.Token);
+            // events keep updating the cached pool while the reads below run; its timestamp tells whether one did
+            var timestampBeforeRead = pool?.Timestamp;
             var app = await _algod.GetApplicationByIDAsync(appId);
 
             if (GetGlobalState(app, PactWeightedPoolHelper.KeyReserveA) != null)
@@ -66,7 +68,7 @@ namespace AVMTradeReporter.Processors.Pool
             if (GetGlobalState(app, PactClammHelper.KeyCurrentPrice) != null)
             {
                 // Pact CLAMM (tick based concentrated liquidity, ARC4 contract)
-                return await LoadClammPoolAsync(pool, address, appId, app, readStartedAt, cancelationTokenSource.Token);
+                return await LoadClammPoolAsync(pool, address, appId, app, readStartedAt, timestampBeforeRead, cancelationTokenSource.Token);
             }
 
             var A = app.Params.GlobalState.FirstOrDefault(p => p.Key == Convert.ToBase64String(Encoding.ASCII.GetBytes("A")));
@@ -366,7 +368,7 @@ namespace AVMTradeReporter.Processors.Pool
         /// harmless (a liquidity event reloads again, a swap reprices from its own post-swap price), skipping a liquidity
         /// event the read missed would leave stale ranges.
         /// </summary>
-        private async Task<AVMTradeReporter.Models.Data.Pool> LoadClammPoolAsync(AVMTradeReporter.Models.Data.Pool? pool, string address, ulong appId, Algorand.Algod.Model.Application app, DateTimeOffset readStartedAt, CancellationToken cancellationToken)
+        private async Task<AVMTradeReporter.Models.Data.Pool> LoadClammPoolAsync(AVMTradeReporter.Models.Data.Pool? pool, string address, ulong appId, Algorand.Algod.Model.Application app, DateTimeOffset readStartedAt, DateTimeOffset? timestampBeforeRead, CancellationToken cancellationToken)
         {
             var stateTimestamp = readStartedAt - ReadTimestampSafetyMargin;
             var assetA = GetGlobalState(app, "a");
@@ -434,6 +436,15 @@ namespace AVMTradeReporter.Processors.Pool
             }
 
             _logger.LogInformation("Processing Pact CLAMM pool {appId}", appId);
+
+            if (pool != null && pool.Timestamp != timestampBeforeRead)
+            {
+                // a swap or liquidity event was applied to the cached pool while the chain was being read: the read state
+                // may predate it, so it must not overwrite the newer event state (a liquidity event queues its own reload
+                // behind the load lock, which reads the boxes again)
+                _logger.LogInformation("Pact CLAMM pool {appId} changed by an event during the refresh, keeping the event state", appId);
+                return pool;
+            }
 
             var updated = false;
             if (pool == null)
@@ -510,7 +521,8 @@ namespace AVMTradeReporter.Processors.Pool
         {
             var result = new List<(ulong Tick, ulong Liquidity)>();
             var boxes = await _algod.GetApplicationBoxesAsync(appId, null);
-            if (boxes?.Boxes == null) return result;
+            // a missing listing or box value is a failed read, never "no liquidity": a partial range list would be taken as exact
+            if (boxes?.Boxes == null) throw new InvalidOperationException($"algod returned no box listing for app {appId}");
             var words = boxes.Boxes
                 .Where(d => d.Name != null && d.Name.Length == 8)
                 .Select(d => (Name: d.Name, Word: BitConverter.ToUInt64(d.Name.Reverse().ToArray(), 0)))
@@ -523,7 +535,8 @@ namespace AVMTradeReporter.Processors.Pool
                 try
                 {
                     var box = await _algod.GetApplicationBoxByNameAsync(appId, "b64:" + Convert.ToBase64String(w.Name));
-                    return box?.Value == null ? new List<(ulong Tick, ulong Liquidity)>() : TickMath.ParseTickWord(w.Word, box.Value).ToList();
+                    if (box?.Value == null) throw new InvalidOperationException($"algod returned no value for tick word {w.Word} of app {appId}");
+                    return TickMath.ParseTickWord(w.Word, box.Value).ToList();
                 }
                 finally
                 {

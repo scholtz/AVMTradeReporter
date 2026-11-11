@@ -1,4 +1,4 @@
-﻿using Algorand;
+using Algorand;
 using Algorand.Algod.Model.Transactions;
 
 namespace AVMTradeReporter.Processors

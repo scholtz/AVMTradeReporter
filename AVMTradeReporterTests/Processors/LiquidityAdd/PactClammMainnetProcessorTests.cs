@@ -1,4 +1,4 @@
-﻿using AVMTradeReporter.Models.Data.Enums;
+using AVMTradeReporter.Models.Data.Enums;
 using AVMTradeReporter.Services;
 using Microsoft.Extensions.Logging;
 
