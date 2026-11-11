@@ -43,15 +43,6 @@
         }
 
         /// <summary>
-        /// sqrt of the price of A in B (base units) at the upper boundary of an encoded tick >= <see cref="TickBase"/>
-        /// (= the lower boundary of the tick before it). Use <see cref="TickBounds"/> for any tick.
-        /// </summary>
-        public static double TickToSqrtPrice(ulong tick, ulong tickSpacing)
-        {
-            return Math.Pow(1.0001, -(double)tickSpacing / 2 * ((double)tick - TickBase));
-        }
-
-        /// <summary>
         /// Converts a tick word (box name) and the record index to the tick.
         /// </summary>
         public static ulong WordToTick(ulong word, int index)

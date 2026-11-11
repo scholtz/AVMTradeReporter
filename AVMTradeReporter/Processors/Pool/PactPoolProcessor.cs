@@ -32,7 +32,25 @@ namespace AVMTradeReporter.Processors.Pool
         /// </summary>
         public static readonly TimeSpan ReadTimestampSafetyMargin = TimeSpan.FromMinutes(1);
 
+        // one load per pool at a time (process wide - the processor may be resolved more than once): a refresh that read the
+        // tick boxes before a mint must not finish after - and overwrite - the reload triggered by that mint
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<ulong, SemaphoreSlim> _loadLocks = new();
+
         public async Task<AVMTradeReporter.Models.Data.Pool> LoadPoolAsync(string address, ulong appId)
+        {
+            var loadLock = _loadLocks.GetOrAdd(appId, _ => new SemaphoreSlim(1, 1));
+            await loadLock.WaitAsync();
+            try
+            {
+                return await LoadPoolCoreAsync(address, appId);
+            }
+            finally
+            {
+                loadLock.Release();
+            }
+        }
+
+        private async Task<AVMTradeReporter.Models.Data.Pool> LoadPoolCoreAsync(string address, ulong appId)
         {
             // before any algod read: the state read below contains at least every block committed before this instant
             var readStartedAt = DateTimeOffset.Now;

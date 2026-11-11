@@ -15,12 +15,12 @@ namespace AVMTradeReporterTests.Model
         {
             // global state after the swap in round 64139970: current_tick 1000361, current_price 6237834869436999446
             var sqrtP = 6237834869436999446UL / 18446744073709551616.0;
-            var lower = TickMath.TickToSqrtPrice(1000362, Spacing);
-            var upper = TickMath.TickToSqrtPrice(1000361, Spacing);
+            var lower = TickMath.TickBounds(1000362, Spacing).Upper;
+            var upper = TickMath.TickBounds(1000361, Spacing).Upper;
             Assert.That(sqrtP, Is.GreaterThan(lower));
             Assert.That(sqrtP, Is.LessThan(upper));
             // price decreases with the tick
-            Assert.That(TickMath.TickToSqrtPrice(1000000, Spacing), Is.EqualTo(1.0).Within(1e-12));
+            Assert.That(TickMath.TickBounds(1000000, Spacing).Upper, Is.EqualTo(1.0).Within(1e-12));
         }
 
         [Test]
@@ -30,8 +30,8 @@ namespace AVMTradeReporterTests.Model
             // low_price 6246004806130590512 and high_price 6227295804679904691 are the Q64.64 sqrt prices
             // at the boundaries of the current tick (named from the contract's A-per-B view, so "low" is the larger sqrt(B/A))
             const double twoPow64 = 18446744073709551616.0;
-            var low = TickMath.TickToSqrtPrice(1000361, Spacing) * twoPow64;
-            var high = TickMath.TickToSqrtPrice(1000362, Spacing) * twoPow64;
+            var low = TickMath.TickBounds(1000361, Spacing).Upper * twoPow64;
+            var high = TickMath.TickBounds(1000362, Spacing).Upper * twoPow64;
             Assert.That(low, Is.EqualTo(6246004806130590512.0).Within(0.000000001).Percent);
             Assert.That(high, Is.EqualTo(6227295804679904691.0).Within(0.000000001).Percent);
             // current_price sits inside the current tick
@@ -77,10 +77,10 @@ namespace AVMTradeReporterTests.Model
         {
             var ticks = Enumerable.Range(1000331, 66).Select(t => ((ulong)t, 433647667UL)).ToList();
             // price above the range (lower tick) -> everything in B; below the range -> everything in A
-            var (aAbove, bAbove) = Reserves(ticks, (ulong)(TickMath.TickToSqrtPrice(1000300, Spacing) * 18446744073709551616.0));
+            var (aAbove, bAbove) = Reserves(ticks, (ulong)(TickMath.TickBounds(1000300, Spacing).Upper * 18446744073709551616.0));
             Assert.That(aAbove, Is.EqualTo(0));
             Assert.That(bAbove, Is.GreaterThan(0));
-            var (aBelow, bBelow) = Reserves(ticks, (ulong)(TickMath.TickToSqrtPrice(1000400, Spacing) * 18446744073709551616.0));
+            var (aBelow, bBelow) = Reserves(ticks, (ulong)(TickMath.TickBounds(1000400, Spacing).Upper * 18446744073709551616.0));
             Assert.That(aBelow, Is.GreaterThan(0));
             Assert.That(bBelow, Is.EqualTo(0));
             var ranges = TickMath.BuildRanges(ticks);

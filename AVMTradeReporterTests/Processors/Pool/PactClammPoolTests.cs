@@ -95,8 +95,8 @@ namespace AVMTradeReporterTests.Processors.Pool
             const double twoPow64 = 18446744073709551616.0;
 
             // low_price / high_price are the sqrt prices at the boundaries of the current tick
-            var lowFromTick = TickMath.TickToSqrtPrice(currentTick, tickSpacing) * twoPow64;
-            var highFromTick = TickMath.TickToSqrtPrice(currentTick + 1, tickSpacing) * twoPow64;
+            var lowFromTick = TickMath.TickBounds(currentTick, tickSpacing).Upper * twoPow64;
+            var highFromTick = TickMath.TickBounds(currentTick + 1, tickSpacing).Upper * twoPow64;
             Assert.That(lowFromTick, Is.EqualTo((double)lowPrice).Within(0.000000001).Percent);
             Assert.That(highFromTick, Is.EqualTo((double)highPrice).Within(0.000000001).Percent);
             Assert.That(currentPrice, Is.LessThanOrEqualTo(lowPrice));

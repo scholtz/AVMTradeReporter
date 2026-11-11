@@ -189,7 +189,7 @@ namespace AVMTradeReporterTests.Model
             // the active tick 1000401 starts (lower sqrt price bound) at sqrt(1.0001^(-30 * 402)); a price exactly there is
             // inside tick 1000401, not in a gap between ranges
             var ranges = TickMath.BuildRanges(LoadTicks());
-            var lowerBound = TickMath.TickToSqrtPrice(1000402, TickSpacing);
+            var lowerBound = TickMath.TickBounds(1000402, TickSpacing).Upper;
             // at ~5.5e18 a double is integer valued, so the Q64.64 value converts back to exactly the bound
             var sqrtPriceX64 = (ulong)(lowerBound * 18446744073709551616.0);
             Assert.That(sqrtPriceX64 / 18446744073709551616.0, Is.EqualTo(lowerBound));

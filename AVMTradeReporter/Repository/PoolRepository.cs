@@ -979,7 +979,8 @@ namespace AVMTradeReporter.Repository
                 var processor = GetPoolProcessor(pool.Protocol);
                 if (processor == null) return null;
                 var reloaded = await processor.LoadPoolAsync(pool.PoolAddress, pool.PoolAppId);
-                return reloaded?.LiquidityRanges != null ? reloaded : null;
+                // a scam-zeroed pool never keeps ranges (ScamRatingPolicy), its reload succeeded nevertheless
+                return reloaded != null && (reloaded.LiquidityRanges != null || ScamRatingPolicy.ShouldZeroBalances(reloaded.ScamRating)) ? reloaded : null;
             }
             catch (Exception ex)
             {

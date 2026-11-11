@@ -23,16 +23,15 @@ namespace AVMTradeReporter.Models.Data
                 // a swap moves only the price, never the per-tick liquidity: the reserves follow exactly from the loaded
                 // liquidity ranges at the post-swap price. A swap that left the price untouched (no current_price in the
                 // global delta - Algorand lists only the keys whose value changed) left the reserves untouched too.
-                // A swap crossing price 1 also flips the tick origin, which decides how its sqrt price is read: apply it first.
-                if (trade.PoolTickOrigin.HasValue) pool.TickOrigin = trade.PoolTickOrigin.Value;
+                // The price state goes first: a swap crossing price 1 flips the tick origin, which decides how the sqrt price
+                // is read, and the new tick decides the active liquidity.
+                ApplyPrice(pool, trade);
                 if (trade.PoolSqrtPriceX64.HasValue && trade.PoolSqrtPriceX64.Value > 0)
                 {
                     ApplyRanges(pool, trade.PoolSqrtPriceX64.Value);
                 }
-                ApplyPrice(pool, trade);
-                if (pool.CurrentTick.HasValue && pool.LiquidityRanges != null)
+                else if (pool.CurrentTick.HasValue)
                 {
-                    // the active liquidity is the liquidity of the contract's current tick (exact also on a tick boundary)
                     pool.L = TickMath.LiquidityAtTick(pool.LiquidityRanges, pool.CurrentTick.Value);
                 }
                 return;
@@ -58,7 +57,7 @@ namespace AVMTradeReporter.Models.Data
 
         /// <summary>
         /// Recomputes the reserves (A, B), the active liquidity (L) and the per-range amounts of a tick based CLAMM pool
-        /// from its liquidity ranges at the given sqrt price (Q64.64).
+        /// from its liquidity ranges at the given sqrt price (Q64.64), read in the orientation of <see cref="Pool.TickOrigin"/>.
         /// </summary>
         public static void ApplyRanges(Pool pool, ulong sqrtPriceX64)
         {
@@ -69,7 +68,8 @@ namespace AVMTradeReporter.Models.Data
             pool.LiquidityRanges = ranges;
             pool.A = a;
             pool.B = b;
-            pool.L = active;
+            // the contract's current tick decides the active liquidity (exact also on a tick boundary); the price is the fallback
+            pool.L = pool.CurrentTick.HasValue ? TickMath.LiquidityAtTick(ranges, pool.CurrentTick.Value) : active;
         }
 
         /// <summary>
