@@ -1,4 +1,4 @@
-using AVMTradeReporter.Models.Data.Enums;
+﻿using AVMTradeReporter.Models.Data.Enums;
 using AVMTradeReporter.Services;
 using Microsoft.Extensions.Logging;
 
@@ -107,5 +107,22 @@ namespace AVMTradeReporterTests.Processors.LiquidityAdd
             Assert.That(trade.PoolSqrtPriceX64, Is.EqualTo(5531894802404564755UL));
             Assert.That(trade.TradeState, Is.EqualTo(TxState.Confirmed));
         }
-    }
+    
+        [Test]
+        public async Task SwapCrossingPriceOneCarriesTheNewTickOrigin()
+        {
+            // USDC/POW 3764749314: the swap of round 66737071 moved the price of USDC in POW from ~0.99 (tick 1000000, d = 1e6)
+            // past 1 to ~4.8 (tick 78): its global delta sets d = 0, which flips how current_price has to be read
+            var (trades, _) = await ProcessMainnetBlockAsync(66737071);
+
+            var trade = trades.trades.SingleOrDefault(t => t.PoolAppId == 3764749314);
+            Assert.That(trade, Is.Not.Null, "the CLAMM swap was not detected");
+            Assert.That(trade!.PoolTickOrigin, Is.EqualTo(0));
+            Assert.That(trade.PoolTick, Is.EqualTo(78));
+            Assert.That(trade.PoolSqrtPriceX64, Is.EqualTo(8395360813952946615UL));
+            // an ordinary swap leaves d untouched and carries no origin
+            var (ordinary, _) = await ProcessMainnetBlockAsync(66846070);
+            Assert.That(ordinary.trades.Single(t => t.PoolAppId == PoolAppId).PoolTickOrigin, Is.Null);
+        }
+}
 }

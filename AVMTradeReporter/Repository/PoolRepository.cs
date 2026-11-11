@@ -735,7 +735,10 @@ namespace AVMTradeReporter.Repository
 
                 // tick based CLAMM: reload the exact state from the box storage before storing, so subscribers never see the
                 // interim incrementally tracked reserves; those are only stored when the reload fails
-                var reloaded = existingPool.AMMType == AMMType.TickBasedCLAMM ? await ReloadTickBasedPoolAsync(existingPool) : null;
+                // only with resolved decimals: otherwise the processor cannot reuse the cached pool (GetPoolAsync reports
+                // it "not ready") and would replace it with a fresh one, losing this pool's state
+                var canReload = existingPool.AMMType == AMMType.TickBasedCLAMM && existingPool.AssetADecimals.HasValue && existingPool.AssetBDecimals.HasValue;
+                var reloaded = canReload ? await ReloadTickBasedPoolAsync(existingPool) : null;
                 if (reloaded == null)
                 {
                     await StorePoolAsync(existingPool, true, cancellationToken);

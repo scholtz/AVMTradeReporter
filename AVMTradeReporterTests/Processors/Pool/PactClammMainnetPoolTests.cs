@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Text;
 using Algorand.Algod;
 using AVMTradeReporter.Models.Data;
@@ -23,15 +23,22 @@ namespace AVMTradeReporterTests.Processors.Pool
         /// </summary>
         private sealed class FakeAlgodHandler : HttpMessageHandler
         {
-            private readonly JObject _fixture = JObject.Parse(File.ReadAllText("Data/pact-clamm-3762241535-algod.json"));
+            private readonly ulong _appId;
+            private readonly JObject _fixture;
             public bool FailBoxes { get; set; }
+
+            public FakeAlgodHandler(ulong appId)
+            {
+                _appId = appId;
+                _fixture = Fixture(appId);
+            }
 
             protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             {
                 var path = request.RequestUri!.AbsolutePath;
-                if (path == $"/v2/applications/{AppId}") return Json(_fixture["application"]!.ToString());
-                if (path == $"/v2/applications/{AppId}/boxes") return FailBoxes ? Error() : Json(_fixture["boxes"]!.ToString());
-                if (path == $"/v2/applications/{AppId}/box")
+                if (path == $"/v2/applications/{_appId}") return Json(_fixture["application"]!.ToString());
+                if (path == $"/v2/applications/{_appId}/boxes") return FailBoxes ? Error() : Json(_fixture["boxes"]!.ToString());
+                if (path == $"/v2/applications/{_appId}/box")
                 {
                     if (FailBoxes) return Error();
                     var name = WebUtility.UrlDecode(request.RequestUri.Query.Split("name=")[1].Split('&')[0]).Replace("b64:", "");
@@ -49,9 +56,11 @@ namespace AVMTradeReporterTests.Processors.Pool
                 Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent("{\"message\":\"unavailable\"}", Encoding.UTF8, "application/json") });
         }
 
-        private static (PactPoolProcessor Processor, MockPoolRepository Repository, FakeAlgodHandler Handler) Create()
+        private static JObject Fixture(ulong appId) => JObject.Parse(File.ReadAllText($"Data/pact-clamm-{appId}-algod.json"));
+
+        private static (PactPoolProcessor Processor, MockPoolRepository Repository, FakeAlgodHandler Handler) Create(ulong appId = AppId)
         {
-            var handler = new FakeAlgodHandler();
+            var handler = new FakeAlgodHandler(appId);
             var algod = new DefaultApi(new HttpClient(handler) { BaseAddress = new Uri("http://algod.test") });
             var repository = new MockPoolRepository();
             var processor = new PactPoolProcessor(algod, repository, new LoggerFactory().CreateLogger<PactPoolProcessor>(), new MockAssetRepository());
@@ -142,5 +151,38 @@ namespace AVMTradeReporterTests.Processors.Pool
             Assert.That(reloaded.A, Is.EqualTo(170_000_000_000));
             Assert.That(reloaded.B, Is.EqualTo(3_600_000_000));
         }
-    }
+    
+        /// <summary>
+        /// Pools whose price of A in B is above 1 base unit: tick origin d = 0, ticks below 1e6 (words below 1e6) and the
+        /// contract current_price is sqrt(price of B in A). Before, those words were dropped and current_price was read as
+        /// A in B, so the backend reported e.g. 1,039 USD for USDC/HAY 3764935215 (Pact: 22,495 USD) and priced HAY at the
+        /// inverse of its real price. The fixtures carry the Pact API TVL read at the same time as the chain state.
+        /// </summary>
+        [TestCase(3764935215UL, "XL5VFN47OC67KVFM2PYKKWMSCSQMGQCKHYB7EMU5ULQKQ6LZOALJ2Y3JCY", 10_898.60, 1_376_750.78, 118.2469, 129)]
+        [TestCase(3764749314UL, "2M75ASPFJ5YWJOYU676IOL3NX23H6R333RWX4WONRALEWTJA5FQWDOH4GQ", 85.5636, 474_046.18, 2764.03, 836)]
+        public async Task PoolsAbovePriceOneMatchPactTvl(ulong appId, string address, double expectedA, double expectedB, double expectedPrice, int expectedTicks)
+        {
+            var (processor, _, _) = Create(appId);
+            var reference = (JObject)Fixture(appId)["pact"]!;
+
+            var pool = await processor.LoadPoolAsync(address, appId);
+
+            Assert.That(pool.TickOrigin, Is.EqualTo(0));
+            Assert.That(pool.LiquidityRanges!.Sum(r => (int)(r.TickHigh - r.TickLow + 1)), Is.EqualTo(expectedTicks));
+            Assert.That((double)pool.RealAmountA, Is.EqualTo(expectedA).Within(0.01));
+            Assert.That((double)pool.RealAmountB, Is.EqualTo(expectedB).Within(0.01));
+            // 1 USDC buys ~118 HAY / ~2764 POW (the Pact API prices agree), not their inverse
+            Assert.That((double)pool.CurrentPrice!.Value, Is.EqualTo(expectedPrice).Within(expectedPrice * 0.0001));
+            var priceA = decimal.Parse(reference["primary"]!["price"]!.ToString(), System.Globalization.CultureInfo.InvariantCulture);
+            var priceB = decimal.Parse(reference["secondary"]!["price"]!.ToString(), System.Globalization.CultureInfo.InvariantCulture);
+            Assert.That((double)(priceA / priceB), Is.EqualTo(expectedPrice).Within(expectedPrice * 0.005));
+            var tvl = pool.RealAmountA * priceA + pool.RealAmountB * priceB;
+            var pactTvl = decimal.Parse(reference["tvlUsd"]!.ToString(), System.Globalization.CultureInfo.InvariantCulture);
+            Assert.That(tvl, Is.EqualTo(pactTvl).Within(pactTvl * 0.0001m));
+            // the price lies in the range of the contract's current tick, which carries the active liquidity
+            var active = pool.LiquidityRanges!.Single(r => r.TickLow <= pool.CurrentTick && pool.CurrentTick <= r.TickHigh);
+            Assert.That(pool.CurrentPrice, Is.InRange(active.PMin, active.PMax));
+            Assert.That(pool.L, Is.EqualTo(active.Liquidity));
+        }
+}
 }

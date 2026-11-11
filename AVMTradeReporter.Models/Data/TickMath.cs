@@ -1,14 +1,20 @@
-namespace AVMTradeReporter.Models.Data
+﻿namespace AVMTradeReporter.Models.Data
 {
     /// <summary>
     /// Math for tick based concentrated liquidity pools (Pact CLAMM).
     ///
-    /// Conventions verified against the testnet pool 763274703:
-    /// - the contract sqrt price is Q64.64: sqrt(price of A in B, base units) * 2^64
-    /// - ticks are unsigned with 1_000_000 meaning "price 1" and are expressed in tick_spacing units,
-    ///   so tick t covers the B/A price range [1.0001^(-spacing*(t+1-1e6)), 1.0001^(-spacing*(t-1e6))]
-    ///   (the price of A in B decreases with the tick)
-    /// - liquidity per tick is stored in boxes named by an 8 byte "word" w (100 ticks per word, tick = 1e6 + (w - 1e6) * 100 + i)
+    /// Conventions (verified against the testnet pool 763274703 and the mainnet pools 3762241535, 3764749314, 3764898004
+    /// and 3764935215, whose box-derived TVL equals the TVL of the Pact API to the cent):
+    /// - ticks are expressed in tick_spacing units and encoded sign-magnitude around <see cref="TickBase"/> (1_000_000):
+    ///   an encoded tick t >= 1e6 is the signed tick s = t - 1e6 and covers s in [s, s + 1]; t &lt; 1e6 is s = -t and
+    ///   covers s in [-(t + 1), -t]. The price of A in B (base units) at signed tick s is 1.0001^(-spacing * s), so
+    ///   ticks >= 1e6 are prices &lt;= 1 and ticks &lt; 1e6 prices >= 1; tick 0 and tick 1e6 meet at price 1
+    /// - the global "d" (<see cref="Pool.TickOrigin"/>) tells on which side the current price is: 1e6 while the price of
+    ///   A in B is &lt;= 1, 0 above (a swap crossing price 1 flips it, e.g. 3764749314 in round 66737071)
+    /// - current_price is Q64.64 sqrt price in the orientation of that side: sqrt(price of A in B) * 2^64 while d = 1e6,
+    ///   sqrt(price of B in A) * 2^64 while d = 0 (see <see cref="CurrentSqrtPrice"/>)
+    /// - liquidity per tick is stored in boxes named by an 8 byte "word" w, 100 ticks per word, in the same two regions:
+    ///   w >= 1e6 holds ticks 1e6 + (w - 1e6) * 100 + i, w &lt; 1e6 holds ticks w * 100 + i
     ///   as 100 records of 10 bytes: big endian uint80 liquidity active in that tick (the mint logs carry the position
     ///   liquidity as uint80 too; the two high bytes are 0 in every record of both the testnet and the mainnet pool)
     /// - a position minted over (tick_low, tick_high) adds its liquidity to the ticks [tick_low, tick_high) - tick_high is
@@ -26,9 +32,10 @@ namespace AVMTradeReporter.Models.Data
         /// <summary>
         /// Converts the Q64.64 sqrt price to the decimal adjusted price of 1 A in B.
         /// </summary>
-        public static decimal SqrtPriceX64ToPrice(ulong sqrtPriceX64, ulong assetADecimals, ulong assetBDecimals)
+        public static decimal SqrtPriceX64ToPrice(ulong sqrtPriceX64, ulong assetADecimals, ulong assetBDecimals, ulong tickOrigin = TickBase)
         {
-            var sqrt = sqrtPriceX64 / TwoPow64;
+            if (sqrtPriceX64 == 0) return 0;
+            var sqrt = CurrentSqrtPrice(sqrtPriceX64, tickOrigin);
             var priceBaseUnits = sqrt * sqrt;
             var price = priceBaseUnits * Math.Pow(10, (double)assetADecimals - (double)assetBDecimals);
             if (double.IsNaN(price) || double.IsInfinity(price)) return 0;
@@ -36,7 +43,8 @@ namespace AVMTradeReporter.Models.Data
         }
 
         /// <summary>
-        /// sqrt of the B/A price (base units) at the lower boundary of the tick.
+        /// sqrt of the price of A in B (base units) at the upper boundary of an encoded tick >= <see cref="TickBase"/>
+        /// (= the lower boundary of the tick before it). Use <see cref="TickBounds"/> for any tick.
         /// </summary>
         public static double TickToSqrtPrice(ulong tick, ulong tickSpacing)
         {
@@ -48,7 +56,32 @@ namespace AVMTradeReporter.Models.Data
         /// </summary>
         public static ulong WordToTick(ulong word, int index)
         {
-            return TickBase + (word - TickBase) * (ulong)TicksPerWord + (ulong)index;
+            if (word >= TickBase) return TickBase + (word - TickBase) * (ulong)TicksPerWord + (ulong)index;
+            return word * (ulong)TicksPerWord + (ulong)index;
+        }
+
+        /// <summary>
+        /// sqrt of the price of A in B (base units) at the lower and upper boundary of the encoded tick.
+        /// </summary>
+        public static (double Lower, double Upper) TickBounds(ulong tick, ulong tickSpacing)
+        {
+            double AtSigned(double s) => Math.Pow(1.0001, -(double)tickSpacing / 2 * s);
+            if (tick >= TickBase)
+            {
+                var s = (double)(tick - TickBase);
+                return (AtSigned(s + 1), AtSigned(s));
+            }
+            return (AtSigned(-(double)tick), AtSigned(-((double)tick + 1)));
+        }
+
+        /// <summary>
+        /// sqrt of the price of A in B (base units) from the contract current_price, whose orientation follows the
+        /// tick origin "d" (<see cref="Pool.TickOrigin"/>): A in B while d >= 1e6, B in A while d = 0.
+        /// </summary>
+        public static double CurrentSqrtPrice(ulong sqrtPriceX64, ulong tickOrigin)
+        {
+            if (sqrtPriceX64 == 0) return 0;
+            return tickOrigin >= TickBase ? sqrtPriceX64 / TwoPow64 : TwoPow64 / sqrtPriceX64;
         }
 
         /// <summary>
@@ -97,7 +130,8 @@ namespace AVMTradeReporter.Models.Data
             PoolLiquidityRange? current = null;
             foreach (var (tick, liquidity) in ticks.Where(t => t.Liquidity > 0).OrderBy(t => t.Tick))
             {
-                if (current != null && current.Liquidity == liquidity && current.TickHigh + 1 == tick)
+                // tick 1e6 - 1 and tick 1e6 are not adjacent prices (the two ends of the encoding), never merge across them
+                if (current != null && current.Liquidity == liquidity && current.TickHigh + 1 == tick && tick != TickBase)
                 {
                     current.TickHigh = tick;
                     continue;
@@ -112,20 +146,23 @@ namespace AVMTradeReporter.Models.Data
         /// Fills the amounts held by every range at the given sqrt price (Q64.64) and the decimals adjusted price bounds,
         /// and returns the pool totals and the liquidity active at that price.
         ///
-        /// The ticks of a range cover the sqrt price interval [sqrt(TickHigh + 1), sqrt(TickLow)] (the price of A in B
-        /// decreases with the tick). Below the interval the range holds only A, above it only B, inside both:
+        /// A range never spans the sign boundary (see <see cref="BuildRanges"/>), so its sqrt price interval is spanned by
+        /// the bounds of its first and last tick (<see cref="TickBounds"/>). Below the interval the range holds only A,
+        /// above it only B, inside both:
         /// A = L * (1/sqrtP - 1/sqrtUpper), B = L * (sqrtP - sqrtLower) - the standard concentrated liquidity formula.
         /// </summary>
-        public static (ulong A, ulong B, ulong ActiveLiquidity) ApplyPrice(List<PoolLiquidityRange> ranges, ulong sqrtPriceX64, ulong tickSpacing, ulong assetADecimals, ulong assetBDecimals)
+        public static (ulong A, ulong B, ulong ActiveLiquidity) ApplyPrice(List<PoolLiquidityRange> ranges, ulong sqrtPriceX64, ulong tickSpacing, ulong tickOrigin, ulong assetADecimals, ulong assetBDecimals)
         {
-            var sqrtP = sqrtPriceX64 / TwoPow64;
+            var sqrtP = CurrentSqrtPrice(sqrtPriceX64, tickOrigin);
             var decimalsShift = Math.Pow(10, (double)assetADecimals - (double)assetBDecimals);
             double totalA = 0, totalB = 0;
             ulong active = 0;
             foreach (var range in ranges)
             {
-                var sa = TickToSqrtPrice(range.TickHigh + 1, tickSpacing); // lower price boundary
-                var sb = TickToSqrtPrice(range.TickLow, tickSpacing);      // upper price boundary
+                var low = TickBounds(range.TickLow, tickSpacing);
+                var high = TickBounds(range.TickHigh, tickSpacing);
+                var sa = Math.Min(low.Lower, high.Lower); // lower price boundary
+                var sb = Math.Max(low.Upper, high.Upper); // upper price boundary
                 double a, b;
                 // a tick covers [lower, upper): a price exactly on a boundary belongs to the range starting there
                 if (sqrtP < sa)

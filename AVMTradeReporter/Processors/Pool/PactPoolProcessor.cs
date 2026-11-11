@@ -359,6 +359,8 @@ namespace AVMTradeReporter.Processors.Pool
             if (currentPrice == null) throw new Exception("current_price is missing in global params");
             var currentTick = GetGlobalState(app, PactClammHelper.KeyCurrentTick);
             var tickSpacing = GetGlobalState(app, "tick_spacing");
+            // "d": which side of price 1 the current price is on, decides the orientation of current_price (see TickMath)
+            var tickOriginState = GetGlobalState(app, PactClammHelper.KeyTickOrigin);
             var feeBps = GetGlobalState(app, "fee_bps");
             var protocolFeeBps = GetGlobalState(app, "protocol_fee_bps");
 
@@ -377,7 +379,8 @@ namespace AVMTradeReporter.Processors.Pool
             {
                 _logger.LogWarning("Pact CLAMM pool {appId} uses unexpected price scale {scale}; price conversion assumes Q64.64", appId, scale.Value.Uint);
             }
-            var price = PactClammHelper.SqrtPriceX64ToPrice(currentPrice.Value.Uint, assetADecimals ?? 0, assetBDecimals ?? 0);
+            ulong origin = tickOriginState?.Value.Uint ?? TickMath.TickBase;
+            var price = PactClammHelper.SqrtPriceX64ToPrice(currentPrice.Value.Uint, assetADecimals ?? 0, assetBDecimals ?? 0, origin);
             ulong? tick = currentTick?.Value.Uint;
             ulong? spacing = tickSpacing?.Value.Uint;
 
@@ -404,7 +407,7 @@ namespace AVMTradeReporter.Processors.Pool
             }
             if (ranges != null)
             {
-                (reserveA, reserveB, activeLiquidity) = TickMath.ApplyPrice(ranges, currentPrice.Value.Uint, spacing ?? 1, assetADecimals ?? 0, assetBDecimals ?? 0);
+                (reserveA, reserveB, activeLiquidity) = TickMath.ApplyPrice(ranges, currentPrice.Value.Uint, spacing ?? 1, origin, assetADecimals ?? 0, assetBDecimals ?? 0);
                 if (tick.HasValue)
                 {
                     // the contract's current tick decides the active liquidity (exact also on a tick boundary)
@@ -430,6 +433,7 @@ namespace AVMTradeReporter.Processors.Pool
                     CurrentPrice = price,
                     CurrentTick = tick,
                     TickSpacing = spacing,
+                    TickOrigin = origin,
                     LiquidityRanges = ranges,
                     Timestamp = stateTimestamp,
                     ApprovalProgramHash = hash,
@@ -462,6 +466,7 @@ namespace AVMTradeReporter.Processors.Pool
                 if (pool.CurrentPrice != price) { pool.CurrentPrice = price; updated = true; }
                 if (pool.CurrentTick != tick) { pool.CurrentTick = tick; updated = true; }
                 if (pool.TickSpacing != spacing) { pool.TickSpacing = spacing; updated = true; }
+                if (pool.TickOrigin != origin) { pool.TickOrigin = origin; updated = true; }
                 if (!TickMath.SameRanges(pool.LiquidityRanges, ranges)) { updated = true; }
                 // always take the freshly priced ranges: their amounts follow the current price even when the bounds did not change
                 pool.LiquidityRanges = ranges;
@@ -480,7 +485,8 @@ namespace AVMTradeReporter.Processors.Pool
 
         /// <summary>
         /// Reads the per-tick liquidity of the Pact CLAMM pool from its tick word boxes (8 byte box names).
-        /// Position ('u' + address + word) and other boxes are skipped.
+        /// Both tick regions are read (words below and above 1e6, see TickMath); position ('u' + address + word) and the
+        /// 'l' + word boxes are skipped by their name length.
         /// </summary>
         private async Task<List<(ulong Tick, ulong Liquidity)>> LoadClammTicksAsync(ulong appId)
         {
@@ -490,7 +496,6 @@ namespace AVMTradeReporter.Processors.Pool
             var words = boxes.Boxes
                 .Where(d => d.Name != null && d.Name.Length == 8)
                 .Select(d => (Name: d.Name, Word: BitConverter.ToUInt64(d.Name.Reverse().ToArray(), 0)))
-                .Where(w => w.Word >= TickMath.TickBase)
                 .ToList();
             // the word boxes are independent - read them concurrently (a handful per pool, bounded to stay polite to algod)
             using var throttle = new SemaphoreSlim(8);

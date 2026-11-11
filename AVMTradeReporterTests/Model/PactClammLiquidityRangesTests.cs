@@ -1,4 +1,4 @@
-using AVMTradeReporter.Models.Data;
+﻿using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Models.Data.Enums;
 using Newtonsoft.Json.Linq;
 
@@ -81,7 +81,7 @@ namespace AVMTradeReporterTests.Model
         {
             var ranges = TickMath.BuildRanges(LoadTicks());
 
-            var (a, b, active) = TickMath.ApplyPrice(ranges, SqrtPriceAfterSwap, TickSpacing, 6, 6);
+            var (a, b, active) = TickMath.ApplyPrice(ranges, SqrtPriceAfterSwap, TickSpacing, TickMath.TickBase, 6, 6);
 
             var price = TickMath.SqrtPriceX64ToPrice(SqrtPriceAfterSwap, 6, 6);
             Assert.That(price, Is.EqualTo(0.0899308m).Within(0.0000001m));
@@ -98,7 +98,7 @@ namespace AVMTradeReporterTests.Model
         public void RangeAmountsAndBoundsAreConsistent()
         {
             var ranges = TickMath.BuildRanges(LoadTicks());
-            var (a, b, _) = TickMath.ApplyPrice(ranges, SqrtPriceAfterSwap, TickSpacing, 6, 6);
+            var (a, b, _) = TickMath.ApplyPrice(ranges, SqrtPriceAfterSwap, TickSpacing, TickMath.TickBase, 6, 6);
             var price = TickMath.SqrtPriceX64ToPrice(SqrtPriceAfterSwap, 6, 6);
 
             // the per-range amounts add up to the pool reserves (each range rounds independently)
@@ -128,7 +128,7 @@ namespace AVMTradeReporterTests.Model
                 new PoolLiquidityRange { TickLow = MintTickLow, TickHigh = MintTickHigh - 1, Liquidity = MintLiquidity }
             };
 
-            var (a, b, _) = TickMath.ApplyPrice(ranges, SqrtPriceAfterSwap, TickSpacing, 6, 6);
+            var (a, b, _) = TickMath.ApplyPrice(ranges, SqrtPriceAfterSwap, TickSpacing, TickMath.TickBase, 6, 6);
 
             Assert.That((decimal)a, Is.EqualTo(37_627_392m).Within(2m));
             Assert.That((decimal)b, Is.EqualTo(4_000_000m).Within(2m));
@@ -145,8 +145,8 @@ namespace AVMTradeReporterTests.Model
                 .ToList();
             var ranges = TickMath.BuildRanges(ticks);
 
-            var (aBefore, bBefore, _) = TickMath.ApplyPrice(ranges, SqrtPriceBeforeSwap, TickSpacing, 6, 6);
-            var (aAfter, bAfter, _) = TickMath.ApplyPrice(ranges, SqrtPriceAfterSwap, TickSpacing, 6, 6);
+            var (aBefore, bBefore, _) = TickMath.ApplyPrice(ranges, SqrtPriceBeforeSwap, TickSpacing, TickMath.TickBase, 6, 6);
+            var (aAfter, bAfter, _) = TickMath.ApplyPrice(ranges, SqrtPriceAfterSwap, TickSpacing, TickMath.TickBase, 6, 6);
 
             var deltaA = (decimal)aAfter - aBefore;
             var deltaB = (decimal)bBefore - bAfter;
@@ -171,7 +171,7 @@ namespace AVMTradeReporterTests.Model
                 PoolSqrtPriceX64 = SqrtPriceAfterSwap,
             });
 
-            var expected = TickMath.ApplyPrice(TickMath.BuildRanges(LoadTicks()), SqrtPriceAfterSwap, TickSpacing, 6, 6);
+            var expected = TickMath.ApplyPrice(TickMath.BuildRanges(LoadTicks()), SqrtPriceAfterSwap, TickSpacing, TickMath.TickBase, 6, 6);
             Assert.That(pool.A, Is.EqualTo(expected.A));
             Assert.That(pool.B, Is.EqualTo(expected.B));
             Assert.That(pool.L, Is.EqualTo(expected.ActiveLiquidity));
@@ -194,7 +194,7 @@ namespace AVMTradeReporterTests.Model
             var sqrtPriceX64 = (ulong)(lowerBound * 18446744073709551616.0);
             Assert.That(sqrtPriceX64 / 18446744073709551616.0, Is.EqualTo(lowerBound));
 
-            var (_, _, active) = TickMath.ApplyPrice(ranges, sqrtPriceX64, TickSpacing, 6, 6);
+            var (_, _, active) = TickMath.ApplyPrice(ranges, sqrtPriceX64, TickSpacing, TickMath.TickBase, 6, 6);
 
             Assert.That(active, Is.EqualTo(337_594_319_121UL));
         }
@@ -304,8 +304,8 @@ namespace AVMTradeReporterTests.Model
         {
             var left = TickMath.BuildRanges(LoadTicks());
             var right = TickMath.BuildRanges(LoadTicks());
-            TickMath.ApplyPrice(left, SqrtPriceAfterSwap, TickSpacing, 6, 6);
-            TickMath.ApplyPrice(right, SqrtPriceBeforeSwap, TickSpacing, 6, 6);
+            TickMath.ApplyPrice(left, SqrtPriceAfterSwap, TickSpacing, TickMath.TickBase, 6, 6);
+            TickMath.ApplyPrice(right, SqrtPriceBeforeSwap, TickSpacing, TickMath.TickBase, 6, 6);
 
             Assert.That(TickMath.SameRanges(left, right), Is.True);
             Assert.That(TickMath.SameRanges(null, null), Is.True);
@@ -322,5 +322,59 @@ namespace AVMTradeReporterTests.Model
 
             Assert.Throws<OverflowException>(() => TickMath.ParseTickWord(TickMath.TickBase, word).ToList());
         }
-    }
+    
+        [Test]
+        public void TickOriginDecidesTheOrientationOfTheSqrtPrice()
+        {
+            // USDC/POW 3764749314 around its crossing of price 1 (round 66736741: tick 1000000, d = 1e6; round 66737071: tick 78, d = 0)
+            var pool = new AVMTradeReporter.Models.Data.Pool
+            {
+                PoolAddress = "2M75ASPFJ5YWJOYU676IOL3NX23H6R333RWX4WONRALEWTJA5FQWDOH4GQ",
+                Protocol = DEXProtocol.Pact,
+                AMMType = AMMType.TickBasedCLAMM,
+                AssetADecimals = 6,
+                AssetBDecimals = 6,
+                TickSpacing = 200,
+                TickOrigin = TickMath.TickBase,
+            };
+            PoolReserveUpdater.ApplyTrade(pool, new Trade { PoolSqrtPriceX64 = 18324627607556582812UL, PoolTick = 1000000 });
+            Assert.That(pool.CurrentPrice, Is.EqualTo(0.98675m).Within(0.0001m)); // sqrt(price A in B) * 2^64
+
+            PoolReserveUpdater.ApplyTrade(pool, new Trade { PoolSqrtPriceX64 = 8395360813952946615UL, PoolTick = 78, PoolTickOrigin = 0 });
+
+            Assert.That(pool.TickOrigin, Is.EqualTo(0));
+            // now sqrt(price B in A) * 2^64: the price keeps rising past 1 to ~4.83, inside tick 78 = 1.0001^(200 * [78, 79])
+            Assert.That(pool.CurrentPrice, Is.EqualTo(4.8279m).Within(0.001m));
+            var (lower, upper) = TickMath.TickBounds(78, 200);
+            Assert.That((double)pool.CurrentPrice!.Value, Is.InRange(lower * lower, upper * upper));
+        }
+
+        [Test]
+        public void TickRegionsMapToSignedTicks()
+        {
+            // words below 1e6 hold ticks w * 100 + i, words from 1e6 on 1e6 + (w - 1e6) * 100 + i
+            Assert.That(TickMath.WordToTick(4, 33), Is.EqualTo(433));
+            Assert.That(TickMath.WordToTick(1000004, 1), Is.EqualTo(1000401));
+            // tick 1e6 covers prices [1.0001^-spacing, 1], tick 0 covers [1, 1.0001^spacing]: they meet at price 1
+            Assert.That(TickMath.TickBounds(1000000, 60).Upper, Is.EqualTo(1d));
+            Assert.That(TickMath.TickBounds(0, 60).Lower, Is.EqualTo(1d));
+            Assert.That(TickMath.TickBounds(0, 60).Upper, Is.EqualTo(Math.Pow(1.0001, 30)).Within(1e-12));
+            // and are never merged into one range although their encodings are adjacent to 999999
+            var ranges = TickMath.BuildRanges(new[] { (999_999UL, 5UL), (1_000_000UL, 5UL), (1_000_001UL, 5UL) });
+            Assert.That(ranges, Has.Count.EqualTo(2));
+            Assert.That(ranges[1].TickLow, Is.EqualTo(1_000_000));
+            Assert.That(ranges[1].TickHigh, Is.EqualTo(1_000_001));
+        }
+
+        [Test]
+        public void ScamRatedPoolExposesNoRangeBalances()
+        {
+            var pool = MakePool(TickMath.BuildRanges(LoadTicks()));
+            pool.ScamRating = 100;
+
+            AVMTradeReporter.Services.ScamRating.ScamRatingPolicy.ApplyBalanceRule(pool);
+
+            Assert.That(pool.LiquidityRanges, Is.Null);
+        }
+}
 }

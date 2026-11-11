@@ -90,7 +90,7 @@ namespace AVMTradeReporterTests.Model
 
         private static (ulong A, ulong B) Reserves(IEnumerable<(ulong Tick, ulong Liquidity)> ticks, ulong sqrtPriceX64)
         {
-            var (a, b, _) = TickMath.ApplyPrice(TickMath.BuildRanges(ticks), sqrtPriceX64, Spacing, 0, 0);
+            var (a, b, _) = TickMath.ApplyPrice(TickMath.BuildRanges(ticks), sqrtPriceX64, Spacing, TickMath.TickBase, 0, 0);
             return (a, b);
         }
 

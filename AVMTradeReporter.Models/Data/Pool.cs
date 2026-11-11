@@ -40,6 +40,12 @@ namespace AVMTradeReporter.Models.Data
         /// </summary>
         public ulong? TickSpacing { get; set; }
         /// <summary>
+        /// Tick origin of the tick based CLAMM pool (contract global "d"): 1_000_000 while the price of A in B (base units)
+        /// is at most 1, 0 above it. It decides the orientation of the contract current_price, see <see cref="TickMath"/>.
+        /// Null (pools stored before it was tracked) is treated as 1_000_000.
+        /// </summary>
+        public ulong? TickOrigin { get; set; }
+        /// <summary>
         /// Liquidity distribution of the tick based CLAMM pool: contiguous tick ranges of equal liquidity loaded from the pool
         /// box storage, each acting as a standalone concentrated liquidity position (see <see cref="PoolLiquidityRange"/>).
         /// A / B are the sums of the ranges' amounts at the current price. Null when the boxes were not (successfully) read,
@@ -480,6 +486,7 @@ namespace AVMTradeReporter.Models.Data
                 CurrentPrice = CurrentPrice == null || CurrentPrice == 0 ? null : 1 / CurrentPrice,
                 CurrentTick = CurrentTick,
                 TickSpacing = TickSpacing,
+                TickOrigin = TickOrigin,
                 LiquidityRanges = LiquidityRanges?.Select(r => r.Reverse()).ToList(),
                 AF = BF,
                 BF = AF,

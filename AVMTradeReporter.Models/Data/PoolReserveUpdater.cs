@@ -1,4 +1,4 @@
-using AVMTradeReporter.Models.Data.Enums;
+﻿using AVMTradeReporter.Models.Data.Enums;
 
 namespace AVMTradeReporter.Models.Data
 {
@@ -23,6 +23,8 @@ namespace AVMTradeReporter.Models.Data
                 // a swap moves only the price, never the per-tick liquidity: the reserves follow exactly from the loaded
                 // liquidity ranges at the post-swap price. A swap that left the price untouched (no current_price in the
                 // global delta - Algorand lists only the keys whose value changed) left the reserves untouched too.
+                // A swap crossing price 1 also flips the tick origin, which decides how its sqrt price is read: apply it first.
+                if (trade.PoolTickOrigin.HasValue) pool.TickOrigin = trade.PoolTickOrigin.Value;
                 if (trade.PoolSqrtPriceX64.HasValue && trade.PoolSqrtPriceX64.Value > 0)
                 {
                     ApplyRanges(pool, trade.PoolSqrtPriceX64.Value);
@@ -63,7 +65,7 @@ namespace AVMTradeReporter.Models.Data
             if (pool.LiquidityRanges == null) return;
             // reprice a copy and swap the reference: the cached pool's list may be serialized concurrently (ES / Redis / SignalR)
             var ranges = TickMath.CloneRanges(pool.LiquidityRanges);
-            var (a, b, active) = TickMath.ApplyPrice(ranges, sqrtPriceX64, pool.TickSpacing ?? 1, pool.AssetADecimals ?? 0, pool.AssetBDecimals ?? 0);
+            var (a, b, active) = TickMath.ApplyPrice(ranges, sqrtPriceX64, pool.TickSpacing ?? 1, pool.TickOrigin ?? TickMath.TickBase, pool.AssetADecimals ?? 0, pool.AssetBDecimals ?? 0);
             pool.LiquidityRanges = ranges;
             pool.A = a;
             pool.B = b;
@@ -75,9 +77,10 @@ namespace AVMTradeReporter.Models.Data
         /// </summary>
         public static void ApplyPrice(Pool pool, Trade trade)
         {
+            if (trade.PoolTickOrigin.HasValue) pool.TickOrigin = trade.PoolTickOrigin.Value;
             if (trade.PoolSqrtPriceX64.HasValue && trade.PoolSqrtPriceX64.Value > 0)
             {
-                pool.CurrentPrice = TickMath.SqrtPriceX64ToPrice(trade.PoolSqrtPriceX64.Value, pool.AssetADecimals ?? 0, pool.AssetBDecimals ?? 0);
+                pool.CurrentPrice = TickMath.SqrtPriceX64ToPrice(trade.PoolSqrtPriceX64.Value, pool.AssetADecimals ?? 0, pool.AssetBDecimals ?? 0, pool.TickOrigin ?? TickMath.TickBase);
             }
             if (trade.PoolTick.HasValue)
             {

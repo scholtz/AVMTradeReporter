@@ -1,4 +1,4 @@
-using Algorand;
+﻿using Algorand;
 using Algorand.Algod.Model.Transactions;
 
 namespace AVMTradeReporter.Processors
@@ -41,6 +41,8 @@ namespace AVMTradeReporter.Processors
 
         public const string KeyCurrentPrice = "current_price";
         public const string KeyCurrentTick = "current_tick";
+        /// <summary>Tick origin "d": 1e6 while the price of A in B is at most 1, 0 above - see TickMath.</summary>
+        public const string KeyTickOrigin = "d";
 
         /// <summary>
         /// Finds the inner application call to the vault with the given ARC4 selector (searches nested inner transactions too).
@@ -78,9 +80,9 @@ namespace AVMTradeReporter.Processors
         /// <summary>
         /// Converts the contract sqrt price (Q64.64: sqrt(price in base units) * 2^64) to the decimal adjusted price of 1 A in B.
         /// </summary>
-        public static decimal SqrtPriceX64ToPrice(ulong sqrtPriceX64, ulong assetADecimals, ulong assetBDecimals)
+        public static decimal SqrtPriceX64ToPrice(ulong sqrtPriceX64, ulong assetADecimals, ulong assetBDecimals, ulong tickOrigin = AVMTradeReporter.Models.Data.TickMath.TickBase)
         {
-            return AVMTradeReporter.Models.Data.TickMath.SqrtPriceX64ToPrice(sqrtPriceX64, assetADecimals, assetBDecimals);
+            return AVMTradeReporter.Models.Data.TickMath.SqrtPriceX64ToPrice(sqrtPriceX64, assetADecimals, assetBDecimals, tickOrigin);
         }
 
         /// <summary>

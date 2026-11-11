@@ -81,6 +81,8 @@ namespace AVMTradeReporter.Services.ScamRating
             if (pool.BF.HasValue && pool.BF != 0) { pool.BF = 0; changed = true; }
             if (pool.StableA.HasValue && pool.StableA != 0) { pool.StableA = 0; changed = true; }
             if (pool.StableB.HasValue && pool.StableB != 0) { pool.StableB = 0; changed = true; }
+            // the per-range amounts of a tick based CLAMM pool would expose the same liquidity again
+            if (pool.LiquidityRanges != null) { pool.LiquidityRanges = null; changed = true; }
             return changed;
         }
     }

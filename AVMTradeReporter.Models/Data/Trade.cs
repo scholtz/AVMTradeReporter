@@ -107,6 +107,12 @@ namespace AVMTradeReporter.Models.Data
         public ulong? PoolTick { get; set; }
 
         /// <summary>
+        /// Pool tick origin "d" after the swap, only when the swap changed it (tick based CLAMM pools crossing price 1),
+        /// see <see cref="Pool.TickOrigin"/>. It decides the orientation of <see cref="PoolSqrtPriceX64"/>.
+        /// </summary>
+        public ulong? PoolTickOrigin { get; set; }
+
+        /// <summary>
         /// 1-based position of the top-level transaction inside its block (null for trades indexed before
         /// this field existed). Together with <see cref="EventIndex"/> it gives every trade/liquidity event
         /// of a block a unique, chronological position (needed by the GeckoTerminal integration).
