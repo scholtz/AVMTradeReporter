@@ -203,6 +203,7 @@ namespace AVMTradeReporterTests.Processors.Pool
             var (processor, _, handler) = Create();
             var pool = await processor.LoadPoolAsync(Address, AppId);
             var timestamp = pool.Timestamp;
+            pool.LiquidityRanges = null; // e.g. dropped by a mint whose reload this is - a swap must not starve the reload
             const ulong swapSqrtPrice = 5537708898821207296UL;
             handler.OnBoxListing = () => PoolReserveUpdater.ApplyTrade(pool, new Trade { AssetIdIn = 0, AssetIdOut = 31566704, PoolSqrtPriceX64 = swapSqrtPrice });
             var expectedPrice = TickMath.SqrtPriceX64ToPrice(swapSqrtPrice, 6, 6);
@@ -212,6 +213,11 @@ namespace AVMTradeReporterTests.Processors.Pool
             Assert.That(refreshed, Is.SameAs(pool));
             Assert.That(refreshed.CurrentPrice, Is.EqualTo(expectedPrice), "the read state overwrote the swap applied meanwhile");
             Assert.That(refreshed.Timestamp, Is.EqualTo(timestamp));
+            // a swap never changes the per-tick liquidity: the fresh ranges are taken and priced at the swap's price
+            Assert.That(refreshed.LiquidityRanges, Has.Count.EqualTo(50));
+            var expected = TickMath.ApplyPrice(TickMath.CloneRanges(refreshed.LiquidityRanges!), swapSqrtPrice, 60, TickMath.TickBase, 6, 6);
+            Assert.That(refreshed.A, Is.EqualTo(expected.A));
+            Assert.That(refreshed.B, Is.EqualTo(expected.B));
             // without an event during the read the chain state is taken
             handler.OnBoxListing = null;
             var again = await processor.LoadPoolAsync(Address, AppId);
@@ -234,6 +240,28 @@ namespace AVMTradeReporterTests.Processors.Pool
             Assert.That(reloaded.LiquidityRanges, Is.Null);
             Assert.That(reloaded.A, Is.EqualTo(170_000_000_000));
             Assert.That(reloaded.B, Is.EqualTo(3_600_000_000));
+        }
+
+        [Test]
+        public async Task LiquidityEventDuringTheReadKeepsTheEventState()
+        {
+            // the read ranges may predate the mint: keep the event state, the mint's own reload reads the boxes again
+            var (processor, _, handler) = Create();
+            var pool = await processor.LoadPoolAsync(Address, AppId);
+            handler.OnBoxListing = () => PoolReserveUpdater.ApplyLiquidity(pool, new Liquidity
+            {
+                Direction = LiquidityDirection.DepositLiquidity,
+                AssetIdA = 0,
+                AssetIdB = 31566704,
+                AssetAmountA = 1_000_000,
+                AssetAmountB = 100_000,
+            });
+            var aAfterMint = pool.A!.Value + 1_000_000;
+
+            var refreshed = await processor.LoadPoolAsync(Address, AppId);
+
+            Assert.That(refreshed.LiquidityRanges, Is.Null);
+            Assert.That(refreshed.A, Is.EqualTo(aAfterMint));
         }
 }
 }

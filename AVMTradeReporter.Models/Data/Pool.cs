@@ -53,13 +53,28 @@ namespace AVMTradeReporter.Models.Data
         /// </summary>
         public List<PoolLiquidityRange>? LiquidityRanges { get; set; }
         /// <summary>
+        /// Raw contract current_price (Q64.64 sqrt price in the orientation of <see cref="TickOrigin"/>) of a tick based
+        /// CLAMM pool - <see cref="CurrentPrice"/> is derived from it. Raw contract value, unaffected by <see cref="Reverse"/>.
+        /// </summary>
+        public ulong? SqrtPriceX64 { get; set; }
+        /// <summary>
         /// In-memory counter of the events applied to this pool instance (<see cref="PoolReserveUpdater"/>), never
         /// serialized: lets a chain read detect an event applied meanwhile, also one with the same block timestamp.
         /// </summary>
         [JsonIgnore]
         public long EventVersion => System.Threading.Interlocked.Read(ref _eventVersion);
+        /// <summary>
+        /// Like <see cref="EventVersion"/>, counting only the liquidity events (the only events changing the per-tick liquidity).
+        /// </summary>
+        [JsonIgnore]
+        public long LiquidityVersion => System.Threading.Interlocked.Read(ref _liquidityVersion);
         private long _eventVersion;
-        internal void MarkEventApplied() => System.Threading.Interlocked.Increment(ref _eventVersion);
+        private long _liquidityVersion;
+        internal void MarkEventApplied(bool liquidityEvent)
+        {
+            if (liquidityEvent) System.Threading.Interlocked.Increment(ref _liquidityVersion);
+            System.Threading.Interlocked.Increment(ref _eventVersion);
+        }
         // protocol fees in A asset
         public ulong? AF { get; set; }
         // protocol fees in B asset
@@ -495,6 +510,7 @@ namespace AVMTradeReporter.Models.Data
                 CurrentTick = CurrentTick,
                 TickSpacing = TickSpacing,
                 TickOrigin = TickOrigin,
+                SqrtPriceX64 = SqrtPriceX64,
                 LiquidityRanges = LiquidityRanges?.Select(r => r.Reverse()).ToList(),
                 AF = BF,
                 BF = AF,

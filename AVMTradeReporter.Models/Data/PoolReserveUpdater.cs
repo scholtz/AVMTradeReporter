@@ -18,7 +18,7 @@ namespace AVMTradeReporter.Models.Data
 
         public static void ApplyTrade(Pool pool, Trade trade)
         {
-            pool.MarkEventApplied();
+            pool.MarkEventApplied(liquidityEvent: false);
             if (pool.AMMType == AMMType.TickBasedCLAMM && pool.LiquidityRanges != null && trade.A == 0 && trade.B == 0)
             {
                 // a swap moves only the price, never the per-tick liquidity: the reserves follow exactly from the loaded
@@ -81,6 +81,7 @@ namespace AVMTradeReporter.Models.Data
             if (trade.PoolTickOrigin.HasValue) pool.TickOrigin = trade.PoolTickOrigin.Value;
             if (trade.PoolSqrtPriceX64.HasValue && trade.PoolSqrtPriceX64.Value > 0)
             {
+                pool.SqrtPriceX64 = trade.PoolSqrtPriceX64.Value;
                 pool.CurrentPrice = TickMath.SqrtPriceX64ToPrice(trade.PoolSqrtPriceX64.Value, pool.AssetADecimals ?? 0, pool.AssetBDecimals ?? 0, pool.TickOrigin ?? TickMath.TickBase);
             }
             if (trade.PoolTick.HasValue)
@@ -91,7 +92,7 @@ namespace AVMTradeReporter.Models.Data
 
         public static void ApplyLiquidity(Pool pool, Liquidity liquidity)
         {
-            pool.MarkEventApplied();
+            pool.MarkEventApplied(liquidityEvent: true);
             if (pool.AMMType == AMMType.TickBasedCLAMM)
             {
                 // the event changed the per-tick liquidity, so the loaded ranges are stale: fall back to the incremental

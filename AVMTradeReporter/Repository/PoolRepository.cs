@@ -659,12 +659,11 @@ namespace AVMTradeReporter.Repository
                 // stores it), instead of waiting for the periodic refresh
                 var migrated = existingPool.AMMType == AMMType.TickBasedCLAMM && existingPool.TickOrigin == null
                     && existingPool.AssetADecimals.HasValue && existingPool.AssetBDecimals.HasValue
+                    && ShouldAttemptTickPoolMigration(existingPool.PoolAddress)
                     ? await ReloadTickBasedPoolAsync(existingPool)
                     : null;
-                if (migrated == null)
-                {
-                    await StorePoolAsync(existingPool, true, cancellationToken);
-                }
+                // the processor may not have stored the reloaded pool (nothing differed from the cache): always store the final state
+                await StorePoolAsync(migrated ?? existingPool, true, cancellationToken);
 
                 _logger.LogDebug("Updated pool from trade: {poolAddress}_{poolAppId}_{protocol}",
                     trade.PoolAddress, trade.PoolAppId, trade.Protocol);
@@ -749,10 +748,8 @@ namespace AVMTradeReporter.Repository
                 // it "not ready") and would replace it with a fresh one, losing this pool's state
                 var canReload = existingPool.AMMType == AMMType.TickBasedCLAMM && existingPool.AssetADecimals.HasValue && existingPool.AssetBDecimals.HasValue;
                 var reloaded = canReload ? await ReloadTickBasedPoolAsync(existingPool) : null;
-                if (reloaded == null)
-                {
-                    await StorePoolAsync(existingPool, true, cancellationToken);
-                }
+                // the processor may not have stored the reloaded pool (nothing differed from the cache): always store the final state
+                await StorePoolAsync(reloaded ?? existingPool, true, cancellationToken);
 
                 _logger.LogDebug("Updated pool from liquidity: {poolAddress}_{poolAppId}_{protocol}",
                     liquidity.PoolAddress, liquidity.PoolAppId, liquidity.Protocol);
@@ -970,8 +967,8 @@ namespace AVMTradeReporter.Repository
         /// <summary>
         /// A liquidity add / remove changed the per-tick liquidity of a tick based CLAMM pool (and dropped its stale
         /// liquidity ranges, see <see cref="PoolReserveUpdater.ApplyLiquidity"/>): reload the ranges and the exact reserves
-        /// from the pool box storage. The processor stores the reloaded pool. Returns it when the ranges were loaded, null
-        /// when the reload failed (the caller then stores the incrementally tracked reserves).
+        /// from the pool box storage. Returns the reloaded pool when the ranges were loaded, null when the reload failed;
+        /// the caller stores the result either way.
         ///
         /// The boxes and the global state are read at the chain tip, so the reloaded pool (ranges, price and reserves) is the
         /// on-chain state as of the read, and the processor stamps it with the time the read started minus a safety margin
@@ -982,6 +979,22 @@ namespace AVMTradeReporter.Repository
         /// event reloads again, a swap reprices from its own post-swap price and the next swap corrects it), whereas skipping
         /// a liquidity event the read did not include would leave stale ranges.
         /// </summary>
+        private static readonly ConcurrentDictionary<string, DateTimeOffset> _tickPoolMigrationAttempts = new();
+        private static readonly TimeSpan TickPoolMigrationRetryInterval = TimeSpan.FromMinutes(10);
+
+        /// <summary>
+        /// The first-swap migration of a tick pool stored before TickOrigin was tracked runs at most once per
+        /// <see cref="TickPoolMigrationRetryInterval"/> per pool, so a pool whose chain read keeps failing never puts
+        /// algod reads on every swap.
+        /// </summary>
+        private static bool ShouldAttemptTickPoolMigration(string poolAddress)
+        {
+            var now = DateTimeOffset.UtcNow;
+            var last = _tickPoolMigrationAttempts.GetOrAdd(poolAddress, DateTimeOffset.MinValue);
+            if (now - last < TickPoolMigrationRetryInterval) return false;
+            return _tickPoolMigrationAttempts.TryUpdate(poolAddress, now, last);
+        }
+
         private async Task<Pool?> ReloadTickBasedPoolAsync(Pool pool)
         {
             try

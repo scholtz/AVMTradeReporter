@@ -58,6 +58,7 @@ namespace AVMTradeReporter.Processors.Pool
             var pool = await _poolRepository.GetPoolAsync(address, cancelationTokenSource.Token);
             // events keep updating the cached pool while the reads below run; its event version tells whether one did
             var versionBeforeRead = pool?.EventVersion;
+            var liquidityVersionBeforeRead = pool?.LiquidityVersion;
             var app = await _algod.GetApplicationByIDAsync(appId);
 
             if (GetGlobalState(app, PactWeightedPoolHelper.KeyReserveA) != null)
@@ -68,7 +69,7 @@ namespace AVMTradeReporter.Processors.Pool
             if (GetGlobalState(app, PactClammHelper.KeyCurrentPrice) != null)
             {
                 // Pact CLAMM (tick based concentrated liquidity, ARC4 contract)
-                return await LoadClammPoolAsync(pool, address, appId, app, readStartedAt, versionBeforeRead, cancelationTokenSource.Token);
+                return await LoadClammPoolAsync(pool, address, appId, app, readStartedAt, versionBeforeRead, liquidityVersionBeforeRead, cancelationTokenSource.Token);
             }
 
             var A = app.Params.GlobalState.FirstOrDefault(p => p.Key == Convert.ToBase64String(Encoding.ASCII.GetBytes("A")));
@@ -368,7 +369,7 @@ namespace AVMTradeReporter.Processors.Pool
         /// harmless (a liquidity event reloads again, a swap reprices from its own post-swap price), skipping a liquidity
         /// event the read missed would leave stale ranges.
         /// </summary>
-        private async Task<AVMTradeReporter.Models.Data.Pool> LoadClammPoolAsync(AVMTradeReporter.Models.Data.Pool? pool, string address, ulong appId, Algorand.Algod.Model.Application app, DateTimeOffset readStartedAt, long? versionBeforeRead, CancellationToken cancellationToken)
+        private async Task<AVMTradeReporter.Models.Data.Pool> LoadClammPoolAsync(AVMTradeReporter.Models.Data.Pool? pool, string address, ulong appId, Algorand.Algod.Model.Application app, DateTimeOffset readStartedAt, long? versionBeforeRead, long? liquidityVersionBeforeRead, CancellationToken cancellationToken)
         {
             var stateTimestamp = readStartedAt - ReadTimestampSafetyMargin;
             var assetA = GetGlobalState(app, "a");
@@ -414,10 +415,12 @@ namespace AVMTradeReporter.Processors.Pool
             ulong reserveB = pool?.B ?? 0;
             ulong activeLiquidity = pool?.L ?? 0;
             List<PoolLiquidityRange>? ranges = null;
+            var freshRanges = false;
             try
             {
                 var ticks = await LoadClammTicksAsync(appId);
                 ranges = TickMath.BuildRanges(ticks);
+                freshRanges = true;
             }
             catch (Exception ex)
             {
@@ -437,12 +440,24 @@ namespace AVMTradeReporter.Processors.Pool
 
             _logger.LogInformation("Processing Pact CLAMM pool {appId}", appId);
 
+            if (pool != null && pool.LiquidityVersion != liquidityVersionBeforeRead)
+            {
+                // a liquidity event was applied while the chain was being read: the read ranges may predate it. Keep the
+                // event state - the event queued its own reload behind the load lock, which reads the boxes again.
+                _logger.LogInformation("Pact CLAMM pool {appId} got a liquidity event during the read, keeping the event state", appId);
+                return pool;
+            }
             if (pool != null && pool.EventVersion != versionBeforeRead)
             {
-                // a swap or liquidity event was applied to the cached pool while the chain was being read: the read state
-                // may predate it, so it must not overwrite the newer event state (a liquidity event queues its own reload
-                // behind the load lock, which reads the boxes again)
-                _logger.LogInformation("Pact CLAMM pool {appId} changed by an event during the refresh, keeping the event state", appId);
+                // only swaps were applied meanwhile: their price / tick / origin are newer than the read and stay, but a
+                // swap never changes the per-tick liquidity, so the freshly read ranges are valid - reprice them at the
+                // pool's own (event) price
+                if (freshRanges && ranges != null && pool.SqrtPriceX64.HasValue)
+                {
+                    pool.LiquidityRanges = ranges;
+                    PoolReserveUpdater.ApplyRanges(pool, pool.SqrtPriceX64.Value);
+                    await _poolRepository.StorePoolAsync(pool, true, cancellationToken);
+                }
                 return pool;
             }
 
@@ -463,6 +478,7 @@ namespace AVMTradeReporter.Processors.Pool
                     CurrentTick = tick,
                     TickSpacing = spacing,
                     TickOrigin = origin,
+                    SqrtPriceX64 = currentPrice.Value.Uint,
                     LiquidityRanges = ranges,
                     Timestamp = stateTimestamp,
                     ApprovalProgramHash = hash,
@@ -496,6 +512,7 @@ namespace AVMTradeReporter.Processors.Pool
                 if (pool.CurrentTick != tick) { pool.CurrentTick = tick; updated = true; }
                 if (pool.TickSpacing != spacing) { pool.TickSpacing = spacing; updated = true; }
                 if (pool.TickOrigin != origin) { pool.TickOrigin = origin; updated = true; }
+                if (pool.SqrtPriceX64 != currentPrice.Value.Uint) { pool.SqrtPriceX64 = currentPrice.Value.Uint; updated = true; }
                 if (!TickMath.SameRanges(pool.LiquidityRanges, ranges)) { updated = true; }
                 // always take the freshly priced ranges: their amounts follow the current price even when the bounds did not change
                 pool.LiquidityRanges = ranges;

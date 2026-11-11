@@ -11,7 +11,8 @@ namespace AVMTradeReporter.Processors.Liqudity
     /// <summary>
     /// Liquidity add (mint) processor for Pact CLAMM (tick based concentrated liquidity) pools. See <see cref="PactClammHelper"/>.
     ///
-    /// Group layout: [pay|axfer A deposit to vault] [pay|axfer B deposit to vault] [appl pool mint(tick_low, tick_high, txn, txn)]
+    /// Group layout: [pay|axfer A deposit to vault] [pay|axfer B deposit to vault] [appl pool mint(tick_low, tick_high, ..)]
+    /// (one or both deposits; mainnet mints use the 4d17cf3e selector, see PactClammHelper.MintV2Selector)
     /// Pool call inner txns: [budget appl 0 ...] [appl vault deposit(asset_a, amt_a, asset_b, amt_b, ..)]
     /// There is no LP token (positions are boxes), so AssetIdLP / AssetAmountLP are 0. The amounts credited by the vault
     /// are used (they can differ slightly from the deposited amounts).
@@ -38,27 +39,26 @@ namespace AVMTradeReporter.Processors.Liqudity
             )
         {
             if (current.Tx is not ApplicationNoopTransaction appCallTx) return null;
-            if (previous1 == null || previous2 == null) return null;
             if (appCallTx.ApplicationId == null || appCallTx.ApplicationId == 0) return null;
-            if (previous2.Tx is not (AssetTransferTransaction or PaymentTransaction)) return null;
-            if (previous1.Tx is not (AssetTransferTransaction or PaymentTransaction)) return null;
 
             var vaultDeposit = PactClammHelper.FindVaultCall(current, PactClammHelper.VaultDepositSelector);
-            if (vaultDeposit == null) return null;
-
-            var vaultAddress = PactWeightedPoolHelper.GetReceiver(previous2.Tx);
-            if (vaultAddress is null) return null;
-            if (PactWeightedPoolHelper.GetReceiver(previous1.Tx) is not { } receiver1 || receiver1 != vaultAddress) return null;
+            if (vaultDeposit?.ApplicationId == null) return null;
 
             var assetAId = PactClammHelper.GetUintArg(vaultDeposit, 1);
             var assetAAmount = PactClammHelper.GetUintArg(vaultDeposit, 2);
             var assetBId = PactClammHelper.GetUintArg(vaultDeposit, 3);
             var assetBAmount = PactClammHelper.GetUintArg(vaultDeposit, 4);
+            if (assetAId == assetBId) return null;
 
-            // sanity check against the deposits in the group
-            var depositedA = PactWeightedPoolHelper.GetAssetId(previous2.Tx);
-            var depositedB = PactWeightedPoolHelper.GetAssetId(previous1.Tx);
-            if (!((depositedA == assetAId && depositedB == assetBId) || (depositedA == assetBId && depositedB == assetAId))) return null;
+            // sanity check against the deposits in the group: the transfers preceding the call that pay the vault (one or
+            // two - a position entirely on one side of the price needs only one asset) must be of the pool's assets
+            var vaultAddress = Address.ForApplication(vaultDeposit.ApplicationId.Value);
+            var deposits = new[] { previous1, previous2 }
+                .Where(p => p?.Tx is AssetTransferTransaction or PaymentTransaction)
+                .Where(p => PactWeightedPoolHelper.GetReceiver(p!.Tx) is { } receiver && receiver == vaultAddress)
+                .ToList();
+            if (deposits.Count == 0) return null;
+            if (deposits.Any(p => PactWeightedPoolHelper.GetAssetId(p!.Tx) is var asset && asset != assetAId && asset != assetBId)) return null;
 
             if (block != null) current.Tx.FillInParamsFromBlockHeader(block);
             if (txGroup != null) current.Tx.Group = txGroup;
