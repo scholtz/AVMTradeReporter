@@ -400,5 +400,44 @@ namespace AVMTradeReporterTests.Processors.Pool
             Assert.That(stored.B, Is.EqualTo(expected.B));
             Assert.That(stored.CurrentPrice, Is.EqualTo(TickMath.SqrtPriceX64ToPrice(before, 6, 6)));
         }
+
+        [Test]
+        public async Task RepositoryReloadsTheRangesOnAnOlderLiquidityEvent()
+        {
+            // trades and liquidity events are applied by independent batches: a later swap advanced the pool timestamp
+            // before this mint arrived. The mint's amounts are not applied, but its liquidity must not be missing from the
+            // ranges: they are invalidated and reloaded from the boxes.
+            var (repository, handler) = CreateRepository();
+            var loader = new PactPoolProcessor(
+                new DefaultApi(new HttpClient(new FakeAlgodHandler(AppId)) { BaseAddress = new Uri("http://algod.test") }),
+                new MockPoolRepository(), new LoggerFactory().CreateLogger<PactPoolProcessor>(), new MockAssetRepository());
+            var pool = await loader.LoadPoolAsync(Address, AppId);
+            pool.ApprovalProgramHash = "ec1899eb1b0ee0c6a4263e38dfab158f2cfa4c0942c0c92c0fb0001965760053";
+            // ranges loaded before the mint: one range less liquidity than the chain now has
+            pool.LiquidityRanges = pool.LiquidityRanges!.Take(10).ToList();
+            var swapTime = DateTimeOffset.UtcNow.AddSeconds(-5);
+            pool.Timestamp = swapTime;
+            await repository.StorePoolAsync(pool, false, CancellationToken.None);
+
+            await repository.UpdatePoolFromLiquidity(new Liquidity
+            {
+                Direction = LiquidityDirection.DepositLiquidity,
+                PoolAddress = Address,
+                PoolAppId = AppId,
+                Protocol = DEXProtocol.Pact,
+                AssetIdA = 0,
+                AssetIdB = 31566704,
+                AssetAmountA = 37_627_392,
+                AssetAmountB = 4_000_000,
+                TxState = TxState.Confirmed,
+                Timestamp = swapTime.AddSeconds(-3),
+            }, CancellationToken.None);
+
+            var stored = await repository.GetPoolAsync(Address, CancellationToken.None);
+            Assert.That(handler.Requests, Is.GreaterThan(0), "the ranges were not reloaded");
+            Assert.That(stored!.LiquidityRanges, Has.Count.EqualTo(50));
+            Assert.That(stored.RealAmountA, Is.EqualTo(169_922m).Within(1m));
+            Assert.That(stored.Timestamp, Is.EqualTo(swapTime));
+        }
 }
 }

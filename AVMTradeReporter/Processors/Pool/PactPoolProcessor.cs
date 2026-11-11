@@ -444,6 +444,8 @@ namespace AVMTradeReporter.Processors.Pool
                 // too, or every refresh would count as a change
                 ranges = null;
             }
+            // the ranges the update below replaces - it only lands if no liquidity event invalidates them meanwhile
+            var rangesBeforeUpdate = pool?.LiquidityRanges;
             if (pool != null && pool.LiquidityVersion != liquidityVersionBeforeRead)
             {
                 // a liquidity event was applied while the chain was being read: the read ranges may predate it. Keep the
@@ -499,6 +501,14 @@ namespace AVMTradeReporter.Processors.Pool
             }
             else
             {
+                // first the ranges, atomically: a liquidity event applied since the version checks above invalidated them
+                // and queued its own reload - keep the event state. Always the freshly priced ranges: their amounts follow
+                // the current price even when the bounds did not change.
+                if (!pool.TryReplaceLiquidityRanges(rangesBeforeUpdate, ranges))
+                {
+                    _logger.LogInformation("Pact CLAMM pool {appId} got a liquidity event during the update, keeping the event state", appId);
+                    return pool;
+                }
                 if (pool.Protocol != DEXProtocol.Pact) { pool.Protocol = DEXProtocol.Pact; updated = true; }
                 if (pool.A != reserveA) { pool.A = reserveA; updated = true; }
                 if (pool.B != reserveB) { pool.B = reserveB; updated = true; }
@@ -519,9 +529,7 @@ namespace AVMTradeReporter.Processors.Pool
                 if (pool.TickSpacing != spacing) { pool.TickSpacing = spacing; updated = true; }
                 if (pool.TickOrigin != origin) { pool.TickOrigin = origin; updated = true; }
                 if (pool.SqrtPriceX64 != sqrtPrice) { pool.SqrtPriceX64 = sqrtPrice; updated = true; }
-                if (!TickMath.SameRanges(pool.LiquidityRanges, ranges)) { updated = true; }
-                // always take the freshly priced ranges: their amounts follow the current price even when the bounds did not change
-                pool.LiquidityRanges = ranges;
+                if (!TickMath.SameRanges(rangesBeforeUpdate, ranges)) { updated = true; }
                 if (updated && !keepEventTimestamp)
                 {
                     pool.Timestamp = pool.Timestamp.HasValue && pool.Timestamp.Value > stateTimestamp ? pool.Timestamp : stateTimestamp;

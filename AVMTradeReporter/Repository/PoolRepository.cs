@@ -720,6 +720,15 @@ namespace AVMTradeReporter.Repository
                 {
                     _logger.LogDebug("Skipping pool update - liquidity timestamp {liquidityTime} is older than pool timestamp {poolTime}",
                         liquidity.Timestamp.Value, existingPool.Timestamp.Value);
+                    if (existingPool.AMMType == AMMType.TickBasedCLAMM && existingPool.AssetADecimals.HasValue && existingPool.AssetBDecimals.HasValue)
+                    {
+                        // trades and liquidity events are applied by independent batches, so a later swap can advance the
+                        // timestamp first. Its amounts are not applied, but the liquidity change may be missing from the
+                        // ranges: invalidate them and reload from the box storage (idempotent - the boxes are the truth)
+                        PoolReserveUpdater.InvalidateRanges(existingPool);
+                        var reread = await ReloadTickBasedPoolAsync(existingPool);
+                        await StorePoolAsync(reread ?? existingPool, true, cancellationToken);
+                    }
                     return;
                 }
 

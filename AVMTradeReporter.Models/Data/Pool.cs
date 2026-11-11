@@ -57,7 +57,21 @@ namespace AVMTradeReporter.Models.Data
         /// A / B are the sums of the ranges' amounts at the current price. Null when the boxes were not (successfully) read,
         /// in which case the reserves are tracked incrementally from the events.
         /// </summary>
-        public List<PoolLiquidityRange>? LiquidityRanges { get; set; }
+        public List<PoolLiquidityRange>? LiquidityRanges
+        {
+            get => System.Threading.Volatile.Read(ref _liquidityRanges);
+            set => System.Threading.Volatile.Write(ref _liquidityRanges, value);
+        }
+        private List<PoolLiquidityRange>? _liquidityRanges;
+
+        /// <summary>
+        /// Replaces the liquidity ranges only when they are still <paramref name="expected"/> - i.e. no liquidity event
+        /// invalidated them and no reload replaced them meanwhile (events and chain reads run on different threads).
+        /// </summary>
+        public bool TryReplaceLiquidityRanges(List<PoolLiquidityRange>? expected, List<PoolLiquidityRange>? replacement)
+        {
+            return ReferenceEquals(System.Threading.Interlocked.CompareExchange(ref _liquidityRanges, replacement, expected), expected);
+        }
         /// <summary>
         /// Raw contract current_price (Q64.64 sqrt price in the orientation of <see cref="TickOrigin"/>) of a tick based
         /// CLAMM pool - <see cref="CurrentPrice"/> is derived from it. Raw contract value, unaffected by <see cref="Reverse"/>.
@@ -519,7 +533,8 @@ namespace AVMTradeReporter.Models.Data
                 CurrentTick = CurrentTick,
                 TickSpacing = TickSpacing,
                 TickOrigin = TickOrigin,
-                SqrtPriceX64 = SqrtPriceX64,
+                // the raw contract price is meaningless in the reversed orientation (CurrentPrice is inverted instead)
+                SqrtPriceX64 = null,
                 LiquidityRanges = LiquidityRanges?.Select(r => r.Reverse()).ToList(),
                 AF = BF,
                 BF = AF,

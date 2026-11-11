@@ -444,5 +444,25 @@ namespace AVMTradeReporterTests.Model
             Assert.That(new AVMTradeReporter.Models.Data.Pool { CurrentTick = 1000401 }.EffectiveTickOrigin, Is.EqualTo(TickMath.TickBase));
             Assert.That(new AVMTradeReporter.Models.Data.Pool().EffectiveTickOrigin, Is.EqualTo(TickMath.TickBase));
         }
+
+        [Test]
+        public void InvalidatedRangesAreNeverPutBack()
+        {
+            var ranges = TickMath.BuildRanges(LoadTicks());
+            var pool = MakePool(ranges);
+
+            // a swap cloned the ranges, then a liquidity event invalidated them before the swap wrote its copy back
+            PoolReserveUpdater.InvalidateRanges(pool);
+            Assert.That(pool.TryReplaceLiquidityRanges(ranges, TickMath.CloneRanges(ranges)), Is.False);
+            Assert.That(pool.LiquidityRanges, Is.Null);
+
+            // unchanged ranges are replaced
+            var fresh = TickMath.BuildRanges(LoadTicks());
+            Assert.That(pool.TryReplaceLiquidityRanges(null, fresh), Is.True);
+            Assert.That(pool.LiquidityRanges, Is.SameAs(fresh));
+            PoolReserveUpdater.ApplyRanges(pool, SqrtPriceAfterSwap);
+            Assert.That(pool.LiquidityRanges, Is.Not.SameAs(fresh));
+            Assert.That(pool.A, Is.GreaterThan(0));
+        }
 }
 }

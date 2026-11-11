@@ -62,11 +62,14 @@ namespace AVMTradeReporter.Models.Data
         /// </summary>
         public static void ApplyRanges(Pool pool, ulong sqrtPriceX64)
         {
-            if (pool.LiquidityRanges == null) return;
+            var current = pool.LiquidityRanges;
+            if (current == null) return;
             // reprice a copy and swap the reference: the cached pool's list may be serialized concurrently (ES / Redis / SignalR)
-            var ranges = TickMath.CloneRanges(pool.LiquidityRanges);
+            var ranges = TickMath.CloneRanges(current);
             var (a, b, active) = TickMath.Reprice(ranges, sqrtPriceX64, pool.TickSpacing ?? 1, pool.EffectiveTickOrigin, pool.CurrentTick, pool.AssetADecimals ?? 0, pool.AssetBDecimals ?? 0);
-            pool.LiquidityRanges = ranges;
+            // a liquidity event invalidated (or a reload replaced) the ranges meanwhile: never put the old ones back, the
+            // writer of the newer ranges owns the reserves
+            if (!pool.TryReplaceLiquidityRanges(current, ranges)) return;
             pool.A = a;
             pool.B = b;
             pool.L = active;
@@ -98,14 +101,28 @@ namespace AVMTradeReporter.Models.Data
             }
         }
 
-        public static void ApplyLiquidity(Pool pool, Liquidity liquidity)
+        /// <summary>
+        /// The per-tick liquidity of a tick based CLAMM pool changed (a liquidity event): drop its ranges, so that neither
+        /// a swap nor a chain read started before puts them back (<see cref="Pool.TryReplaceLiquidityRanges"/>), until
+        /// they are reloaded from the box storage.
+        /// </summary>
+        public static void InvalidateRanges(Pool pool)
         {
             pool.MarkEventApplied(liquidityEvent: true);
+            pool.LiquidityRanges = null;
+        }
+
+        public static void ApplyLiquidity(Pool pool, Liquidity liquidity)
+        {
             if (pool.AMMType == AMMType.TickBasedCLAMM)
             {
                 // the event changed the per-tick liquidity, so the loaded ranges are stale: fall back to the incremental
                 // tracking below until the ranges are reloaded from the box storage (PoolRepository reloads them right away)
-                pool.LiquidityRanges = null;
+                InvalidateRanges(pool);
+            }
+            else
+            {
+                pool.MarkEventApplied(liquidityEvent: true);
             }
             if (!IsDeltaTracked(pool, liquidity.A, liquidity.B))
             {
