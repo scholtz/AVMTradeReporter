@@ -376,5 +376,28 @@ namespace AVMTradeReporterTests.Model
 
             Assert.That(pool.LiquidityRanges, Is.Null);
         }
+
+        [Test]
+        public void SwapTickPinsTheOrientationWithoutAnOriginDelta()
+        {
+            // a swap applied against a pool state read later (origin already 0 after a crossing) that itself moved the tick
+            // on the price <= 1 side (tick >= 1e6) is read as A in B, not inverted
+            var pool = new AVMTradeReporter.Models.Data.Pool
+            {
+                PoolAddress = "2M75ASPFJ5YWJOYU676IOL3NX23H6R333RWX4WONRALEWTJA5FQWDOH4GQ",
+                Protocol = DEXProtocol.Pact,
+                AMMType = AMMType.TickBasedCLAMM,
+                AssetADecimals = 6,
+                AssetBDecimals = 6,
+                TickSpacing = 200,
+                TickOrigin = 0,
+            };
+
+            PoolReserveUpdater.ApplyTrade(pool, new Trade { PoolSqrtPriceX64 = 18324627607556582812UL, PoolTick = 1000000 });
+
+            Assert.That(pool.TickOrigin, Is.EqualTo(TickMath.TickBase));
+            Assert.That(pool.CurrentPrice, Is.EqualTo(0.98675m).Within(0.0001m));
+            Assert.That(pool.SqrtPriceX64, Is.EqualTo(18324627607556582812UL));
+        }
 }
 }

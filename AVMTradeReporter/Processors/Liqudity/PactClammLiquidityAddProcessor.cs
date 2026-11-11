@@ -53,8 +53,11 @@ namespace AVMTradeReporter.Processors.Liqudity
             // sanity check against the deposits in the group: the transfers preceding the call that pay the vault (one or
             // two - a position entirely on one side of the price needs only one asset) must be of the pool's assets
             var vaultAddress = Address.ForApplication(vaultDeposit.ApplicationId.Value);
+            // previous1 / previous2 are the preceding transactions of the block: only those of this very group count
+            var group = txGroup ?? current.Tx.Group;
             var deposits = new[] { previous1, previous2 }
                 .Where(p => p?.Tx is AssetTransferTransaction or PaymentTransaction)
+                .Where(p => group == null || (p!.Tx.Group != null && p.Tx.Group.Bytes.SequenceEqual(group.Bytes)))
                 .Where(p => PactWeightedPoolHelper.GetReceiver(p!.Tx) is { } receiver && receiver == vaultAddress)
                 .ToList();
             if (deposits.Count == 0) return null;

@@ -78,7 +78,16 @@ namespace AVMTradeReporter.Models.Data
         /// </summary>
         public static void ApplyPrice(Pool pool, Trade trade)
         {
-            if (trade.PoolTickOrigin.HasValue) pool.TickOrigin = trade.PoolTickOrigin.Value;
+            if (trade.PoolTickOrigin.HasValue)
+            {
+                pool.TickOrigin = trade.PoolTickOrigin.Value;
+            }
+            else if (trade.PoolTick.HasValue && pool.AMMType == AMMType.TickBasedCLAMM)
+            {
+                // the side of price 1 follows from the tick itself (ticks >= 1e6 are prices <= 1): a swap that moved the tick
+                // pins its own orientation, even when it is applied against a pool state read later (e.g. after a reload)
+                pool.TickOrigin = trade.PoolTick.Value >= TickMath.TickBase ? TickMath.TickBase : 0;
+            }
             if (trade.PoolSqrtPriceX64.HasValue && trade.PoolSqrtPriceX64.Value > 0)
             {
                 pool.SqrtPriceX64 = trade.PoolSqrtPriceX64.Value;

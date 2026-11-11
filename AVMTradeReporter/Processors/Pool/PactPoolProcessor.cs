@@ -3,6 +3,7 @@ using AVMTradeReporter.Extensions;
 using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Models.Data.Enums;
 using AVMTradeReporter.Repository;
+using AVMTradeReporter.Services.ScamRating;
 using System.Text;
 
 namespace AVMTradeReporter.Processors.Pool
@@ -440,6 +441,12 @@ namespace AVMTradeReporter.Processors.Pool
 
             _logger.LogInformation("Processing Pact CLAMM pool {appId}", appId);
 
+            if (pool != null && ScamRatingPolicy.ShouldZeroBalances(pool.ScamRating))
+            {
+                // a scam-zeroed pool never keeps ranges (ScamRatingPolicy.ApplyBalanceRule): keep them out of the comparison
+                // too, or every refresh would count as a change
+                ranges = null;
+            }
             if (pool != null && pool.LiquidityVersion != liquidityVersionBeforeRead)
             {
                 // a liquidity event was applied while the chain was being read: the read ranges may predate it. Keep the
@@ -454,6 +461,8 @@ namespace AVMTradeReporter.Processors.Pool
                 // pool's own (event) price
                 if (freshRanges && ranges != null && pool.SqrtPriceX64.HasValue)
                 {
+                    // a pool stored before the origin was tracked: the swaps did not cross price 1 (that sets it), so the read one holds
+                    pool.TickOrigin ??= origin;
                     pool.LiquidityRanges = ranges;
                     PoolReserveUpdater.ApplyRanges(pool, pool.SqrtPriceX64.Value);
                     await _poolRepository.StorePoolAsync(pool, true, cancellationToken);
