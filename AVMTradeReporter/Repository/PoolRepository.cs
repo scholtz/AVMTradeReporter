@@ -654,14 +654,16 @@ namespace AVMTradeReporter.Repository
                 existingPool.Volume24H += trade.ValueUSD ?? 0;
                 existingPool.Volume7D += trade.ValueUSD ?? 0;
 
-                await StorePoolAsync(existingPool, true, cancellationToken);
-
-                if (existingPool.AMMType == AMMType.TickBasedCLAMM && existingPool.TickOrigin == null
-                    && existingPool.AssetADecimals.HasValue && existingPool.AssetBDecimals.HasValue)
+                // a tick pool stored before the tick origin and the liquidity ranges were tracked: its price may be inverted
+                // (pools above price 1) until read from chain - read it once now, before anything is published (the reload
+                // stores it), instead of waiting for the periodic refresh
+                var migrated = existingPool.AMMType == AMMType.TickBasedCLAMM && existingPool.TickOrigin == null
+                    && existingPool.AssetADecimals.HasValue && existingPool.AssetBDecimals.HasValue
+                    ? await ReloadTickBasedPoolAsync(existingPool)
+                    : null;
+                if (migrated == null)
                 {
-                    // stored before the tick origin and the liquidity ranges were tracked: until read from chain its price may
-                    // be inverted (pools above price 1) - read it once now instead of waiting for the periodic refresh
-                    await ReloadTickBasedPoolAsync(existingPool);
+                    await StorePoolAsync(existingPool, true, cancellationToken);
                 }
 
                 _logger.LogDebug("Updated pool from trade: {poolAddress}_{poolAppId}_{protocol}",

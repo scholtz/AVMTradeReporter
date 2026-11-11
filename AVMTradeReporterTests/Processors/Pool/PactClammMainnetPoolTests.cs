@@ -199,22 +199,23 @@ namespace AVMTradeReporterTests.Processors.Pool
         {
             // a swap is applied to the cached pool while a refresh is reading the chain: the refresh's state may predate the
             // swap and must not overwrite it
+            // a swap with the same block timestamp as the pool (a second swap of the same block) is detected too
             var (processor, _, handler) = Create();
             var pool = await processor.LoadPoolAsync(Address, AppId);
-            var swapTimestamp = DateTimeOffset.Now;
-            handler.OnBoxListing = () =>
-            {
-                pool.A = 111;
-                pool.B = 222;
-                pool.Timestamp = swapTimestamp;
-            };
+            var timestamp = pool.Timestamp;
+            const ulong swapSqrtPrice = 5537708898821207296UL;
+            handler.OnBoxListing = () => PoolReserveUpdater.ApplyTrade(pool, new Trade { AssetIdIn = 0, AssetIdOut = 31566704, PoolSqrtPriceX64 = swapSqrtPrice });
+            var expectedPrice = TickMath.SqrtPriceX64ToPrice(swapSqrtPrice, 6, 6);
 
             var refreshed = await processor.LoadPoolAsync(Address, AppId);
 
             Assert.That(refreshed, Is.SameAs(pool));
-            Assert.That(refreshed.A, Is.EqualTo(111));
-            Assert.That(refreshed.B, Is.EqualTo(222));
-            Assert.That(refreshed.Timestamp, Is.EqualTo(swapTimestamp));
+            Assert.That(refreshed.CurrentPrice, Is.EqualTo(expectedPrice), "the read state overwrote the swap applied meanwhile");
+            Assert.That(refreshed.Timestamp, Is.EqualTo(timestamp));
+            // without an event during the read the chain state is taken
+            handler.OnBoxListing = null;
+            var again = await processor.LoadPoolAsync(Address, AppId);
+            Assert.That(again.CurrentPrice, Is.EqualTo(TickMath.SqrtPriceX64ToPrice(5531894802404564755UL, 6, 6)));
         }
 
         [Test]

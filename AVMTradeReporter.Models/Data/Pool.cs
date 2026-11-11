@@ -52,6 +52,14 @@ namespace AVMTradeReporter.Models.Data
         /// in which case the reserves are tracked incrementally from the events.
         /// </summary>
         public List<PoolLiquidityRange>? LiquidityRanges { get; set; }
+        /// <summary>
+        /// In-memory counter of the events applied to this pool instance (<see cref="PoolReserveUpdater"/>), never
+        /// serialized: lets a chain read detect an event applied meanwhile, also one with the same block timestamp.
+        /// </summary>
+        [JsonIgnore]
+        public long EventVersion => System.Threading.Interlocked.Read(ref _eventVersion);
+        private long _eventVersion;
+        internal void MarkEventApplied() => System.Threading.Interlocked.Increment(ref _eventVersion);
         // protocol fees in A asset
         public ulong? AF { get; set; }
         // protocol fees in B asset

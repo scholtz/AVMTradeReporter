@@ -56,8 +56,8 @@ namespace AVMTradeReporter.Processors.Pool
             var readStartedAt = DateTimeOffset.Now;
             using var cancelationTokenSource = new CancellationTokenSource();
             var pool = await _poolRepository.GetPoolAsync(address, cancelationTokenSource.Token);
-            // events keep updating the cached pool while the reads below run; its timestamp tells whether one did
-            var timestampBeforeRead = pool?.Timestamp;
+            // events keep updating the cached pool while the reads below run; its event version tells whether one did
+            var versionBeforeRead = pool?.EventVersion;
             var app = await _algod.GetApplicationByIDAsync(appId);
 
             if (GetGlobalState(app, PactWeightedPoolHelper.KeyReserveA) != null)
@@ -68,7 +68,7 @@ namespace AVMTradeReporter.Processors.Pool
             if (GetGlobalState(app, PactClammHelper.KeyCurrentPrice) != null)
             {
                 // Pact CLAMM (tick based concentrated liquidity, ARC4 contract)
-                return await LoadClammPoolAsync(pool, address, appId, app, readStartedAt, timestampBeforeRead, cancelationTokenSource.Token);
+                return await LoadClammPoolAsync(pool, address, appId, app, readStartedAt, versionBeforeRead, cancelationTokenSource.Token);
             }
 
             var A = app.Params.GlobalState.FirstOrDefault(p => p.Key == Convert.ToBase64String(Encoding.ASCII.GetBytes("A")));
@@ -368,7 +368,7 @@ namespace AVMTradeReporter.Processors.Pool
         /// harmless (a liquidity event reloads again, a swap reprices from its own post-swap price), skipping a liquidity
         /// event the read missed would leave stale ranges.
         /// </summary>
-        private async Task<AVMTradeReporter.Models.Data.Pool> LoadClammPoolAsync(AVMTradeReporter.Models.Data.Pool? pool, string address, ulong appId, Algorand.Algod.Model.Application app, DateTimeOffset readStartedAt, DateTimeOffset? timestampBeforeRead, CancellationToken cancellationToken)
+        private async Task<AVMTradeReporter.Models.Data.Pool> LoadClammPoolAsync(AVMTradeReporter.Models.Data.Pool? pool, string address, ulong appId, Algorand.Algod.Model.Application app, DateTimeOffset readStartedAt, long? versionBeforeRead, CancellationToken cancellationToken)
         {
             var stateTimestamp = readStartedAt - ReadTimestampSafetyMargin;
             var assetA = GetGlobalState(app, "a");
@@ -437,7 +437,7 @@ namespace AVMTradeReporter.Processors.Pool
 
             _logger.LogInformation("Processing Pact CLAMM pool {appId}", appId);
 
-            if (pool != null && pool.Timestamp != timestampBeforeRead)
+            if (pool != null && pool.EventVersion != versionBeforeRead)
             {
                 // a swap or liquidity event was applied to the cached pool while the chain was being read: the read state
                 // may predate it, so it must not overwrite the newer event state (a liquidity event queues its own reload
