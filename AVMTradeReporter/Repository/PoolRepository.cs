@@ -628,6 +628,10 @@ namespace AVMTradeReporter.Repository
                     return;
                 }
 
+                // a tick pool without liquidity ranges is on the inexact event tracking (stored before the ranges existed, a
+                // failed box read, or ranges dropped by a liquidity event whose reload lost) - scam-zeroed pools never keep them
+                var tickPoolWithoutRanges = existingPool.AMMType == AMMType.TickBasedCLAMM && existingPool.LiquidityRanges == null
+                    && !ScamRatingPolicy.ShouldZeroBalances(existingPool.ScamRating);
                 PoolReserveUpdater.ApplyTrade(existingPool, trade);
                 existingPool.Timestamp = trade.Timestamp;
                 if (!ScamRatingPolicy.IsProtocolLocked(existingPool))
@@ -654,10 +658,9 @@ namespace AVMTradeReporter.Repository
                 existingPool.Volume24H += trade.ValueUSD ?? 0;
                 existingPool.Volume7D += trade.ValueUSD ?? 0;
 
-                // a tick pool stored before the tick origin and the liquidity ranges were tracked: its price may be inverted
-                // (pools above price 1) until read from chain - read it once now, before anything is published (the reload
-                // stores it), instead of waiting for the periodic refresh
-                var migrated = existingPool.AMMType == AMMType.TickBasedCLAMM && existingPool.TickOrigin == null
+                // read such a pool from chain now (throttled per pool), before anything is published, instead of waiting for
+                // the periodic refresh - a pool stored before the tick origin was tracked may even show an inverted price
+                var migrated = tickPoolWithoutRanges
                     && existingPool.AssetADecimals.HasValue && existingPool.AssetBDecimals.HasValue
                     && ShouldAttemptTickPoolMigration(existingPool.PoolAddress)
                     ? await ReloadTickBasedPoolAsync(existingPool)
@@ -983,7 +986,7 @@ namespace AVMTradeReporter.Repository
         private static readonly TimeSpan TickPoolMigrationRetryInterval = TimeSpan.FromMinutes(10);
 
         /// <summary>
-        /// The first-swap migration of a tick pool stored before TickOrigin was tracked runs at most once per
+        /// The reload of a tick pool without liquidity ranges on a swap runs at most once per
         /// <see cref="TickPoolMigrationRetryInterval"/> per pool, so a pool whose chain read keeps failing never puts
         /// algod reads on every swap.
         /// </summary>

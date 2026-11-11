@@ -57,7 +57,7 @@ namespace AVMTradeReporter.Processors.Liqudity
             var group = txGroup ?? current.Tx.Group;
             var deposits = new[] { previous1, previous2 }
                 .Where(p => p?.Tx is AssetTransferTransaction or PaymentTransaction)
-                .Where(p => group == null || (p!.Tx.Group != null && p.Tx.Group.Bytes.SequenceEqual(group.Bytes)))
+                .Where(p => group == null || p!.Tx.Group == null || p.Tx.Group.Bytes.SequenceEqual(group.Bytes)) // inner txns carry no group
                 .Where(p => PactWeightedPoolHelper.GetReceiver(p!.Tx) is { } receiver && receiver == vaultAddress)
                 .ToList();
             if (deposits.Count == 0) return null;

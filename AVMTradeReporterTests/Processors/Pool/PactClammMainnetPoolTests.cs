@@ -4,7 +4,11 @@ using Algorand.Algod;
 using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Models.Data.Enums;
 using AVMTradeReporter.Processors.Pool;
+using AVMTradeReporter.Model.Configuration;
+using AVMTradeReporter.Repository;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Newtonsoft.Json.Linq;
 
 namespace AVMTradeReporterTests.Processors.Pool
@@ -30,6 +34,8 @@ namespace AVMTradeReporterTests.Processors.Pool
             public bool NullBoxValues { get; set; }
             /// <summary>Runs when the box listing is requested, i.e. while the processor is reading the chain.</summary>
             public Action? OnBoxListing { get; set; }
+            /// <summary>Number of algod requests served.</summary>
+            public int Requests;
 
             public FakeAlgodHandler(ulong appId)
             {
@@ -39,6 +45,7 @@ namespace AVMTradeReporterTests.Processors.Pool
 
             protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             {
+                Interlocked.Increment(ref Requests);
                 var path = request.RequestUri!.AbsolutePath;
                 if (path == $"/v2/applications/{_appId}") return Json(_fixture["application"]!.ToString());
                 if (path == $"/v2/applications/{_appId}/boxes")
@@ -262,6 +269,134 @@ namespace AVMTradeReporterTests.Processors.Pool
 
             Assert.That(refreshed.LiquidityRanges, Is.Null);
             Assert.That(refreshed.A, Is.EqualTo(aAfterMint));
+        }
+
+        /// <summary>
+        /// The real in-memory pool repository (no Elasticsearch / Redis) whose Pact pool processor reads the fake algod.
+        /// </summary>
+        private static (PoolRepository Repository, FakeAlgodHandler Handler) CreateRepository()
+        {
+            var handler = new FakeAlgodHandler(AppId);
+            var algod = new DefaultApi(new HttpClient(handler) { BaseAddress = new Uri("http://algod.test") });
+            var appConfig = new OptionsWrapper<AppConfiguration>(new AppConfiguration());
+            PoolRepository? repository = null;
+            var services = new ServiceCollection();
+            services.AddSingleton(_ => new PactPoolProcessor(algod, repository!, new LoggerFactory().CreateLogger<PactPoolProcessor>(), new MockAssetRepository()));
+            var aggregated = new AggregatedPoolRepository(null!, new LoggerFactory().CreateLogger<AggregatedPoolRepository>(), null!, appConfig, null!, null, null);
+            repository = new PoolRepository(null!, new LoggerFactory().CreateLogger<PoolRepository>(), null!, aggregated, appConfig, services.BuildServiceProvider());
+            return (repository, handler);
+        }
+
+        /// <summary>The production state before the fix: event tracked reserves, no ranges, no tick origin.</summary>
+        private static AVMTradeReporter.Models.Data.Pool LegacyPool() => new()
+        {
+            PoolAddress = Address,
+            PoolAppId = AppId,
+            Protocol = DEXProtocol.Pact,
+            AMMType = AMMType.TickBasedCLAMM,
+            ApprovalProgramHash = "ec1899eb1b0ee0c6a4263e38dfab158f2cfa4c0942c0c92c0fb0001965760053",
+            AssetIdA = 0,
+            AssetIdB = 31566704,
+            AssetADecimals = 6,
+            AssetBDecimals = 6,
+            A = 68_681_971_506,
+            B = 748_572_371,
+            TickSpacing = 60,
+            CurrentTick = 1000401,
+            Timestamp = DateTimeOffset.UtcNow.AddHours(-1),
+        };
+
+        [Test]
+        public async Task RepositoryReloadsTheRangesOnALiquidityEvent()
+        {
+            var (repository, _) = CreateRepository();
+            await repository.StorePoolAsync(LegacyPool(), false, CancellationToken.None);
+            var eventTime = DateTimeOffset.UtcNow.AddSeconds(-5);
+
+            await repository.UpdatePoolFromLiquidity(new Liquidity
+            {
+                Direction = LiquidityDirection.DepositLiquidity,
+                PoolAddress = Address,
+                PoolAppId = AppId,
+                Protocol = DEXProtocol.Pact,
+                AssetIdA = 0,
+                AssetIdB = 31566704,
+                AssetAmountA = 37_627_392,
+                AssetAmountB = 4_000_000,
+                TxState = TxState.Confirmed,
+                Timestamp = eventTime,
+            }, CancellationToken.None);
+
+            var pool = await repository.GetPoolAsync(Address, CancellationToken.None);
+            Assert.That(pool!.LiquidityRanges, Has.Count.EqualTo(50));
+            Assert.That(pool.RealAmountA, Is.EqualTo(169_922m).Within(1m));
+            Assert.That(pool.RealAmountB, Is.EqualTo(3_656.49m).Within(0.01m));
+            Assert.That(pool.TickOrigin, Is.EqualTo(TickMath.TickBase));
+            // the block time of the event is newer than the read stamp: it is kept, later events still apply
+            Assert.That(pool.Timestamp, Is.EqualTo(eventTime));
+        }
+
+        [Test]
+        public async Task RepositoryReadsATickPoolWithoutRangesOnItsNextSwap()
+        {
+            // the swap carries current_tick (as most swaps do), which lets ApplyTrade infer the tick origin - the pool still
+            // has to be read from chain, it has no ranges
+            var (repository, handler) = CreateRepository();
+            await repository.StorePoolAsync(LegacyPool(), false, CancellationToken.None);
+
+            await repository.UpdatePoolFromTrade(new Trade
+            {
+                PoolAddress = Address,
+                PoolAppId = AppId,
+                Protocol = DEXProtocol.Pact,
+                AssetIdIn = 0,
+                AssetIdOut = 31566704,
+                AssetAmountIn = 13_600_000,
+                AssetAmountOut = 1_219_404,
+                PoolSqrtPriceX64 = 5531894802404564755UL,
+                PoolTick = 1000401,
+                TradeState = TxState.Confirmed,
+                Timestamp = DateTimeOffset.UtcNow.AddSeconds(-5),
+            }, CancellationToken.None);
+
+            var pool = await repository.GetPoolAsync(Address, CancellationToken.None);
+            Assert.That(handler.Requests, Is.GreaterThan(0), "the pool was not read from chain");
+            Assert.That(pool!.LiquidityRanges, Has.Count.EqualTo(50));
+            Assert.That(pool.RealAmountA, Is.EqualTo(169_922m).Within(1m));
+            Assert.That(pool.RealAmountB, Is.EqualTo(3_656.49m).Within(0.01m));
+        }
+
+        [Test]
+        public async Task RepositoryRepricesASwapFromTheRangesWithoutReadingTheChain()
+        {
+            var (repository, handler) = CreateRepository();
+            var loader = new PactPoolProcessor(
+                new DefaultApi(new HttpClient(new FakeAlgodHandler(AppId)) { BaseAddress = new Uri("http://algod.test") }),
+                new MockPoolRepository(), new LoggerFactory().CreateLogger<PactPoolProcessor>(), new MockAssetRepository());
+            var pool = await loader.LoadPoolAsync(Address, AppId);
+            pool.ApprovalProgramHash = "ec1899eb1b0ee0c6a4263e38dfab158f2cfa4c0942c0c92c0fb0001965760053";
+            pool.Timestamp = DateTimeOffset.UtcNow.AddHours(-1);
+            await repository.StorePoolAsync(pool, false, CancellationToken.None);
+            const ulong before = 5537708898821207296UL; // an earlier price of the pool
+
+            await repository.UpdatePoolFromTrade(new Trade
+            {
+                PoolAddress = Address,
+                PoolAppId = AppId,
+                Protocol = DEXProtocol.Pact,
+                AssetIdIn = 0,
+                AssetIdOut = 31566704,
+                PoolSqrtPriceX64 = before,
+                TradeState = TxState.Confirmed,
+                Timestamp = DateTimeOffset.UtcNow.AddSeconds(-5),
+            }, CancellationToken.None);
+
+            var stored = await repository.GetPoolAsync(Address, CancellationToken.None);
+            Assert.That(handler.Requests, Is.EqualTo(0), "a swap on a pool with ranges must not read the chain");
+            var expected = TickMath.ApplyPrice(TickMath.CloneRanges(stored!.LiquidityRanges!), before, 60, TickMath.TickBase, 6, 6);
+            Assert.That(stored.A, Is.EqualTo(expected.A));
+            Assert.That(stored.B, Is.EqualTo(expected.B));
+            Assert.That(stored.CurrentPrice, Is.EqualTo(TickMath.SqrtPriceX64ToPrice(before, 6, 6)));
         }
 }
 }
