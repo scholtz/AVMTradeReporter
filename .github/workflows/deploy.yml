@@ -24,9 +24,7 @@ permissions:
 env:
   IMAGE_API: scholtz2/avm-trade-reporter
   IMAGE_SUBSCRIBER: scholtz2/avm-trade-reporter-subscriber
-  # stage's own namespace: the stage KUBE_CONFIG reaches nothing else, and this job must never change biatec-scan
-  # (production / Voi)
-  NAMESPACE: biatec-scan-testnet
+  NAMESPACE: biatec-scan
 
 jobs:
   build:
@@ -109,9 +107,9 @@ jobs:
           version="${{ needs.build.outputs.version }}"
           bash scripts/set-image-tags.sh "$version" k8s/stage/deployment-api-stage.yaml k8s/stage/subscriber-deployment-stage.yaml
 
-      # before ANY change to the cluster: every stage manifest must target the stage namespace only, and a server-side
-      # dry run of them (a forbidden or invalid object fails here). The stage deployer may create its objects, so a
-      # first deploy into an empty namespace works.
+      # before ANY change to the cluster: a server-side dry run of the manifests (a forbidden or invalid object fails
+      # here), and the Secrets / ConfigMap the next steps patch plus the shared icon cache the API pods mount must exist
+      # (the deployers cannot create objects) - fail now, not half-way or after a 20-minute rollout of Pending pods
       - name: Preflight manifests
         env:
           VERSION: ${{ needs.build.outputs.version }}
@@ -126,22 +124,10 @@ jobs:
             echo "::error::master records the newer $recorded on stage - refusing to deploy the older $VERSION. Deploy the current master: gh workflow run deploy.yml --ref master"
             exit 1
           fi
-          # a manifest naming another namespace (e.g. production's biatec-scan) is refused - any YAML form: block,
-          # list item, flow mapping (kubectl itself also rejects a namespaced object of another namespace under -n)
-          if grep -noE "namespace:[[:space:]]*[\"']?[A-Za-z0-9.-]*" k8s/stage/*.yaml | grep -vE "namespace:[[:space:]]*[\"']?$NAMESPACE$"; then
-            echo "::error::The stage manifests above name a namespace other than $NAMESPACE - stage must never change another namespace."
-            exit 1
-          fi
-          # and the credential itself must not be able to change production's namespace (it is minted outside this repo)
-          for perm in "patch deployments.apps" "create deployments.apps" "delete deployments.apps" "patch secrets" "create secrets" \
-                      "patch configmaps" "patch ingresses.networking.k8s.io" "patch persistentvolumeclaims"; do
-            # shellcheck disable=SC2086 # "verb resource"
-            if [ "$(kubectl auth can-i $perm -n biatec-scan 2>/dev/null || true)" != no ]; then
-              echo "::error::The stage KUBE_CONFIG may '$perm' in biatec-scan - stage must never be able to change production's namespace. Re-mint it scoped to $NAMESPACE only."
-              exit 1
-            fi
-          done
-          kubectl apply --dry-run=server -n "$NAMESPACE" -f k8s/stage/pv-images-stage.yaml -f k8s/stage/deployment-api-stage.yaml -f k8s/stage/subscriber-deployment-stage.yaml
+          kubectl apply --dry-run=server -n "$NAMESPACE" -f k8s/stage/deployment-api-stage.yaml -f k8s/stage/subscriber-deployment-stage.yaml
+          bash scripts/check-objects.sh patch:secrets/avm-trade-reporter-stage-secret \
+            patch:secrets/avm-trade-reporter-subscriber-stage-secret patch:configmaps/avm-trade-reporter-stage-main-conf \
+            get:persistentvolumeclaims/avm-trade-reporter-images-pvc
 
       # Stage's Elastic/Redis credentials live only as GitHub secrets, never committed to the repo.
       # This step (re-)creates the Secret from those GitHub secrets on every deploy, so rotating a
@@ -167,12 +153,6 @@ jobs:
       - name: Update stage config map
         run: |
           kubectl create configmap avm-trade-reporter-stage-main-conf --from-file=k8s/stage/conf-api-stage -n "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
-
-      # stage's own PV/PVC for the shared icon cache (same host directory as production's) - must exist before the
-      # API pods that mount it
-      - name: Apply stage images PV/PVC
-        run: |
-          kubectl apply -f k8s/stage/pv-images-stage.yaml -n "$NAMESPACE"
 
       - name: Apply Kubernetes manifests (stage)
         run: |

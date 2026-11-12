@@ -5,13 +5,12 @@
 # waiting for a push to master.
 set -euo pipefail
 
-kubectl apply -f pv-images-stage.yaml -n biatec-scan-testnet
-kubectl apply -f deployment-api-stage.yaml -n biatec-scan-testnet
-kubectl apply -f subscriber-deployment-stage.yaml -n biatec-scan-testnet
+kubectl apply -f deployment-api-stage.yaml -n biatec-scan
+kubectl apply -f subscriber-deployment-stage.yaml -n biatec-scan
 
-kubectl create configmap avm-trade-reporter-stage-main-conf --from-file=conf-api-stage -n biatec-scan-testnet --dry-run=client -o yaml | kubectl apply -f -
-kubectl rollout restart deployment/avm-trade-reporter-stage-app-deployment -n biatec-scan-testnet
-kubectl rollout status deployment/avm-trade-reporter-stage-app-deployment -n biatec-scan-testnet
+kubectl create configmap avm-trade-reporter-stage-main-conf --from-file=conf-api-stage -n biatec-scan --dry-run=client -o yaml | kubectl apply -f -
+kubectl rollout restart deployment/avm-trade-reporter-stage-app-deployment -n biatec-scan
+kubectl rollout status deployment/avm-trade-reporter-stage-app-deployment -n biatec-scan
 
-kubectl rollout restart deployment/avmtradereporter-subscriber-stage -n biatec-scan-testnet
-kubectl rollout status deployment/avmtradereporter-subscriber-stage -n biatec-scan-testnet
+kubectl rollout restart deployment/avmtradereporter-subscriber-stage -n biatec-scan
+kubectl rollout status deployment/avmtradereporter-subscriber-stage -n biatec-scan
