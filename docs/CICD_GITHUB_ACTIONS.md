@@ -115,7 +115,11 @@ rejected the expired credential. Because the manifests were committed before tha
 not expire and is revoked by deleting it. Every Role only reaches its own environment's objects by name, no Role may
 create Deployments / Pods or list Secrets, and only the production deployer touches the shared images PV/PVC.
 
-This limits each credential through the API, but it is **not a security boundary** between the environments: they
+The ServiceAccounts and their token Secrets live in their own namespace `github-deployers` (nothing else in it, no
+deployer has any right there): a pod can only mount Secrets of its own namespace, so no pod template in `biatec-scan`
+can reach another deployer's token. The Roles - and the deployers' work - stay in `biatec-scan`.
+
+This limits each credential through the API, but it is **not a security boundary** between the apps: they
 share the namespace `biatec-scan`, so a deployer that may patch its own Deployment may also change its pod template,
 and a pod can mount any Secret of its namespace. Isolating the stage job (every push, no reviewer) from production
 needs stage in its own namespace - blocked today by the shared icon cache (a PersistentVolume binds to one PVC in one
@@ -133,7 +137,7 @@ Re-running the newest failed run is fine. Nothing is set unless all three kubeco
 The kubeconfigs are written to a temporary directory outside the repository and deleted after `--set-secrets`. If
 the admin context reaches the cluster through a proxy (a Rancher `/k8s/clusters/...` URL does not accept
 ServiceAccount tokens), pass the cluster's own API endpoint: `KUBE_SERVER=https://<host>:6443 k8s/ci/make-kubeconfig.sh --set-secrets`.
-To revoke one: `kubectl -n biatec-scan delete secret github-deployer-stage-token` (re-running the script mints a new
+To revoke one: `kubectl -n github-deployers delete secret github-deployer-stage-token` (re-running the script mints a new
 token and updates the secret).
 
 **Limits by design:** the deployers only `kubectl apply` objects that already exist (get + patch). A new object - a

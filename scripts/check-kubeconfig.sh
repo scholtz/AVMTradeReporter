@@ -82,7 +82,8 @@ elif [ -n "$cert_data" ]; then
   not_after=$(printf '%s' "$cert_data" | base64 -d | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2 || true)
   subject=$(printf '%s' "$cert_data" | base64 -d | openssl x509 -noout -subject 2>/dev/null | sed 's/^subject=//' || true)
   kind="client certificate (${subject:-unknown subject})"
-  if [ -n "$not_after" ]; then expires_epoch=$(to_epoch "$not_after"); expiry_known=1; fi
+  if [ -n "$not_after" ]; then expires_epoch=$(to_epoch "$not_after" || true); fi
+  if [ -n "$expires_epoch" ]; then expiry_known=1; fi
 elif [ -n "$exec_cmd" ]; then
   kind="exec credential plugin '$exec_cmd' (needs that binary and its login on the runner)"
 elif [ -n "$auth_provider" ]; then

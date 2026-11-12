@@ -11,6 +11,7 @@
 set -euo pipefail
 
 NAMESPACE=biatec-scan
+DEPLOYER_NAMESPACE=github-deployers # the ServiceAccounts + token Secrets (see github-deployer.yaml)
 REPO=scholtz/AVMTradeReporter
 SET_SECRETS=0
 OUT_DIR=""
@@ -92,13 +93,13 @@ for env in $ENVIRONMENTS; do
   ca=""
   # the token controller fills the Secret asynchronously
   for _ in $(seq 1 30); do
-    token=$(kubectl -n "$NAMESPACE" get secret "$secret" -o jsonpath='{.data.token}' 2>/dev/null | base64 -d || true)
-    ca=$(kubectl -n "$NAMESPACE" get secret "$secret" -o jsonpath='{.data.ca\.crt}' 2>/dev/null || true)
+    token=$(kubectl -n "$DEPLOYER_NAMESPACE" get secret "$secret" -o jsonpath='{.data.token}' 2>/dev/null | base64 -d || true)
+    ca=$(kubectl -n "$DEPLOYER_NAMESPACE" get secret "$secret" -o jsonpath='{.data.ca\.crt}' 2>/dev/null || true)
     [ -n "$token" ] && [ -n "$ca" ] && break
     sleep 1
   done
   if [ -z "$token" ] || [ -z "$ca" ]; then
-    echo "$NAMESPACE/$secret has no token / ca.crt yet (is the ServiceAccount token controller enabled?)" >&2
+    echo "$DEPLOYER_NAMESPACE/$secret has no token / ca.crt yet (is the ServiceAccount token controller enabled?)" >&2
     exit 1
   fi
 
@@ -151,7 +152,16 @@ EOF
                "create serviceaccounts" "create rolebindings.rbac.authorization.k8s.io" "patch roles.rbac.authorization.k8s.io"; do
     # shellcheck disable=SC2086 # "verb resource"
     if [ "$(KUBECONFIG="$file" kubectl auth can-i $perm -n "$NAMESPACE" 2>/dev/null)" != "no" ]; then
-      echo "The $env deployer may '$perm' - Roles must stay get/patch/update on named objects" >&2
+      echo "The $env deployer may '$perm' - Roles must stay get/patch on named objects" >&2
+      exit 1
+    fi
+    denied=$((denied + 1))
+  done
+  # no deployer reaches the deployer identities (another environment's token) in any way
+  for perm in "get secrets" "list secrets" "create pods" "create serviceaccounts --subresource=token"; do
+    # shellcheck disable=SC2086 # "verb resource"
+    if [ "$(KUBECONFIG="$file" kubectl auth can-i $perm -n "$DEPLOYER_NAMESPACE" 2>/dev/null)" != "no" ]; then
+      echo "The $env deployer may '$perm' in $DEPLOYER_NAMESPACE - the deployer tokens must be out of every deployer's reach" >&2
       exit 1
     fi
     denied=$((denied + 1))
@@ -171,12 +181,19 @@ EOF
   echo "Denied on all $denied checks against the other environments' objects and broad / shared-volume access - separated."
 done
 
-# only after ALL three verified: a failure above leaves every environment's secret as it was
+# only after ALL three verified: a verification failure above leaves every environment's secret as it was. A failing
+# `gh secret set` (permissions, network) is reported with which environments already got their new secret - re-running
+# the script is safe: it re-verifies and sets all three again.
 if [ "$SET_SECRETS" -eq 1 ]; then
+  done_envs=""
   for env in $ENVIRONMENTS; do
     file="$OUT_DIR/$env.kubeconfig"
     encoded=$(base64 -w0 "$file" 2>/dev/null || base64 "$file" | tr -d '\n')
-    printf '%s' "$encoded" | gh secret set KUBE_CONFIG --env "$env" --repo "$REPO"
+    if ! printf '%s' "$encoded" | gh secret set KUBE_CONFIG --env "$env" --repo "$REPO"; then
+      echo "Setting KUBE_CONFIG of environment $env FAILED. Already set: ${done_envs:-none}. Fix the cause and run the script again." >&2
+      exit 1
+    fi
+    done_envs="${done_envs:+$done_envs }$env"
     echo "Set KUBE_CONFIG of environment $env"
   done
   echo "Done (the kubeconfigs were removed). Deploy the current master again: gh workflow run deploy.yml --ref master --repo $REPO"
