@@ -40,9 +40,13 @@ namespace AVMTradeReporterTests.Performance
         private sealed record Result(double BlocksPerSecond, int Flushes, int Completed, bool Contiguous);
 
         /// <param name="legacy">The pipeline before 2026-11: MaxConcurrentTasks slots, two round trips per block on the loop, every block flushes.</param>
-        private static async Task<Result> RunAsync(int blocks, bool legacy)
+        /// <param name="maxBlocksPerSecond">The catch-up pacing (null: the default of the configuration, 0: no cap).</param>
+        private static async Task<Result> RunAsync(int blocks, bool legacy, int? maxBlocksPerSecond = null)
         {
             var config = new BlockProcessingConfiguration();
+            if (maxBlocksPerSecond != null) config.CatchUpMaxBlocksPerSecond = maxBlocksPerSecond.Value;
+            var paceWindowStart = TimeSpan.Zero;
+            var paceStarted = 0;
             var pending = new PendingBlockBatches();
             var completed = new ConcurrentDictionary<ulong, byte>();
             var flushes = 0;
@@ -125,6 +129,18 @@ namespace AVMTradeReporterTests.Performance
                     // catching up, the loop waits for a slot instead of processing the block itself (as the service does)
                     while (Volatile.Read(ref inFlight) >= limit) await Task.WhenAny(tasks.Where(t => !t.IsCompleted).DefaultIfEmpty(Task.CompletedTask));
                     tasks.RemoveAll(t => t.IsCompleted);
+
+                    // paced like the service (PaceCatchUpAsync); model time runs Scale times faster than the wall clock
+                    var paceElapsed = (watch.Elapsed - paceWindowStart) * Scale;
+                    if (paceElapsed >= TimeSpan.FromSeconds(1)) { paceWindowStart = watch.Elapsed; paceStarted = 0; paceElapsed = TimeSpan.Zero; }
+                    var pace = IndexerSyncPolicy.CatchUpPacingDelay(paceStarted, paceElapsed, config.CatchUpMaxBlocksPerSecond);
+                    if (pace > TimeSpan.Zero)
+                    {
+                        await Task.Delay(pace / Scale);
+                        paceWindowStart = watch.Elapsed;
+                        paceStarted = 0;
+                    }
+                    paceStarted++;
                 }
                 Interlocked.Increment(ref inFlight);
                 if (Volatile.Read(ref inFlight) <= limit)
@@ -147,14 +163,18 @@ namespace AVMTradeReporterTests.Performance
         public async Task CatchUp_IsSeveralTimesFasterThanTheBlockByBlockPipeline()
         {
             var before = await RunAsync(blocks: 210, legacy: true);
+            var uncapped = await RunAsync(blocks: 840, legacy: false, maxBlocksPerSecond: 0);
             var after = await RunAsync(blocks: 840, legacy: false);
+            var cap = new BlockProcessingConfiguration().CatchUpMaxBlocksPerSecond;
 
             TestContext.Out.WriteLine($"catch-up throughput at mainnet latencies (fetch 60 ms, bulk 700 ms, 1 in {TradeEvery} blocks with events):");
-            TestContext.Out.WriteLine($"  before: {before.BlocksPerSecond,6:F1} blocks/s ({before.Flushes} bulk requests for {before.Completed} blocks)");
-            TestContext.Out.WriteLine($"  after:  {after.BlocksPerSecond,6:F1} blocks/s ({after.Flushes} bulk requests for {after.Completed} blocks)");
+            TestContext.Out.WriteLine($"  before:   {before.BlocksPerSecond,6:F1} blocks/s ({before.Flushes} bulk requests for {before.Completed} blocks)");
+            TestContext.Out.WriteLine($"  uncapped: {uncapped.BlocksPerSecond,6:F1} blocks/s ({uncapped.Flushes} bulk requests for {uncapped.Completed} blocks)");
+            TestContext.Out.WriteLine($"  after:    {after.BlocksPerSecond,6:F1} blocks/s with the default cap of {cap} blocks/s ({after.Flushes} bulk requests for {after.Completed} blocks)");
             TestContext.Out.WriteLine($"  speed-up: {after.BlocksPerSecond / before.BlocksPerSecond:F1}x");
 
-            Assert.That(before.Contiguous && after.Contiguous, Is.True, "every block completes, with or without events");
+            Assert.That(before.Contiguous && uncapped.Contiguous && after.Contiguous, Is.True, "every block completes, with or without events");
+            Assert.That(after.BlocksPerSecond, Is.LessThanOrEqualTo(cap * 1.1), "the cap holds: a public algod answers 429 above its rate limit");
             // measured: 6.6 -> 55 blocks/s (8x). Only the ratio is asserted, with a budget far below it: both runs slow down
             // together on a loaded CI runner, an absolute blocks/s floor would not.
             Assert.That(after.BlocksPerSecond, Is.GreaterThan(before.BlocksPerSecond * 3), "catching up must not fall back to the block-by-block pace");

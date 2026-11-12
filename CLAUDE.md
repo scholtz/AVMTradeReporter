@@ -15,8 +15,9 @@ did **5.2 blocks/s** (about 6 hours). The cause was not CPU and not algod:
 - the fetch loop itself paid two round trips per block (algod `wait-for-block-after`, the
   `indexers` document write): ~30 ms, i.e. a hard cap of ~30 blocks/s even with nothing else.
 
-The same pipeline now does **~55 blocks/s** in the benchmark (8x; a day of Algorand blocks in
-under 10 minutes). The rules below are covered by `SyncThroughputBenchmarkTests`,
+The same pipeline now does **~55 blocks/s** in the benchmark (8x), and a Release build run
+against the public testnet algod did 58-69 blocks/s. By default it is *capped* at
+`CatchUpMaxBlocksPerSecond` = 40 (a day of Algorand blocks in 13 minutes), see rule 5. The rules below are covered by `SyncThroughputBenchmarkTests`,
 `PendingBlockBatchesFastPathTests` and `IndexerSyncPolicyTests` (all in the `ci.yml` filter - a new
 test class outside `Services.CoinGecko` / `Performance` must be added to that filter or it never
 runs on a PR). The benchmark drives the real `PendingBlockBatches` and `IndexerSyncPolicy` with a
@@ -42,12 +43,30 @@ runs on a PR). The benchmark drives the real `PendingBlockBatches` and `IndexerS
    wait. At the tip nothing changed: every block waits for algod, the document is written with
    every block, `MaxConcurrentTasks` slots.
 5. **Concurrency follows the lag.** More than `BlockProcessing.CatchUpLagBlocks` (20) behind:
-   `CatchUpMaxConcurrentTasks` (16) slots; a block task is almost only waiting. Fetching 200 old
-   blocks from a public archival algod (2026-11-12): 25 / 35 / 49 / 47 blocks/s at 4 / 8 / 16 / 32
-   parallel requests, no 429 - beyond 16 there is nothing to gain and a rate limit to hit.
-6. **Ask the algod that has the block.** The primary is not archival; catching up, the node that
-   served the last block is asked first (`_preferredAlgod`, reset at the tip). A failed request
-   plus a warning with a stack trace per block is not free, and it buries the log.
+   `CatchUpMaxConcurrentTasks` (16) slots; a block task is almost only waiting. Fetching 200
+   blocks from our own mainnet algod, `algorand-algod-public.de-4.biatec.io`, from outside the
+   cluster (2026-11-12): 36 / 50 / 48 / 40 blocks/s at 4 / 8 / 16 / 32 parallel requests, 75 ms per
+   block, no error - beyond 16 there is nothing to gain.
+   **One block is one algod request, so the catch-up rate is the request rate**: it is capped at
+   `CatchUpMaxBlocksPerSecond` (40). Mainnet uses our own nodes (do not point it at Nodely); stage
+   (testnet) and Voi use Nodely's free tier - HTTP 429 above 50 requests per second per IP, plus a
+   daily quota after which requests may be rejected, and every network deployed in the cluster
+   shares one egress IP. An uncapped catch-up crosses that line, and a rejected fetch is not "a
+   bit slower": it is retries, the 30 minute lost-block path, and in the end lost events. Where
+   every configured algod is an own node the cap may be raised or set to 0.
+   **An algod can only help a catch-up as far back as it keeps blocks.** `algorand-algod-public`
+   answers 404 ("failed to retrieve information from the ledger") for blocks more than about 1 000
+   rounds (45 minutes) behind the tip. A longer backlog is served by whichever configured algod
+   (`Algod2` / `Algod3`) is archival; if none is, those blocks go down the lost-block path and are
+   given up. Check this before relying on a catch-up: `curl <algod>/v2/blocks/<tip - 20000>`.
+6. **Ask the algod that has the block - our own node whenever it has it.** The algods are asked
+   in their configured order, own node first. A node that could not return round R while a later
+   one could is skipped up to R + 200 and then tried again (`AlgodBlockAvailability`, forgotten at
+   the tip), so the archival fallback serves exactly the blocks our node no longer keeps, and a
+   catch-up does not pay a failed request plus a warning with a stack trace per block.
+   `Algod2` / `Algod3` have **no default host**: they used to default to Nodely *mainnet* on every
+   network (an implicit dependency nobody had configured, and the wrong chain for testnet / Voi).
+   Mainnet's archival fallback is now explicit in `k8s/main/conf-api/appsettings.json`.
 7. **Speed must not widen a failure.** The skipped wait-for-block call was also what paused the
    loop during an algod outage, and a block no algod returns is given up after 30 minutes: while
    catching up, nothing new is started as long as a block is in `RecoverLostBlockAsync`

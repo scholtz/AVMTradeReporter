@@ -3,9 +3,11 @@
     public class AlgodConfiguration
     {
         /// <summary>
-        /// Algod Host
+        /// Algod Host. Empty = this algod is not configured. There is deliberately no default: the fallbacks
+        /// (<c>Algod2</c> / <c>Algod3</c>) used to default to a public MAINNET algod on every network - an implicit
+        /// dependency on mainnet, and on testnet / Voi a node of the wrong chain.
         /// </summary>
-        public string Host { get; set; } = "https://mainnet-api.4160.nodely.dev";
+        public string Host { get; set; } = string.Empty;
         /// <summary>
         /// Algod Port
         /// </summary>

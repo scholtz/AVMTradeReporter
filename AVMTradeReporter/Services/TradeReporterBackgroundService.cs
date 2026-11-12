@@ -52,12 +52,14 @@ namespace AVMTradeReporter.Services
         private ulong _knownTip;
         private volatile bool _catchingUp;
         private DateTimeOffset _lastIndexerPersist = DateTimeOffset.MinValue;
-        // Index into Algods() of the node asked first. While catching up it follows the node that served the last block:
-        // the primary is usually not archival, and asking it first for every old block is a failed request plus a
-        // warning with a stack trace per block.
-        private int _preferredAlgod;
+        // Which algod is asked first for a round: our own node whenever it has the block, the archival fallback only for
+        // the blocks it no longer keeps (see AlgodBlockAvailability). Created with the first fetch.
+        private AlgodBlockAvailability? _algodAvailability;
         // Blocks no algod returned, being retried in the background (RecoverLostBlockAsync)
         private int _blocksInRecovery;
+        // Catch-up pacing: blocks started in the current one-second window (IndexerSyncPolicy.CatchUpPacingDelay)
+        private long _paceWindowStart;
+        private int _paceStartedInWindow;
         private bool _memoryPressureHigh;
         private readonly List<Task> _runningTasks = new List<Task>();
         private readonly object _tasksLock = new object();
@@ -273,6 +275,9 @@ namespace AVMTradeReporter.Services
                         var limit = IndexerSyncPolicy.ConcurrencyLimit(_catchingUp, _appConfig.Value.BlockProcessing.MaxConcurrentTasks, _appConfig.Value.BlockProcessing.CatchUpMaxConcurrentTasks, memoryPressure);
                         if (_concurrentTasksCapacity - _concurrentTasksSemaphore.CurrentCount < limit)
                         {
+                            // one block is one algod request: a catch-up stays below the rate a public algod accepts
+                            if (_catchingUp) await PaceCatchUpAsync(stoppingToken);
+
                             // Start async processing
                             var blockTask = ProcessBlockAsyncWrapper(Indexer.Round, _processingCts.Token);
                             lock (_tasksLock)
@@ -454,6 +459,28 @@ namespace AVMTradeReporter.Services
             }
         }
 
+        /// <summary>Holds the next block of a catch-up back while <c>CatchUpMaxBlocksPerSecond</c> were started in this second.</summary>
+        private async Task PaceCatchUpAsync(CancellationToken cancellationToken)
+        {
+            var max = _appConfig.Value.BlockProcessing.CatchUpMaxBlocksPerSecond;
+            if (max <= 0) return;
+            var elapsed = _paceWindowStart == 0 ? TimeSpan.MaxValue : System.Diagnostics.Stopwatch.GetElapsedTime(_paceWindowStart);
+            if (elapsed >= TimeSpan.FromSeconds(1))
+            {
+                _paceWindowStart = System.Diagnostics.Stopwatch.GetTimestamp();
+                _paceStartedInWindow = 0;
+                elapsed = TimeSpan.Zero;
+            }
+            var wait = IndexerSyncPolicy.CatchUpPacingDelay(_paceStartedInWindow, elapsed, max);
+            if (wait > TimeSpan.Zero)
+            {
+                await Task.Delay(wait, cancellationToken);
+                _paceWindowStart = System.Diagnostics.Stopwatch.GetTimestamp();
+                _paceStartedInWindow = 0;
+            }
+            _paceStartedInWindow++;
+        }
+
         /// <summary>Returns once one of the running block tasks ended, however it ended (or there is none).</summary>
         private async Task WaitForFreeSlotAsync(CancellationToken cancellationToken)
         {
@@ -513,7 +540,7 @@ namespace AVMTradeReporter.Services
             }
             else
             {
-                Volatile.Write(ref _preferredAlgod, 0); // at the tip the primary algod is asked first again
+                _algodAvailability?.Reset(); // at the tip every algod has the block: the configured order applies again
                 _logger.LogInformation("Indexer caught up with the chain tip at round {round}", Indexer.Round);
             }
         }
@@ -622,19 +649,19 @@ namespace AVMTradeReporter.Services
         private async Task<CertifiedBlock?> TryFetchBlockAsync(ulong blockId, bool headerOnly)
         {
             var algods = Algods().ToList();
-            var first = Volatile.Read(ref _preferredAlgod);
-            if (first < 0 || first >= algods.Count) first = 0;
-            for (var offset = 0; offset < algods.Count; offset++)
+            var availability = _algodAvailability ??= new AlgodBlockAvailability(algods.Count);
+            List<int>? failed = null;
+            foreach (var index in availability.Order(blockId))
             {
-                var index = (first + offset) % algods.Count;
                 var (name, api) = algods[index];
                 try
                 {
                     var block = await api.GetBlockAsync(blockId, Format.Msgpack, headerOnly);
                     if (block?.Block != null)
                     {
-                        // catching up: the node that has the old blocks is asked first from now on (reset at the tip)
-                        if (index != first && _catchingUp) Volatile.Write(ref _preferredAlgod, index);
+                        // Catching up: a node that lacked this block lacks the older ones too - it is not asked first again
+                        // until the catch-up gets near the blocks it keeps (forgotten at the tip).
+                        if (failed != null && _catchingUp) foreach (var missing in failed) availability.MarkMissing(missing, blockId);
                         return block;
                     }
                     _logger.LogWarning("{algod} returned no block {blockId}", name, blockId);
@@ -643,6 +670,7 @@ namespace AVMTradeReporter.Services
                 {
                     _logger.LogWarning(ex, "{algod} failed to return block {blockId}", name, blockId);
                 }
+                (failed ??= new List<int>()).Add(index);
             }
             return null;
         }

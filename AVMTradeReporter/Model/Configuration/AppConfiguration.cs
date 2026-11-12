@@ -21,13 +21,14 @@ namespace AVMTradeReporter.Model.Configuration
         /// <summary>
         /// AVM Algod configuration
         /// </summary>
-        public AlgodConfiguration Algod { get; set; } = new AlgodConfiguration();
+        public AlgodConfiguration Algod { get; set; } = new AlgodConfiguration { Host = "https://algorand-algod-public.de-4.biatec.io" };
         /// <summary>
-        /// Fallback algod configuration
+        /// Fallback algod configuration. Not used unless a host is configured. Our own node keeps about 1 000 rounds: a
+        /// catch-up of more than ~45 minutes needs an ARCHIVAL algod here, or the older blocks are given up as lost.
         /// </summary>
         public AlgodConfiguration Algod2 { get; set; } = new AlgodConfiguration();
         /// <summary>
-        /// Fallback algod configuration
+        /// Second fallback algod configuration. Not used unless a host is configured.
         /// </summary>
         public AlgodConfiguration Algod3 { get; set; } = new AlgodConfiguration();
 
@@ -397,6 +398,14 @@ namespace AVMTradeReporter.Model.Configuration
         /// Benchmarked 2026-11 against a public archival algod: fetch throughput stops growing at about 16.
         /// </summary>
         public int CatchUpMaxConcurrentTasks { get; set; } = 16;
+
+        /// <summary>
+        /// Blocks started per second while catching up, at most. One block is one algod request, and a public algod
+        /// answers a client that is too fast with HTTP 429 (testnet / Voi use Nodely's free tier: 50 requests per second
+        /// per IP, plus a daily quota) - which turns into failed fetches, i.e. a slower and riskier catch-up than a paced
+        /// one. Raise it, or set 0 = no cap, where every configured algod is an own node.
+        /// </summary>
+        public int CatchUpMaxBlocksPerSecond { get; set; } = 40;
 
         /// <summary>Seconds between two writes of the indexer document while catching up (at the tip: every block).</summary>
         public double CatchUpIndexerPersistSeconds { get; set; } = 1;
