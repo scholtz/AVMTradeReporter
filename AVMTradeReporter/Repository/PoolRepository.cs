@@ -13,7 +13,6 @@ using Elastic.Clients.Elasticsearch.Mapping;
 using Elastic.Clients.Elasticsearch.Security;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
-using Org.BouncyCastle.Utilities;
 using StackExchange.Redis;
 using System.Collections.Concurrent;
 using System.Diagnostics;
