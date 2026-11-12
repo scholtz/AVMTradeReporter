@@ -183,7 +183,7 @@ EOF
   echo "Denied on all $denied checks against the other environments' objects and broad / shared-volume access - separated."
 done
 
-# only after ALL three verified: a verification failure above leaves every environment's secret as it was. A failing
+# only after BOTH verified: a verification failure above leaves every environment's secret as it was. A failing
 # `gh secret set` (permissions, network) is reported with which environments already got their new secret - re-running
 # the script is safe: it re-verifies and sets all three again.
 if [ "$SET_SECRETS" -eq 1 ]; then
@@ -198,7 +198,7 @@ if [ "$SET_SECRETS" -eq 1 ]; then
     done_envs="${done_envs:+$done_envs }$env"
     echo "Set KUBE_CONFIG of environment $env"
   done
-  echo "Done (the kubeconfigs were removed). Deploy the current master again: gh workflow run deploy.yml --ref master --repo $REPO"
+  echo "Done (the kubeconfigs were removed). They are used by the next production / Voi promote (promote-production.yml)."
 else
   echo "Verified kubeconfigs in $OUT_DIR - they contain credentials: store them (base64) as KUBE_CONFIG of their"
   echo "environment and delete the directory, or simply run: $0 --set-secrets"

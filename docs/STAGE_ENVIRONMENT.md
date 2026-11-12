@@ -20,8 +20,9 @@ it's also running in production - both environments get the exact same image on 
 | USD reference asset | `AppConfiguration.UsdReferenceAssetId = 31566704` (Algorand mainnet USDC) | `AppConfiguration.UsdReferenceAssetId = 10458941` (Algorand testnet USDC) - see "USD reference asset per network" below |
 
 Stage has its own namespace, `biatec-scan-testnet`, and its deploy credential reaches only that namespace: a stage
-deploy never changes anything in production's `biatec-scan`, and stage pods cannot mount production's Secrets. The
-one thing still shared is the on-disk icon cache - stage's own PV/PVC (`k8s/stage/pv-images-stage.yaml`) points at
+deploy never changes any object in production's `biatec-scan` (its preflight refuses a credential that could), and
+stage pods cannot mount production's Secrets. The one thing still shared is the on-disk icon cache - stage can write
+production's cached icons, as it always could - stage's own PV/PVC (`k8s/stage/pv-images-stage.yaml`) points at
 the same host directory as production's (see `docs/ICON_SHARING.md`).
 
 > **Gossip relay discovery bug fixed 2026-08-05:** `GossipBackgroundService` discovers gossip relays

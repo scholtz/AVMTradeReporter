@@ -126,11 +126,21 @@ jobs:
             echo "::error::master records the newer $recorded on stage - refusing to deploy the older $VERSION. Deploy the current master: gh workflow run deploy.yml --ref master"
             exit 1
           fi
-          # a manifest naming another namespace (e.g. production's biatec-scan) is refused, whatever the credential
-          if grep -nE '^[[:space:]]+namespace:' k8s/stage/*.yaml | grep -vE "namespace:[[:space:]]*\"?$NAMESPACE\"?[[:space:]]*(#.*)?$"; then
+          # a manifest naming another namespace (e.g. production's biatec-scan) is refused - any YAML form: block,
+          # list item, flow mapping (kubectl itself also rejects a namespaced object of another namespace under -n)
+          if grep -noE "namespace:[[:space:]]*[\"']?[A-Za-z0-9.-]*" k8s/stage/*.yaml | grep -vE "namespace:[[:space:]]*[\"']?$NAMESPACE$"; then
             echo "::error::The stage manifests above name a namespace other than $NAMESPACE - stage must never change another namespace."
             exit 1
           fi
+          # and the credential itself must not be able to change production's namespace (it is minted outside this repo)
+          for perm in "patch deployments.apps" "create deployments.apps" "delete deployments.apps" "patch secrets" "create secrets" \
+                      "patch configmaps" "patch ingresses.networking.k8s.io" "patch persistentvolumeclaims"; do
+            # shellcheck disable=SC2086 # "verb resource"
+            if [ "$(kubectl auth can-i $perm -n biatec-scan 2>/dev/null || true)" != no ]; then
+              echo "::error::The stage KUBE_CONFIG may '$perm' in biatec-scan - stage must never be able to change production's namespace. Re-mint it scoped to $NAMESPACE only."
+              exit 1
+            fi
+          done
           kubectl apply --dry-run=server -n "$NAMESPACE" -f k8s/stage/pv-images-stage.yaml -f k8s/stage/deployment-api-stage.yaml -f k8s/stage/subscriber-deployment-stage.yaml
 
       # Stage's Elastic/Redis credentials live only as GitHub secrets, never committed to the repo.

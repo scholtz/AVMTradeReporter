@@ -174,7 +174,12 @@ the deploy fails with `forbidden`, naming the object.
   deployment avm-trade-reporter-stage-app-deployment avmtradereporter-subscriber-stage && kubectl -n biatec-scan
   delete service avm-trade-reporter-stage-service && kubectl -n biatec-scan delete configmap
   avm-trade-reporter-stage-main-conf && kubectl -n biatec-scan delete secret avm-trade-reporter-stage-secret
-  avm-trade-reporter-subscriber-stage-secret`
+  avm-trade-reporter-subscriber-stage-secret`. Do it **before** the first deploy into `biatec-scan-testnet`: otherwise
+  two Ingresses claim the host (the old one may keep the traffic) and the old subscriber keeps indexing testnet next
+  to the new one. If `k8s/ci/make-kubeconfig.sh` ever ran before this move, also revoke its stage identity:
+  `kubectl -n github-deployers delete serviceaccount github-deployer-stage --ignore-not-found && kubectl -n
+  github-deployers delete secret github-deployer-stage-token --ignore-not-found && kubectl -n biatec-scan delete
+  role,rolebinding github-deployer-stage --ignore-not-found`.
 - DNS records for the two new stage hostnames must point at the same ingress-nginx load balancer IP
   as the production hostnames, before the first `deploy-stage` run, so cert-manager can issue TLS
   certificates for them:
