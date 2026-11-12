@@ -41,7 +41,7 @@ namespace AVMTradeReporterTests.Services
             cts.Cancel();
 
             // Act & Assert
-            Assert.DoesNotThrowAsync(async () =>
+            await Assert.DoesNotThrowAsync(async () =>
             {
                 var result = await _tradeQueryService.GetTradesAsync(cancellationToken: cts.Token);
                 Assert.That(result, Is.Not.Null);
@@ -52,7 +52,7 @@ namespace AVMTradeReporterTests.Services
         public async Task GetTradesAsync_WithParameters_DoesNotThrow()
         {
             // Act & Assert
-            Assert.DoesNotThrowAsync(async () =>
+            await Assert.DoesNotThrowAsync(async () =>
             {
                 var result = await _tradeQueryService.GetTradesAsync(
                     assetIdIn: 123,
@@ -66,13 +66,13 @@ namespace AVMTradeReporterTests.Services
         }
 
         [Test]
-        public void GetTradesAsync_ValidatesParameters()
+        public async Task GetTradesAsync_ValidatesParameters()
         {
             // Test that the service accepts various parameter combinations without throwing
-            Assert.DoesNotThrowAsync(async () => await _tradeQueryService.GetTradesAsync(assetIdIn: 123));
-            Assert.DoesNotThrowAsync(async () => await _tradeQueryService.GetTradesAsync(assetIdOut: 456));
-            Assert.DoesNotThrowAsync(async () => await _tradeQueryService.GetTradesAsync(txId: "abc123"));
-            Assert.DoesNotThrowAsync(async () => await _tradeQueryService.GetTradesAsync(assetIdIn: 123, assetIdOut: 456));
+            await Assert.DoesNotThrowAsync(async () => await _tradeQueryService.GetTradesAsync(assetIdIn: 123));
+            await Assert.DoesNotThrowAsync(async () => await _tradeQueryService.GetTradesAsync(assetIdOut: 456));
+            await Assert.DoesNotThrowAsync(async () => await _tradeQueryService.GetTradesAsync(txId: "abc123"));
+            await Assert.DoesNotThrowAsync(async () => await _tradeQueryService.GetTradesAsync(assetIdIn: 123, assetIdOut: 456));
         }
 
         [Test]

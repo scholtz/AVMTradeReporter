@@ -529,7 +529,7 @@ namespace AVMTradeReporterTests.Services.CoinGecko
             var service = Create();
             using var cts = new CancellationTokenSource();
             cts.Cancel();
-            Assert.CatchAsync<OperationCanceledException>(async () => await service.GetEventsJsonAsync(10, 10, cts.Token));
+            await Assert.CatchAsync<OperationCanceledException>(async () => await service.GetEventsJsonAsync(10, 10, cts.Token));
 
             // a later request still gets the right answer, not a stale entry of the cancelled one
             Assert.That(Events(await service.GetEventsJsonAsync(10, 10, default)), Has.Length.EqualTo(1));

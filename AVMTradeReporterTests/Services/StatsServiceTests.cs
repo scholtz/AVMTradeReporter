@@ -115,7 +115,7 @@ namespace AVMTradeReporterTests.Services
             cts.Cancel();
 
             // The mock repository returns synchronously, so cancellation is swallowed gracefully.
-            Assert.DoesNotThrowAsync(async () =>
+            await Assert.DoesNotThrowAsync(async () =>
             {
                 var result = await _statsService.GetDexStatsAsync(DEXProtocol.Biatec, DateTimeOffset.UtcNow, cancellationToken: cts.Token);
                 Assert.That(result, Is.Not.Null);
