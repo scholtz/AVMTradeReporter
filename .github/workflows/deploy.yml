@@ -111,7 +111,19 @@ jobs:
       # here), and the Secrets / ConfigMap the next steps patch plus the shared icon cache the API pods mount must exist
       # (the deployers cannot create objects) - fail now, not half-way or after a 20-minute rollout of Pending pods
       - name: Preflight manifests
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
         run: |
+          # never deploy an OLDER version than master records (a re-run of an older run): refused here, before the
+          # cluster changes - the commit step's forward-only check would only notice after the rollout
+          git fetch --quiet origin master
+          git show origin/master:k8s/stage/deployment-api-stage.yaml > "$RUNNER_TEMP/recorded-stage.yaml"
+          recorded=$(bash scripts/set-image-tags.sh --current "$RUNNER_TEMP/recorded-stage.yaml" || true)
+          if [ -n "$recorded" ] && [ "$recorded" != "$VERSION" ] \
+             && [ "$(printf '%s\n%s\n' "$VERSION" "$recorded" | sort -V | tail -n1)" = "$recorded" ]; then
+            echo "::error::master records the newer $recorded on stage - refusing to deploy the older $VERSION. Deploy the current master: gh workflow run deploy.yml --ref master"
+            exit 1
+          fi
           kubectl apply --dry-run=server -n "$NAMESPACE" -f k8s/stage/deployment-api-stage.yaml -f k8s/stage/subscriber-deployment-stage.yaml
           bash scripts/check-objects.sh patch:secrets/avm-trade-reporter-stage-secret \
             patch:secrets/avm-trade-reporter-subscriber-stage-secret patch:configmaps/avm-trade-reporter-stage-main-conf \

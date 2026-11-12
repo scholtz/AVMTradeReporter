@@ -40,11 +40,18 @@ runs:
         set -euo pipefail
         read -r -a files <<< "$FILES"
         set_tags="$GITHUB_WORKSPACE/scripts/set-image-tags.sh"
-        worktree=$(mktemp -d)
-        trap 'git worktree remove --force "$worktree" >/dev/null 2>&1 || true' EXIT
+        worktree=""
+        cleanup() {
+          if [ -n "$worktree" ]; then git worktree remove --force "$worktree" >/dev/null 2>&1 || rm -rf "$worktree"; fi
+          git worktree prune >/dev/null 2>&1 || true
+        }
+        trap cleanup EXIT
         for attempt in 1 2 3 4 5; do
           [ "$attempt" -gt 1 ] && sleep $((attempt * 3))
-          git worktree remove --force "$worktree" >/dev/null 2>&1 || true
+          # a fresh directory per attempt: a half-done checkout of a failed attempt cannot block the next one
+          cleanup
+          worktree=$(mktemp -d)
+          rmdir "$worktree"
           # a transient fetch / checkout failure is retried like a rejected push
           if ! git fetch --quiet origin master || ! git worktree add --quiet --detach "$worktree" origin/master; then
             echo "Fetching master failed (attempt $attempt), retrying..."

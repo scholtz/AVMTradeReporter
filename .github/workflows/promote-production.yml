@@ -97,10 +97,10 @@ jobs:
           version="${{ steps.resolve.outputs.version }}"
           if [ "${{ inputs.network }}" = "algorand" ]; then
             other_name="voi"
-            other_version=$(grep -oE "${IMAGE_API}:[^\"[:space:]]+" k8s/voi/deployment-api-voi.yaml | head -n1 | cut -d: -f2)
+            other_version=$(bash scripts/set-image-tags.sh --current k8s/voi/deployment-api-voi.yaml || true)
           else
             other_name="algorand"
-            other_version=$(grep -oE "${IMAGE_API}:[^\"[:space:]]+" k8s/main/deployment-api.yaml | head -n1 | cut -d: -f2)
+            other_version=$(bash scripts/set-image-tags.sh --current k8s/main/deployment-api.yaml || true)
           fi
           if [ -n "$other_version" ] && [ "$other_version" != "$version" ]; then
             echo "::warning::Promoting only '${{ inputs.network }}' to $version - '$other_name' stays on $other_version. Re-run with network=all to keep both in sync."
@@ -126,7 +126,7 @@ jobs:
       - name: Stage must run the version being promoted
         run: |
           version="${{ needs.resolve-version.outputs.version }}"
-          staged=$(grep -oE "${IMAGE_API}:[^\"[:space:]]+" k8s/stage/deployment-api-stage.yaml | head -n1 | cut -d: -f2)
+          staged=$(bash scripts/set-image-tags.sh --current k8s/stage/deployment-api-stage.yaml || true)
           echo "promoting: $version / stage runs: $staged"
           if [ "${{ inputs.skip_stage_verification }}" = "true" ]; then
             echo "::warning::skip_stage_verification is set - promoting $version without proving it on stage"
