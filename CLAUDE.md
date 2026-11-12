@@ -1,5 +1,66 @@
 # Project notes for Claude
 
+## Sync speed: the indexer must catch up fast - optimize for blocks per second
+
+Whenever the forward indexer (`TradeReporterBackgroundService`) is behind the chain tip - after an
+outage, a stall, a restart that rewinds to `StoredThrough` - the explorer shows stale data and
+GeckoTerminal sees a stale `latest-block` until it has caught up. How long that takes is a product
+requirement, not a detail. On 2026-11-12 a mainnet restart had to re-process 108 826 blocks and
+did **5.2 blocks/s** (about 6 hours). The cause was not CPU and not algod:
+
+- every bulk request uses `Refresh.WaitFor`, so it returns only after the next Elasticsearch
+  refresh: 0.6-0.9 s **whatever its size** (one trade or 2 000);
+- every block, with or without events, called `FlushPendingAsync` and queued on the one flush
+  lock, so each refresh wait let only `MaxConcurrentTasks + 1` = 4 blocks through;
+- the fetch loop itself paid two round trips per block (algod `wait-for-block-after`, the
+  `indexers` document write): ~30 ms, i.e. a hard cap of ~30 blocks/s even with nothing else.
+
+The same pipeline now does **~55 blocks/s** in the benchmark (8x; a day of Algorand blocks in
+under 10 minutes). Rules, all enforced by `SyncThroughputBenchmarkTests` (runs in CI on every PR,
+`Category=Performance`) and the unit tests named below:
+
+1. **A block without documents never touches the flush lock.** ~85% of mainnet blocks hold no DEX
+   event; they complete through `PendingBlockBatches.TryCompleteEmpty`. Only when
+   `PendingBlockBatches.NeedsRetry` says an earlier flush left documents behind does an empty
+   block trigger a flush (on Voi / testnet the next block with a trade may be hours away).
+   `NeedsRetry` is decided when a flush *ends* - raising it while one runs sends every empty block
+   back behind the lock (measured: 55 -> 12 blocks/s).
+2. **Flushes are a group commit.** A flush stores every closed batch; a block task that queued for
+   the lock and finds its block already stored returns at once (`FlushAsync(onBehalfOf:)`). Without
+   that each queued task spends one more refresh wait holding its slot (measured: 55 -> 17).
+3. **Never put two refresh waits in a row.** Trades and liquidity are stored concurrently
+   (`Task.WhenAll`), each with its own "already sent" set. A third index gets the same treatment.
+4. **While catching up, the fetch loop does no per-block round trip and never processes a block
+   itself.** `IndexerSyncPolicy`: algod is asked for the tip only when the last known tip is
+   reached; the indexer document is written every `CatchUpIndexerPersistSeconds` (a crash replays
+   at most that much - upserts are idempotent); a full set of slots means *wait for a slot*
+   (`WaitForFreeSlotAsync`), not the synchronous path, which would park the loop behind a refresh
+   wait. At the tip nothing changed: every block waits for algod, the document is written with
+   every block, `MaxConcurrentTasks` slots.
+5. **Concurrency follows the lag.** More than `BlockProcessing.CatchUpLagBlocks` (20) behind:
+   `CatchUpMaxConcurrentTasks` (16) slots; a block task is almost only waiting. Fetching 200 old
+   blocks from a public archival algod (2026-11-12): 25 / 35 / 49 / 47 blocks/s at 4 / 8 / 16 / 32
+   parallel requests, no 429 - beyond 16 there is nothing to gain and a rate limit to hit.
+6. **Ask the algod that has the block.** The primary is not archival; catching up, the node that
+   served the last block is asked first (`_preferredAlgod`, reset at the tip). A failed request
+   plus a warning with a stack trace per block is not free, and it buries the log.
+
+What must **not** be traded for speed: `Refresh.WaitFor` stays (a block counts as indexed only
+once it is searchable); the watermark stays contiguous; documents are announced to the live feed
+once; a block with documents completes only through its flush.
+
+Before merging anything that adds work per block, per transaction or per flush on this path
+(a new index, a lookup, a lock, a log line with an exception), run
+`dotnet test AVMTradeReporterTests --filter "FullyQualifiedName~SyncThroughput" --logger "console;verbosity=normal"`
+and compare the printed blocks/s; put the new latency into the model if it is a new round trip.
+The model's "before" figure (6.6 blocks/s) reproduces what production did (5.2-7.8), which is
+what makes its "after" figure worth reading. To measure a real catch-up, read
+`/api/coingecko/latest-block` twice a few minutes apart: blocks/s = the difference in
+`blockNumber` / seconds; the pod logs "catching up with N concurrent block tasks" when it enters
+the mode and "caught up with the chain tip" when it leaves. Not done yet, in order of expected
+gain: releasing a block's slot while it waits for its flush; a dedicated flusher task instead of
+block tasks taking turns; one `_bulk` for both indices.
+
 ## OHLC outlier guard must protect every asset with an established price, not just trusted ones
 
 `OHLCRepository.GetIntervalBuckets` has two independent guard concepts, easy

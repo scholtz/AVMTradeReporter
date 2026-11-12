@@ -384,6 +384,24 @@ namespace AVMTradeReporter.Model.Configuration
         public int MemoryCheckIntervalMs { get; set; } = 5000;
 
         /// <summary>
+        /// The indexer is "catching up" while more than this many blocks exist above the one it is about to process
+        /// (after an outage, a stall or a rewind on restart). It then uses <see cref="CatchUpMaxConcurrentTasks"/>, asks
+        /// algod for the tip only when it reached the last known one, writes the indexer document once per
+        /// <see cref="CatchUpIndexerPersistSeconds"/> and keeps using the algod that served the last block. 0 disables.
+        /// </summary>
+        public int CatchUpLagBlocks { get; set; } = 20;
+
+        /// <summary>
+        /// Concurrent block tasks while catching up. A block is mostly waiting (algod fetch, the Elasticsearch refresh its
+        /// bulk waits for), so this is far above <see cref="MaxConcurrentTasks"/>; the memory threshold still applies.
+        /// Benchmarked 2026-11 against a public archival algod: fetch throughput stops growing at about 16.
+        /// </summary>
+        public int CatchUpMaxConcurrentTasks { get; set; } = 16;
+
+        /// <summary>Seconds between two writes of the indexer document while catching up (at the tip: every block).</summary>
+        public double CatchUpIndexerPersistSeconds { get; set; } = 1;
+
+        /// <summary>
         /// Minutes a single block may stay in flight (or the fetch loop may stay silent) before <c>/health</c> turns
         /// unhealthy and the liveness probe restarts the pod; the restart resumes at the last fully stored block. A hung
         /// block task otherwise freezes latest-block for ever without a single log line (2026-11 mainnet incident). Must

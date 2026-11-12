@@ -46,6 +46,16 @@ namespace AVMTradeReporter.Services
 
         // Async processing support
         private readonly SemaphoreSlim _concurrentTasksSemaphore;
+        private readonly int _concurrentTasksCapacity;
+
+        // Catch-up state (see IndexerSyncPolicy). The tip is what the last wait-for-block answer reported.
+        private ulong _knownTip;
+        private volatile bool _catchingUp;
+        private DateTimeOffset _lastIndexerPersist = DateTimeOffset.MinValue;
+        // Index into Algods() of the node asked first. While catching up it follows the node that served the last block:
+        // the primary is usually not archival, and asking it first for every old block is a failed request plus a
+        // warning with a stack trace per block.
+        private int _preferredAlgod;
         private readonly List<Task> _runningTasks = new List<Task>();
         private readonly object _tasksLock = new object();
         private DateTime _lastMemoryCheck = DateTime.MinValue;
@@ -80,7 +90,9 @@ namespace AVMTradeReporter.Services
             _blockRepository = blockRepository;
 
             // Initialize semaphore for concurrent task management
-            _concurrentTasksSemaphore = new SemaphoreSlim(_appConfig.Value.BlockProcessing.MaxConcurrentTasks, _appConfig.Value.BlockProcessing.MaxConcurrentTasks);
+            // sized for the catch-up mode; how many of the slots may be used right now is IndexerSyncPolicy.ConcurrencyLimit
+            _concurrentTasksCapacity = IndexerSyncPolicy.ConcurrencyLimit(true, _appConfig.Value.BlockProcessing.MaxConcurrentTasks, _appConfig.Value.BlockProcessing.CatchUpMaxConcurrentTasks);
+            _concurrentTasksSemaphore = new SemaphoreSlim(_concurrentTasksCapacity, _concurrentTasksCapacity);
 
             _httpClient = HttpClientConfigurator.ConfigureHttpClient(appConfig.Value.Algod.Host, appConfig.Value.Algod.ApiKey, appConfig.Value.Algod.Header);
             _algod = new DefaultApi(_httpClient);
@@ -197,12 +209,14 @@ namespace AVMTradeReporter.Services
                     }
 
 #if !DEBUG
-                    var waited = false;
-                    foreach (var (name, api) in Algods())
+                    // While the tip seen by the last answer is still ahead, that answer covers this round too: no round trip.
+                    var waited = !IndexerSyncPolicy.MustWaitForBlock(_knownTip, Indexer.Round);
+                    foreach (var (name, api) in waited ? Enumerable.Empty<(string Name, Algorand.Algod.IDefaultApi Api)>() : Algods())
                     {
                         try
                         {
-                            await api.WaitForBlockAsync(stoppingToken, Indexer?.Round ?? throw new Exception("Rund not defined"));
+                            var status = await api.WaitForBlockAsync(stoppingToken, Indexer?.Round ?? throw new Exception("Rund not defined"));
+                            _knownTip = status?.LastRound ?? 0;
                             waited = true;
                             break;
                         }
@@ -225,6 +239,8 @@ namespace AVMTradeReporter.Services
                         continue;
                     }
 #endif
+                    UpdateCatchUpMode();
+
                     // Clean up completed tasks
                     CleanupCompletedTasks();
 
@@ -234,8 +250,9 @@ namespace AVMTradeReporter.Services
 
                     if (useAsyncProcessing)
                     {
-                        // Try to acquire semaphore without blocking
-                        if (_concurrentTasksSemaphore.CurrentCount > 0)
+                        // A free slot within the limit of the current mode (the semaphore itself is sized for catch-up)
+                        var limit = IndexerSyncPolicy.ConcurrencyLimit(_catchingUp, _appConfig.Value.BlockProcessing.MaxConcurrentTasks, _appConfig.Value.BlockProcessing.CatchUpMaxConcurrentTasks);
+                        if (_concurrentTasksCapacity - _concurrentTasksSemaphore.CurrentCount < limit)
                         {
                             // Start async processing
                             var blockTask = ProcessBlockAsyncWrapper(Indexer.Round, _processingCts.Token);
@@ -245,6 +262,14 @@ namespace AVMTradeReporter.Services
                             }
                             _logger.LogDebug("Started async processing for block {blockId}. Running tasks: {taskCount}",
                                 Indexer.Round, _runningTasks.Count);
+                        }
+                        else if (_catchingUp)
+                        {
+                            // Catching up, the loop never processes a block itself: a block with events waits for an
+                            // Elasticsearch refresh, and a loop that waits with it starts nothing meanwhile (benchmark:
+                            // 12 instead of 60+ blocks/s). It waits for a slot and offers the same round again.
+                            await WaitForFreeSlotAsync(stoppingToken);
+                            continue;
                         }
                         else
                         {
@@ -409,6 +434,18 @@ namespace AVMTradeReporter.Services
             }
         }
 
+        /// <summary>Returns once one of the running block tasks ended, however it ended (or there is none).</summary>
+        private async Task WaitForFreeSlotAsync(CancellationToken cancellationToken)
+        {
+            Task[] running;
+            lock (_tasksLock)
+            {
+                running = _runningTasks.ToArray();
+            }
+            if (running.Length == 0) return;
+            await Task.WhenAny(running).WaitAsync(cancellationToken);
+        }
+
         private void CleanupCompletedTasks()
         {
             lock (_tasksLock)
@@ -434,8 +471,31 @@ namespace AVMTradeReporter.Services
             }
             Indexer.Updated = DateTimeOffset.Now;
             RecordStoredThrough();
+            // While catching up: not one Elasticsearch write per block on the fetch loop (IndexerSyncPolicy.ShouldPersistIndexer)
+            var now = DateTimeOffset.UtcNow;
+            if (!IndexerSyncPolicy.ShouldPersistIndexer(_catchingUp, now - _lastIndexerPersist, TimeSpan.FromSeconds(_appConfig.Value.BlockProcessing.CatchUpIndexerPersistSeconds))) return;
+            _lastIndexerPersist = now;
             await _indexerRepository.StoreIndexerAsync(Indexer, cancellationToken);
 #endif
+        }
+
+        /// <summary>Enters / leaves the catch-up mode for the block about to be processed and says so once per change.</summary>
+        private void UpdateCatchUpMode()
+        {
+            if (Indexer == null) return;
+            var catchingUp = _appConfig.Value.Direction != "-" && IndexerSyncPolicy.IsCatchingUp(_knownTip, Indexer.Round, _appConfig.Value.BlockProcessing.CatchUpLagBlocks);
+            if (catchingUp == _catchingUp) return;
+            _catchingUp = catchingUp;
+            if (catchingUp)
+            {
+                _logger.LogWarning("Indexer is {lag} blocks behind the chain tip {tip}: catching up with {tasks} concurrent block tasks",
+                    _knownTip - Indexer.Round, _knownTip, IndexerSyncPolicy.ConcurrencyLimit(true, _appConfig.Value.BlockProcessing.MaxConcurrentTasks, _appConfig.Value.BlockProcessing.CatchUpMaxConcurrentTasks));
+            }
+            else
+            {
+                Volatile.Write(ref _preferredAlgod, 0); // at the tip the primary algod is asked first again
+                _logger.LogInformation("Indexer caught up with the chain tip at round {round}", Indexer.Round);
+            }
         }
 
         /// <summary>Copies the contiguous completed watermark onto the indexer document (see <see cref="Indexer.StoredThrough"/>).</summary>
@@ -541,12 +601,22 @@ namespace AVMTradeReporter.Services
         /// <summary>Loads a block from the first algod that answers (primary, then the fallbacks); null when none does.</summary>
         private async Task<CertifiedBlock?> TryFetchBlockAsync(ulong blockId, bool headerOnly)
         {
-            foreach (var (name, api) in Algods())
+            var algods = Algods().ToList();
+            var first = Volatile.Read(ref _preferredAlgod);
+            if (first < 0 || first >= algods.Count) first = 0;
+            for (var offset = 0; offset < algods.Count; offset++)
             {
+                var index = (first + offset) % algods.Count;
+                var (name, api) = algods[index];
                 try
                 {
                     var block = await api.GetBlockAsync(blockId, Format.Msgpack, headerOnly);
-                    if (block?.Block != null) return block;
+                    if (block?.Block != null)
+                    {
+                        // catching up: the node that has the old blocks is asked first from now on (reset at the tip)
+                        if (index != first && _catchingUp) Volatile.Write(ref _preferredAlgod, index);
+                        return block;
+                    }
                     _logger.LogWarning("{algod} returned no block {blockId}", name, blockId);
                 }
                 catch (Exception ex)
@@ -662,7 +732,18 @@ namespace AVMTradeReporter.Services
                 }
                 _pending.Close(blockId);
 
-                await FlushPendingAsync(cancellationToken);
+                // Most blocks hold no DEX event. Such a block is complete right now: it must not queue behind the flush
+                // lock, which is held for a whole Elasticsearch refresh (the bulk requests wait for it). Only when an
+                // earlier flush left documents behind does it trigger the retry they are waiting for.
+                if (_pending.TryCompleteEmpty(blockId, out var emptyBlockTimestamp))
+                {
+                    _blockTracker?.MarkCompleted(blockId, emptyBlockTimestamp);
+                    if (_pending.NeedsRetry) await FlushPendingAsync(cancellationToken);
+                }
+                else
+                {
+                    await FlushPendingAsync(cancellationToken, blockId);
+                }
 
                 await _blockRepository.PublishToHub(Model.Data.Block.FromAlgorandBlock(block.Block), cancellationToken);
             }
@@ -692,12 +773,14 @@ namespace AVMTradeReporter.Services
         /// settled - stored, or dropped after Elasticsearch rejected them on every attempt. While Elasticsearch cannot be
         /// reached nothing is dropped and the watermark waits.
         /// </summary>
-        private async Task FlushPendingAsync(CancellationToken cancellationToken)
+        /// <param name="onBehalfOf">The block whose task flushes (see <see cref="PendingBlockBatches.FlushAsync"/>); null for a retry of whatever is closed.</param>
+        private async Task FlushPendingAsync(CancellationToken cancellationToken, ulong? onBehalfOf = null)
         {
             var flush = await _pending.FlushAsync(
                 (trades, publish) => _tradeRepository.StoreTradesAsync(trades, cancellationToken, publish),
                 (liquidity, publish) => _liquidityRepository.StoreLiquidityUpdatesAsync(liquidity, cancellationToken, publish),
-                cancellationToken);
+                cancellationToken,
+                onBehalfOf: onBehalfOf);
             if (flush.Unreachable)
             {
                 _logger.LogWarning("Elasticsearch could not be reached; the closed block(s) stay pending and are retried with the next block");
