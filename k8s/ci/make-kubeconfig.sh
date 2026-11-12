@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Builds the kubeconfigs of the GitHub Actions deploy jobs from the per-environment deployer ServiceAccounts
 # (non-expiring, revocable tokens - see k8s/ci/github-deployer.yaml), verifies each one, and with --set-secrets stores
-# them base64 encoded as the KUBE_CONFIG secret of their environment (stage, production, production-voi).
+# them base64 encoded as the KUBE_CONFIG secret of their environment (production, production-voi). Stage is not
+# managed here: its KUBE_CONFIG is scoped to the namespace biatec-scan-testnet (created by the cluster admin).
 #
 # Run with a kubectl context that has cluster-admin rights on the cluster (to apply the RBAC):
 #   k8s/ci/make-kubeconfig.sh --set-secrets   # the usual way: nothing is left on disk
@@ -24,11 +25,10 @@ while [ $# -gt 0 ]; do
 done
 
 # Plain functions instead of associative arrays: runs on macOS' bash 3.2, too.
-ENVIRONMENTS="stage production production-voi"
+ENVIRONMENTS="production production-voi"
 # environment -> its ServiceAccount and a Deployment it must be able to patch
 env_info() {
   case "$1" in
-    stage) echo "github-deployer-stage|avm-trade-reporter-stage-app-deployment" ;;
     production) echo "github-deployer-production|avm-trade-reporter-app-deployment" ;;
     production-voi) echo "github-deployer-voi|avm-trade-reporter-voi-app-deployment" ;;
   esac
@@ -183,7 +183,7 @@ EOF
   echo "Denied on all $denied checks against the other environments' objects and broad / shared-volume access - separated."
 done
 
-# only after ALL three verified: a verification failure above leaves every environment's secret as it was. A failing
+# only after BOTH verified: a verification failure above leaves every environment's secret as it was. A failing
 # `gh secret set` (permissions, network) is reported with which environments already got their new secret - re-running
 # the script is safe: it re-verifies and sets all three again.
 if [ "$SET_SECRETS" -eq 1 ]; then
@@ -198,7 +198,7 @@ if [ "$SET_SECRETS" -eq 1 ]; then
     done_envs="${done_envs:+$done_envs }$env"
     echo "Set KUBE_CONFIG of environment $env"
   done
-  echo "Done (the kubeconfigs were removed). Deploy the current master again: gh workflow run deploy.yml --ref master --repo $REPO"
+  echo "Done (the kubeconfigs were removed). They are used by the next production / Voi promote (promote-production.yml)."
 else
   echo "Verified kubeconfigs in $OUT_DIR - they contain credentials: store them (base64) as KUBE_CONFIG of their"
   echo "environment and delete the directory, or simply run: $0 --set-secrets"

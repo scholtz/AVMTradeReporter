@@ -1,14 +1,14 @@
 # Stage environment for AVMTradeReporter (testnet) - deployed automatically by
-# .github/workflows/deploy.yml on every push to master. Lives in the same "biatec-scan" namespace as
-# production (k8s/main/deployment-api.yaml) but under entirely distinct resource names/hosts/ConfigMap/
-# Secret, so it can never collide with or be confused for the production Deployment/Service/Ingress.
+# .github/workflows/deploy.yml on every push to master. Lives in its own namespace "biatec-scan-testnet" -
+# the stage deployer's credential reaches only that namespace and never touches production's "biatec-scan"
+# (k8s/main/deployment-api.yaml). Resource names stay distinct from production's anyway.
 # See docs/CICD_GITHUB_ACTIONS.md for the full pipeline and docs/STAGE_ENVIRONMENT.md for what is (and
 # isn't) isolated between stage and production.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: avm-trade-reporter-stage-app-deployment
-  namespace: biatec-scan
+  namespace: biatec-scan-testnet
 spec:
   selector:
     matchLabels:
@@ -77,8 +77,8 @@ spec:
             - name: avm-trade-reporter-stage-main-conf
               mountPath: /app/appsettings.json
               subPath: appsettings.json
-            # Same PVC (and thus the same on-disk icon cache) as production's API deployments -
-            # see k8s/main/pv-images.yaml for why this is intentionally shared across environments.
+            # Stage's own PVC on the same host directory as production's (one shared on-disk icon cache) -
+            # see k8s/stage/pv-images-stage.yaml and k8s/main/pv-images.yaml.
             - name: avm-trade-reporter-images
               mountPath: /app/images
       volumes:
@@ -87,13 +87,13 @@ spec:
             name: avm-trade-reporter-stage-main-conf
         - name: avm-trade-reporter-images
           persistentVolumeClaim:
-            claimName: avm-trade-reporter-images-pvc
+            claimName: avm-trade-reporter-stage-images-pvc
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: avm-trade-reporter-stage-service
-  namespace: biatec-scan
+  namespace: biatec-scan-testnet
 spec:
   type: ClusterIP
   selector:
@@ -109,7 +109,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: avm-trade-reporter-stage-ingress-main2
-  namespace: biatec-scan
+  namespace: biatec-scan-testnet
   annotations:
     nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"

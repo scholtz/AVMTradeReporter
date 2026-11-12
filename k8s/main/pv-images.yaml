@@ -1,7 +1,8 @@
 # Shared storage for cached ASA icon images, mounted (ReadWriteMany) by every API deployment
 # that serves /api/asset/image/{assetId} - production's avm-trade-reporter-app-deployment and
-# avm-trade-reporter2-app-deployment (k8s/main/deployment-api.yaml, deployment2-api.yaml) *and*
-# stage's avm-trade-reporter-stage-app-deployment (k8s/stage/deployment-api-stage.yaml).
+# avm-trade-reporter2-app-deployment (k8s/main/deployment-api.yaml, deployment2-api.yaml) and Voi's. Stage
+# (namespace biatec-scan-testnet) cannot mount this claim of another namespace: it has its own PV + PVC on the
+# SAME host directory (k8s/stage/pv-images-stage.yaml), so all environments still share one icon cache.
 #
 # Sharing this volume across environments is what lets a testnet asset's icon request reuse an
 # icon already downloaded for its mainnet counterpart with the same unit name/ticker, instead of

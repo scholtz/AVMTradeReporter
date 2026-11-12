@@ -14,8 +14,9 @@ Repo: [`scholtz/AVMTradeReporter`](https://github.com/scholtz/AVMTradeReporter)
 ## Where it lives
 
 One Docker image (`scholtz2/avm-trade-reporter`) runs three independent
-deployments in the same Kubernetes namespace (`biatec-scan`), kept apart
-purely by distinct resource names/ConfigMaps/Secrets — network specifics
+deployments: production and Voi in the Kubernetes namespace `biatec-scan`,
+stage in its own namespace `biatec-scan-testnet` (since 2026-11-12), kept
+apart by namespace / distinct resource names/ConfigMaps/Secrets — network specifics
 (Algod host, gossip network, USD reference asset, Redis key prefix) all come
 from the per-environment ConfigMap/Secret, not the image.
 

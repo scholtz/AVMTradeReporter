@@ -34,7 +34,7 @@ done
 to_epoch() { date -d "$1" +%s 2>/dev/null || date -j -f "%b %d %T %Y %Z" "$1" +%s 2>/dev/null || true; }
 fmt_epoch() { date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ; }
 
-REMEDY="Regenerate the deployer kubeconfig with k8s/ci/make-kubeconfig.sh (non-expiring ServiceAccount token) and update the KUBE_CONFIG secret of the stage, production and production-voi environments - see docs/CICD_GITHUB_ACTIONS.md, 'Deployer credentials'."
+REMEDY="Regenerate this environment's deployer kubeconfig and update its KUBE_CONFIG secret - stage: the cluster admin's token for the namespace biatec-scan-testnet; production / production-voi: k8s/ci/make-kubeconfig.sh --set-secrets. See docs/CICD_GITHUB_ACTIONS.md, 'Deployer credentials'."
 
 # --- what kind of credential is it, and when does it expire (from the kubeconfig itself, no cluster call) ---
 view_err=$(mktemp)

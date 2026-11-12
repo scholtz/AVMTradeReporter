@@ -66,6 +66,8 @@ normalized (lowercased, alphanumeric/`-`/`_` only) UnitName.
 - This is a heuristic, not a verified mapping - a testnet asset with `UnitName = "USDC"` gets the
   real USDC icon even if it isn't actually a Circle-issued or otherwise "official" test token.
   Acceptable for a low-stakes icon, not for anything security-relevant.
+- Stage (namespace `biatec-scan-testnet`) cannot mount production's PVC; it has its own PV + PVC
+  (`k8s/stage/pv-images-stage.yaml`) on the same host directory, so the cache is still one directory.
 - The shared PVC is backed by a `hostPath` volume
   (`/mnt/nvme1/biatec-scan-shared-drive/avm-trade-reporter-images` on the underlying node) - see
   the caveats in `k8s/main/pv-images.yaml` about hostPath only providing real sharing when every

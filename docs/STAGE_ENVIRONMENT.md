@@ -11,7 +11,7 @@ it's also running in production - both environments get the exact same image on 
 |---|---|---|
 | Network (Algod) | Algorand mainnet (`algorand-algod-public.de-4.biatec.io`) | Algorand testnet (`testnet-api.4160.nodely.dev`) |
 | Network (gossip relay discovery) | `AppConfiguration.GossipDiscovery.Enabled = true`, `Network = AlgorandMainNet` | `AppConfiguration.GossipDiscovery.Enabled = true`, `Network = AlgorandTestNet` (see note below) |
-| Namespace | `biatec-scan` | `biatec-scan` (same namespace, distinct resource names) |
+| Namespace | `biatec-scan` | `biatec-scan-testnet` (own namespace since 2026-11-12; resource names stay distinct) |
 | Deployments | `avm-trade-reporter-app-deployment`, `avm-trade-reporter2-app-deployment`, `avmtradereporter-subscriber` | `avm-trade-reporter-stage-app-deployment`, `avmtradereporter-subscriber-stage` |
 | ConfigMap | `avm-trade-reporter-main-conf` | `avm-trade-reporter-stage-main-conf` |
 | Secret | `avm-trade-reporter-secret` / `avm-trade-reporter2-secret` / `avm-trade-reporter-subscriber-secret` (managed by hand in-cluster) | `avm-trade-reporter-stage-secret` / `avm-trade-reporter-subscriber-stage-secret` (re-created by CI from the `stage` Environment's `ELASTIC_*`/`REDIS_*` GitHub secrets on every deploy) |
@@ -19,8 +19,11 @@ it's also running in production - both environments get the exact same image on 
 | Hostnames | `algorand-trades.de-4.biatec.io`, `api.algorand.scan.biatec.io` | `stage-algorand-trades.de-4.biatec.io`, `testnet.scan.biatec.io` |
 | USD reference asset | `AppConfiguration.UsdReferenceAssetId = 31566704` (Algorand mainnet USDC) | `AppConfiguration.UsdReferenceAssetId = 10458941` (Algorand testnet USDC) - see "USD reference asset per network" below |
 
-Because the two environments share the `biatec-scan` namespace, distinct resource names are what keep
-them from colliding - there's no separate stage namespace to fall back on.
+Stage has its own namespace, `biatec-scan-testnet`, and its deploy credential reaches only that namespace: a stage
+deploy never changes any object in production's `biatec-scan` (its preflight refuses a credential that could), and
+stage pods cannot mount production's Secrets. The one thing still shared is the on-disk icon cache - stage can write
+production's cached icons, as it always could - stage's own PV/PVC (`k8s/stage/pv-images-stage.yaml`) points at
+the same host directory as production's (see `docs/ICON_SHARING.md`).
 
 > **Gossip relay discovery bug fixed 2026-08-05:** `GossipBackgroundService` discovers gossip relays
 > via DNS SRV whenever no static `AppConfiguration.GossipWebsocketClientConfigurations` entry is set
