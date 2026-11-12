@@ -16,9 +16,11 @@ did **5.2 blocks/s** (about 6 hours). The cause was not CPU and not algod:
   `indexers` document write): ~30 ms, i.e. a hard cap of ~30 blocks/s even with nothing else.
 
 The same pipeline now does **~55 blocks/s** in the benchmark (8x), and a Release build run
-against the public testnet algod did 58-69 blocks/s. Through a *public* algod it is limited to
-that algod's `MaxRequestsPerSecond` (25 by default: a day of Algorand blocks in 21 minutes); our
-own nodes are not limited, see rule 5. The rules below are covered by `SyncThroughputBenchmarkTests`,
+against the public testnet algod did 58-69 blocks/s. **A catch-up fetches its blocks from the
+network's archival relay nodes over the gossip protocol, not from an algod API** (rule 6): 128
+blocks/s from the 13 mainnet archival relays, measured. An algod is the source at the chain tip
+and the fallback; a *public* algod is limited to its `MaxRequestsPerSecond` (25 by default), our
+own nodes are not, see rule 5. The rules below are covered by `SyncThroughputBenchmarkTests`,
 `PendingBlockBatchesFastPathTests` and `IndexerSyncPolicyTests` (all in the `ci.yml` filter - a new
 test class outside `Services.CoinGecko` / `Performance` must be added to that filter or it never
 runs on a PR). The benchmark drives the real `PendingBlockBatches` and `IndexerSyncPolicy` with a
@@ -44,7 +46,7 @@ runs on a PR). The benchmark drives the real `PendingBlockBatches` and `IndexerS
    wait. At the tip nothing changed: every block waits for algod, the document is written with
    every block, `MaxConcurrentTasks` slots.
 5. **Concurrency follows the lag.** More than `BlockProcessing.CatchUpLagBlocks` (20) behind:
-   `CatchUpMaxConcurrentTasks` (16) slots; a block task is almost only waiting. Fetching 200
+   `CatchUpMaxConcurrentTasks` (32) slots; a block task is almost only waiting. Fetching 200
    blocks from our own mainnet algod, `algorand-algod-public.de-4.biatec.io`, from outside the
    cluster (2026-11-12): 36 / 50 / 48 / 40 blocks/s at 4 / 8 / 16 / 32 parallel requests, 75 ms per
    block, no error - beyond 16 there is nothing to gain.
@@ -61,10 +63,32 @@ runs on a PR). The benchmark drives the real `PendingBlockBatches` and `IndexerS
    its primary at Nodely.
    **An algod can only help a catch-up as far back as it keeps blocks.** `algorand-algod-public`
    answers 404 ("failed to retrieve information from the ledger") for blocks more than about 1 000
-   rounds (45 minutes) behind the tip. A longer backlog is served by whichever configured algod
-   (`Algod2` / `Algod3`) is archival; if none is, those blocks go down the lost-block path and are
-   given up. Check this before relying on a catch-up: `curl <algod>/v2/blocks/<tip - 20000>`.
-6. **Ask the algod that has the block - our own node whenever it has it.** The algods are asked
+   rounds (45 minutes) behind the tip. A longer backlog is served by the archival relays (rule
+   6); with `ArchivalRelays.Enabled = false` and no archival `Algod2` / `Algod3` those blocks go
+   down the lost-block path and are given up.
+6. **A backlog is fetched from the archival relays, over the gossip protocol**
+   (`ArchivalRelayBlockSource`, `AppConfiguration.ArchivalRelays`, on by default). While catching
+   up `TryFetchBlockAsync` asks the relays first and an algod only when they fail; at the tip it
+   is the other way round (own algod first, relays as the last resort). Why not an algod API:
+   our own node keeps ~1 000 rounds, and a public algod service is rate limited and has a quota
+   - on 2026-11-12 block fetches from the cluster failed for hours while production was 60 000
+   blocks behind. Archival relays keep the whole chain and exist to serve blocks to nodes that
+   sync (`GET /v1/{genesis}/block/{round in base 36}`, the SDK's `GossipHttpClient`); they are
+   discovered through the `_archive._tcp` DNS SRV record of `GossipDiscovery.Network` (mainnet
+   13, testnet 4, Voi 2). Rules for that source:
+   - **all of them are used**: a block goes to the relay with the shortest expected wait
+     (measured latency x requests in flight), at most `MaxInFlightPerRelay` (4) per relay.
+     Measured against mainnet, 2 000 old blocks: 128 blocks/s at 32 parallel fetches (round-robin:
+     110; 8 per relay: 92 - leaning on the fast relays slows them down), 138 at 64, no failure.
+     Hence `CatchUpMaxConcurrentTasks` = 32;
+   - a relay that fails rests (5 s doubling to 5 min) and the block is asked from the next one;
+     "I do not have that block" (null) is an answer, not a failure;
+   - **a block of another round or another genesis id is never accepted**, and a relay network
+     whose genesis id differs from `AppConfiguration.GenesisId` disables the source (a wrong
+     `GossipDiscovery.Network` must not feed another chain's blocks into the index);
+   - the first blocks of a catch-up wait for the discovery instead of reporting "no relay".
+   Do not add a public algod service as an archival fallback again; mainnet has no `Algod2`.
+   **Among the algods, ask the one that has the block - our own node whenever it has it.** The algods are asked
    in their configured order, own node first. A node that does not keep round R (HTTP 404 "failed
    to retrieve information from the ledger" - only that; a timeout or a 5xx says nothing about
    the other rounds) while a later one returned it is skipped up to R + 200; then ONE block task
@@ -74,7 +98,7 @@ runs on a PR). The benchmark drives the real `PendingBlockBatches` and `IndexerS
    with a stack trace per block.
    `Algod2` / `Algod3` have **no default host**: they used to default to Nodely *mainnet* on every
    network (an implicit dependency nobody had configured, and the wrong chain for testnet / Voi).
-   Mainnet's archival fallback is now explicit in `k8s/main/conf-api/appsettings.json`.
+   Mainnet configures none: its old blocks come from the archival relays.
 7. **Speed must not widen a failure.** The skipped wait-for-block call was also what paused the
    loop during an algod outage, and a block no algod returns is given up after 30 minutes: while
    catching up, nothing new is started as long as a block is in `RecoverLostBlockAsync`

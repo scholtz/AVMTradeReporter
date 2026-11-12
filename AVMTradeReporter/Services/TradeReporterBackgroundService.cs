@@ -35,6 +35,7 @@ namespace AVMTradeReporter.Services
         private readonly BlockRepository _blockRepository;
         private readonly IIndexedBlockTracker? _blockTracker;
         private readonly IndexerStallMonitor? _stallMonitor;
+        private readonly ArchivalRelayBlockSource? _relayBlocks;
 
         // Not-yet-stored documents, per block: a block counts as indexed (latest-block watermark) only once ITS documents
         // are acknowledged by Elasticsearch - see PendingBlockBatches.
@@ -77,11 +78,13 @@ namespace AVMTradeReporter.Services
             TransactionProcessor transactionProcessor,
             BlockRepository blockRepository,
             IIndexedBlockTracker? blockTracker = null,
-            IndexerStallMonitor? stallMonitor = null
+            IndexerStallMonitor? stallMonitor = null,
+            ArchivalRelayBlockSource? relayBlocks = null
             )
         {
             _blockTracker = blockTracker;
             _stallMonitor = stallMonitor;
+            _relayBlocks = relayBlocks;
             _logger = logger;
             _appConfig = appConfig;
             _indexerRepository = indexerRepository;
@@ -627,6 +630,14 @@ namespace AVMTradeReporter.Services
         /// <summary>Loads a block from the first algod that answers (primary, then the fallbacks); null when none does.</summary>
         private async Task<CertifiedBlock?> TryFetchBlockAsync(ulong blockId, bool headerOnly)
         {
+            // Syncing a backlog: the blocks come from the archival relay nodes over the gossip protocol, which is what they
+            // are there for - not from an algod API (our own node does not keep old blocks, a public one is rate limited).
+            if (_catchingUp && !headerOnly)
+            {
+                var relayed = await TryFetchBlockFromRelaysAsync(blockId);
+                if (relayed != null) return relayed;
+            }
+
             var algods = Algods().ToList();
             List<int>? notKept = null;
             foreach (var index in _algodAvailability.Order(blockId))
@@ -654,7 +665,26 @@ namespace AVMTradeReporter.Services
                     if (IsBlockNotKept(ex)) (notKept ??= new List<int>()).Add(index);
                 }
             }
-            return null;
+            // No algod has the block: at the tip (or for a header) the archival relays are the last resort.
+            return _catchingUp && !headerOnly ? null : await TryFetchBlockFromRelaysAsync(blockId);
+        }
+
+        private async Task<CertifiedBlock?> TryFetchBlockFromRelaysAsync(ulong blockId)
+        {
+            if (_relayBlocks is not { Enabled: true }) return null;
+            try
+            {
+                return await _relayBlocks.TryFetchBlockAsync(blockId, _processingCts.Token);
+            }
+            catch (OperationCanceledException) when (_processingCts.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "The archival relays failed to return block {blockId}", blockId);
+                return null;
+            }
         }
 
         /// <summary>
