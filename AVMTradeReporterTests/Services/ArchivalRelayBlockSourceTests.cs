@@ -116,17 +116,87 @@ namespace AVMTradeReporterTests.Services
         }
 
         [Test]
-        public async Task RelayWithoutTheBlock_IsNotPunished_TheNextOneIsAsked()
+        public async Task BlockThatNoRelayHasYet_IsAnAnswer_NotAFailure()
         {
+            // the round does not exist yet (404 from every relay): nobody is punished, the caller simply gets no block
             var asked = new List<string>();
             var source = Source((host, round, _) =>
             {
                 lock (asked) asked.Add(host);
-                return Task.FromResult(host == "http://b" ? Block(round) : null);
+                return Task.FromResult<CertifiedBlock?>(null);
             }, hosts: new[] { "http://a", "http://b" });
 
-            Assert.That(await source.TryFetchBlockAsync(1000, default), Is.Not.Null);
-            Assert.That(source.Snapshot().Single(r => r.Host == "http://a").Resting, Is.False, "\"I do not have it\" is an answer, not a failure");
+            Assert.That(await source.TryFetchBlockAsync(1000, default), Is.Null);
+            Assert.That(asked, Is.EquivalentTo(new[] { "http://a", "http://b" }), "the next relay is asked");
+            Assert.That(source.Snapshot().Select(r => r.Resting), Has.All.False, "\"I do not have it\" is an answer");
+        }
+
+        [Test]
+        public async Task RelayThatLacksABlockAnotherRelayHas_IsNotAskedFirstForTheNextBlocks()
+        {
+            // listed as archival, but it is not (or it is far behind): every old block would lose an attempt on it
+            var asked = new List<string>();
+            var source = Source((host, round, _) =>
+            {
+                lock (asked) asked.Add(host);
+                return Task.FromResult(host == "http://a" ? null : Block(round));
+            }, hosts: new[] { "http://a", "http://b" });
+
+            for (ulong round = 1000; round < 1030; round++) Assert.That(await source.TryFetchBlockAsync(round, default), Is.Not.Null);
+            Assert.That(asked.Count(h => h == "http://a"), Is.LessThanOrEqualTo(1));
+        }
+
+        [Test]
+        public async Task BusyRelay_RestsForAsLongAsItAsks()
+        {
+            var time = new FakeTime();
+            var asked = new List<string>();
+            var source = Source((host, round, _) =>
+            {
+                lock (asked) asked.Add(host);
+                if (host == "http://a") throw new RelayBusyException(System.Net.HttpStatusCode.ServiceUnavailable, TimeSpan.FromSeconds(60));
+                return Task.FromResult<CertifiedBlock?>(Block(round));
+            }, hosts: new[] { "http://a", "http://b" }, config: new ArchivalRelayConfiguration { MaxInFlightPerRelay = 1 }, time: time);
+
+            // "a" is unmeasured and "b" is instant, so "a" is only asked while "b" is busy: ask two blocks at once
+            await Task.WhenAll(source.TryFetchBlockAsync(1000, default), source.TryFetchBlockAsync(1001, default));
+            Assert.That(source.Snapshot().Single(r => r.Host == "http://a").Resting || !asked.Contains("http://a"), Is.True);
+
+            time.Advance(TimeSpan.FromSeconds(30));
+            Assert.That(source.Snapshot().Single(r => r.Host == "http://a").Resting, Is.EqualTo(asked.Contains("http://a")), "still resting 30 s into the 60 s it asked for");
+            time.Advance(TimeSpan.FromSeconds(31));
+            Assert.That(source.Snapshot().Single(r => r.Host == "http://a").Resting, Is.False);
+        }
+
+        [Test]
+        public async Task HungRelay_IsAbandonedAfterTheTimeout_AndItsRequestIsCancelled()
+        {
+            var cancelled = false;
+            var source = Source(async (host, round, token) =>
+            {
+                if (host != "http://a") return Block(round);
+                try { await Task.Delay(Timeout.Infinite, token); }
+                catch (OperationCanceledException) { cancelled = true; throw; }
+                return null;
+            }, hosts: new[] { "http://a" }, config: new ArchivalRelayConfiguration { RequestTimeoutSeconds = 1 });
+
+            Assert.That(await source.TryFetchBlockAsync(1000, default), Is.Null, "the caller falls back to algod");
+            Assert.That(() => Volatile.Read(ref cancelled), Is.True.After(2000, 10), "the request itself is aborted, not only abandoned");
+            Assert.That(source.Snapshot().Single().Resting, Is.True);
+        }
+
+        [Test]
+        public async Task EveryRelayBusy_FallsBackAfterTheWait_InsteadOfQueueingForEver()
+        {
+            var release = new TaskCompletionSource();
+            var source = Source(async (host, round, _) => { await release.Task; return Block(round); },
+                hosts: new[] { "http://a" }, config: new ArchivalRelayConfiguration { MaxInFlightPerRelay = 1, RequestTimeoutSeconds = 1 });
+
+            var first = source.TryFetchBlockAsync(1000, default);
+            var second = await source.TryFetchBlockAsync(1001, default);
+            Assert.That(second, Is.Null, "no free relay within the wait: algod is asked");
+            release.SetResult();
+            await first;
         }
 
         [Test]

@@ -388,6 +388,13 @@ namespace AVMTradeReporter.Model.Configuration
         /// </summary>
         public int MaxInFlightPerRelay { get; set; } = 4;
 
+        /// <summary>
+        /// While catching up, a block is asked from the relays first only when it is more than this many rounds behind
+        /// the tip; nearer blocks go to the algods first (an own node keeps about 1 000 rounds), the relays being their
+        /// last resort. 0 = every block of a catch-up comes from the relays.
+        /// </summary>
+        public int FirstBeyondLagBlocks { get; set; } = 500;
+
         /// <summary>Relays asked for one block before the algods are.</summary>
         public int MaxAttempts { get; set; } = 3;
 
@@ -431,8 +438,8 @@ namespace AVMTradeReporter.Model.Configuration
         /// <summary>
         /// Concurrent block tasks while catching up. A block is mostly waiting (the fetch, the Elasticsearch refresh its
         /// bulk waits for), so this is far above <see cref="MaxConcurrentTasks"/>; the memory threshold still applies.
-        /// Benchmarked 2026-11 against the 13 mainnet archival relays: 35 / 57 / 78 / 83 blocks/s at 8 / 16 / 32 / 64
-        /// parallel fetches, no failure - beyond 32 there is little to gain.
+        /// Benchmarked 2026-11 through <c>ArchivalRelayBlockSource</c> against the 13 mainnet archival relays, 2 000
+        /// old blocks: 128 blocks/s at 32 parallel fetches, 138 at 64, no failure - beyond 32 there is little to gain.
         /// </summary>
         public int CatchUpMaxConcurrentTasks { get; set; } = 32;
 

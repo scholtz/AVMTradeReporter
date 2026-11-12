@@ -68,8 +68,11 @@ runs on a PR). The benchmark drives the real `PendingBlockBatches` and `IndexerS
    down the lost-block path and are given up.
 6. **A backlog is fetched from the archival relays, over the gossip protocol**
    (`ArchivalRelayBlockSource`, `AppConfiguration.ArchivalRelays`, on by default). While catching
-   up `TryFetchBlockAsync` asks the relays first and an algod only when they fail; at the tip it
-   is the other way round (own algod first, relays as the last resort). Why not an algod API:
+   up `TryFetchBlockAsync` asks the relays first for every block more than
+   `ArchivalRelays.FirstBeyondLagBlocks` (500; stage: 0, its algod is a public service) behind
+   the tip, and an algod only when they fail; nearer blocks and the tip go the other way round
+   (own algod first, relays as the last resort). When no algod answers the tip wait at all, the
+   relays keep the indexer going (they answer 404 for a round that does not exist yet). Why not an algod API:
    our own node keeps ~1 000 rounds, and a public algod service is rate limited and has a quota
    - on 2026-11-12 block fetches from the cluster failed for hours while production was 60 000
    blocks behind. Archival relays keep the whole chain and exist to serve blocks to nodes that
@@ -81,8 +84,14 @@ runs on a PR). The benchmark drives the real `PendingBlockBatches` and `IndexerS
      Measured against mainnet, 2 000 old blocks: 128 blocks/s at 32 parallel fetches (round-robin:
      110; 8 per relay: 92 - leaning on the fast relays slows them down), 138 at 64, no failure.
      Hence `CatchUpMaxConcurrentTasks` = 32;
-   - a relay that fails rests (5 s doubling to 5 min) and the block is asked from the next one;
-     "I do not have that block" (null) is an answer, not a failure;
+   - a relay that fails rests (5 s doubling to 5 min; a 429 / 503 for as long as its Retry-After
+     asks) and the block is asked from the next one. A 404 is an answer, not a failure - but a
+     relay that lacks a block another relay has rests too. Requests carry the cancellation token
+     and a 15 s timeout (own `HttpClient`, not the SDK's `GossipHttpClient`, which has neither);
+   - when every relay is at its limit a block waits for a slot at most as long as a request may
+     take, then falls back to algod (Voi has 2 relays = 8 slots for 32 block tasks);
+   - **known limit**: a relay's block is trusted like an algod answer - round and genesis id are
+     checked, the certificate and the hash chain are not, and the transport is plain HTTP;
    - **a block of another round or another genesis id is never accepted**, and a relay network
      whose genesis id differs from `AppConfiguration.GenesisId` disables the source (a wrong
      `GossipDiscovery.Network` must not feed another chain's blocks into the index);

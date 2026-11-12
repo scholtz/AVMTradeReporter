@@ -2,9 +2,21 @@ using Algorand.Algod.Model;
 using Algorand.Gossip;
 using AVMTradeReporter.Model.Configuration;
 using Microsoft.Extensions.Options;
+using System.Net;
 
 namespace AVMTradeReporter.Services
 {
+    /// <summary>A relay that asks to be left alone for a while (HTTP 429 / 503, possibly with Retry-After).</summary>
+    public sealed class RelayBusyException : Exception
+    {
+        public TimeSpan? RetryAfter { get; }
+
+        public RelayBusyException(HttpStatusCode status, TimeSpan? retryAfter) : base($"the relay answered {(int)status}")
+        {
+            RetryAfter = retryAfter;
+        }
+    }
+
     /// <summary>
     /// Fetches blocks from the network's archival relay nodes over the gossip (node to node) protocol - the same
     /// <c>/v1/{genesis}/block/{round}</c> endpoint a node uses to catch up - instead of an algod REST API.
@@ -19,12 +31,20 @@ namespace AVMTradeReporter.Services
     /// Every relay is used: a block goes to the relay with the shortest expected wait (its measured latency times the
     /// requests it already has in flight), so fast relays get more and no relay gets more than
     /// <see cref="ArchivalRelayConfiguration.MaxInFlightPerRelay"/> at once. A relay that fails rests for a growing time
-    /// and the block is asked from the next one. A block of another chain, or of another round, is never accepted.
+    /// (one that answers 429 / 503 for as long as it asks) and the block is asked from the next one. A block of another
+    /// chain, or of another round, is never accepted.
+    /// </para>
+    /// <para>
+    /// Known limit: a block is trusted as far as the relay is - like an algod answer. The round and the genesis id are
+    /// checked; the block certificate and the hash chain are not verified, and the protocol is plain HTTP.
     /// </para>
     /// </remarks>
     public sealed class ArchivalRelayBlockSource
     {
-        /// <summary>Fetches one block from one relay; null when the relay does not have it.</summary>
+        /// <summary>
+        /// Fetches one block from one relay; null when the relay does not have it. Throws <see cref="RelayBusyException"/>
+        /// when the relay asks for a pause and anything else when it failed.
+        /// </summary>
         public delegate Task<CertifiedBlock?> RelayFetch(string host, ulong round, CancellationToken cancellationToken);
 
         /// <summary>The archival relays of the network and the genesis id they serve.</summary>
@@ -58,7 +78,7 @@ namespace AVMTradeReporter.Services
         private List<Relay> _relays = new();
         private DateTimeOffset _discoveredAt = DateTimeOffset.MinValue;
         private DateTimeOffset _nextDiscoveryAt = DateTimeOffset.MinValue;
-        private bool _wrongChain;
+        private volatile bool _wrongChain;
 
         public ArchivalRelayBlockSource(IOptions<AppConfiguration> options, ILogger<ArchivalRelayBlockSource> logger)
             : this(options.Value.ArchivalRelays, options.Value.GenesisId, logger, null, null, DnsDiscovery(options.Value))
@@ -78,7 +98,7 @@ namespace AVMTradeReporter.Services
             _logger = logger;
             _time = timeProvider ?? TimeProvider.System;
             _discover = discover;
-            _fetch = fetch ?? new GossipFetcher(expectedGenesisId).FetchAsync;
+            _fetch = fetch ?? new HttpRelayFetcher(expectedGenesisId).FetchAsync;
         }
 
         public bool Enabled => _config.Enabled && !_wrongChain;
@@ -100,43 +120,59 @@ namespace AVMTradeReporter.Services
             await EnsureDiscoveredAsync(cancellationToken);
 
             var tried = new HashSet<string>(StringComparer.Ordinal);
+            List<Relay>? withoutTheBlock = null;
             for (var attempt = 0; attempt < Math.Max(1, _config.MaxAttempts); attempt++)
             {
                 var relay = await AcquireRelayAsync(tried, cancellationToken);
-                if (relay == null) return null; // no relay left that is not resting or already tried
+                if (relay == null) return null; // no relay left that is free, not resting and not tried yet
                 tried.Add(relay.Host);
 
                 var started = _time.GetUtcNow();
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeout.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, _config.RequestTimeoutSeconds)));
                 try
                 {
-                    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                    timeout.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, _config.RequestTimeoutSeconds)));
+                    // the fetch gets the token (the request itself is aborted on a timeout or a shutdown); WaitAsync is the
+                    // guard for a fetch that ignores it
                     var block = await _fetch(relay.Host, round, timeout.Token).WaitAsync(timeout.Token);
                     if (block?.Block == null)
                     {
-                        // the relay does not have the block (not there yet, or not as archival as advertised): not a fault
-                        Release(relay, _time.GetUtcNow() - started, failed: false, served: false);
+                        // "I do not have it": an answer, not a fault - unless another relay turns out to have the block
+                        Release(relay, started, served: false, rest: null);
+                        (withoutTheBlock ??= new List<Relay>()).Add(relay);
                         continue;
                     }
                     if (block.Block.Round != round || !string.Equals(block.Block.GenesisId, _expectedGenesisId, StringComparison.Ordinal))
                     {
                         _logger.LogError("Archival relay {relay} answered block {round} with round {actualRound} of {genesis} (expected {expectedGenesis}) - rejected", relay.Host, round, block.Block.Round, block.Block.GenesisId, _expectedGenesisId);
-                        Release(relay, _time.GetUtcNow() - started, failed: true, served: false);
+                        Release(relay, started, served: false, rest: LongestRest);
                         continue;
                     }
-                    Release(relay, _time.GetUtcNow() - started, failed: false, served: true);
+                    Release(relay, started, served: true, rest: null);
+                    if (withoutTheBlock != null)
+                    {
+                        // The block exists, so a relay without it is not archival (or far behind): asking it first for every
+                        // old block would cost each of them an attempt.
+                        foreach (var behind in withoutTheBlock) Rest(behind, LongestRest);
+                    }
                     return block;
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
-                    Release(relay, _time.GetUtcNow() - started, failed: false, served: false);
+                    Release(relay, started, served: false, rest: null);
                     throw;
+                }
+                catch (RelayBusyException busy)
+                {
+                    var rest = busy.RetryAfter is { } asked && asked > FirstRest ? (asked < LongestRest ? asked : LongestRest) : FirstRest;
+                    _logger.LogWarning("Archival relay {relay} is busy ({error}); resting it for {seconds} s", relay.Host, busy.Message, rest.TotalSeconds);
+                    Release(relay, started, served: false, rest: rest);
                 }
                 catch (Exception ex)
                 {
                     // a warning without the stack trace: a resting relay is routine, the next one is asked
                     _logger.LogWarning("Archival relay {relay} failed to return block {round}: {error}", relay.Host, round, ex.GetType().Name + ": " + ex.Message);
-                    Release(relay, _time.GetUtcNow() - started, failed: true, served: false);
+                    Release(relay, started, served: false, rest: NextRest(relay));
                 }
             }
             return null;
@@ -144,10 +180,12 @@ namespace AVMTradeReporter.Services
 
         /// <summary>
         /// The usable relay with the shortest expected wait. When every usable relay is at its in-flight limit it waits
-        /// for one to finish; null when there is no usable relay at all.
+        /// for one to finish, but not longer than a request may take: then the caller falls back to algod. Null when
+        /// there is no usable relay.
         /// </summary>
         private async Task<Relay?> AcquireRelayAsync(HashSet<string> tried, CancellationToken cancellationToken)
         {
+            var giveUpAt = _time.GetUtcNow() + TimeSpan.FromSeconds(Math.Max(1, _config.RequestTimeoutSeconds));
             while (true)
             {
                 var now = _time.GetUtcNow();
@@ -177,28 +215,46 @@ namespace AVMTradeReporter.Services
                         return best;
                     }
                 }
-                if (!anyBusy) return null;
-                await Task.Delay(TimeSpan.FromMilliseconds(5), _time, cancellationToken);
+                if (!anyBusy || now >= giveUpAt) return null;
+                await Task.Delay(TimeSpan.FromMilliseconds(5), cancellationToken);
             }
         }
 
-        private void Release(Relay relay, TimeSpan elapsed, bool failed, bool served)
+        private void Release(Relay relay, DateTimeOffset started, bool served, TimeSpan? rest)
         {
+            var now = _time.GetUtcNow();
             lock (_lock)
             {
                 relay.InFlight--;
-                if (failed)
+                if (rest is { } pause)
                 {
                     relay.Failed++;
                     relay.ConsecutiveFailures++;
-                    var rest = TimeSpan.FromTicks(Math.Min(LongestRest.Ticks, FirstRest.Ticks << Math.Min(relay.ConsecutiveFailures - 1, 10)));
-                    relay.RestUntil = _time.GetUtcNow() + rest;
+                    if (now + pause > relay.RestUntil) relay.RestUntil = now + pause;
                     return;
                 }
                 if (!served) return;
                 relay.Served++;
                 relay.ConsecutiveFailures = 0;
-                relay.LatencyMs = relay.LatencyMs * 0.8 + elapsed.TotalMilliseconds * 0.2;
+                relay.LatencyMs = relay.LatencyMs * 0.8 + (now - started).TotalMilliseconds * 0.2;
+            }
+        }
+
+        private void Rest(Relay relay, TimeSpan pause)
+        {
+            var until = _time.GetUtcNow() + pause;
+            lock (_lock)
+            {
+                if (until > relay.RestUntil) relay.RestUntil = until;
+            }
+        }
+
+        /// <summary>5 s, doubling with every failure in a row, up to 5 minutes.</summary>
+        private TimeSpan NextRest(Relay relay)
+        {
+            lock (_lock)
+            {
+                return TimeSpan.FromTicks(Math.Min(LongestRest.Ticks, FirstRest.Ticks << Math.Min(relay.ConsecutiveFailures, 10)));
             }
         }
 
@@ -228,6 +284,9 @@ namespace AVMTradeReporter.Services
 
         private async Task DiscoverAsync()
         {
+            // Never completes inside the caller's lock: the caller stores this task in _discovery after the call returns,
+            // and a discovery that had already finished (and cleared the field) would be stored as "in progress" for ever.
+            await Task.Yield();
             try
             {
                 // the DNS lookup is synchronous in the SDK: off the caller's thread
@@ -266,21 +325,43 @@ namespace AVMTradeReporter.Services
             };
         }
 
-        /// <summary>The SDK's gossip HTTP client, one per relay (a client asks the hosts of its configuration).</summary>
-        private sealed class GossipFetcher
+        /// <summary>
+        /// The relay's block endpoint: <c>GET {relay}/v1/{genesis}/block/{round in base 36}</c>, answered with the
+        /// msgpack block and its certificate. Not the SDK's <c>GossipHttpClient</c>: it takes no cancellation token and
+        /// does not tell a 404 from a 503.
+        /// </summary>
+        private sealed class HttpRelayFetcher
         {
             private readonly string _genesisId;
-            private readonly System.Collections.Concurrent.ConcurrentDictionary<string, GossipHttpClient> _clients = new(StringComparer.Ordinal);
+            private readonly HttpClient _http;
 
-            public GossipFetcher(string genesisId)
+            public HttpRelayFetcher(string genesisId)
             {
                 _genesisId = genesisId;
+                _http = new HttpClient(new SocketsHttpHandler
+                {
+                    ConnectTimeout = TimeSpan.FromSeconds(5),
+                    PooledConnectionLifetime = TimeSpan.FromMinutes(10), // relays move: the DNS answer is not cached for ever
+                    AutomaticDecompression = DecompressionMethods.All,
+                })
+                {
+                    Timeout = Timeout.InfiniteTimeSpan, // the caller's token carries the per-request timeout
+                };
             }
 
-            public Task<CertifiedBlock?> FetchAsync(string host, ulong round, CancellationToken cancellationToken)
+            public async Task<CertifiedBlock?> FetchAsync(string host, ulong round, CancellationToken cancellationToken)
             {
-                var client = _clients.GetOrAdd(host, h => new GossipHttpClient(new GossipHttpConfiguration { GenesisId = _genesisId, Hosts = new[] { h } }));
-                return client.FetchBlockAsync(round, 1)!;
+                var url = $"{host.TrimEnd('/')}/v1/{_genesisId}/block/{GossipHttpClient.ToBase36(round)}";
+                using var response = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                if (response.StatusCode == HttpStatusCode.NotFound) return null; // the relay does not have this round
+                if (response.StatusCode is HttpStatusCode.TooManyRequests or HttpStatusCode.ServiceUnavailable)
+                {
+                    var retry = response.Headers.RetryAfter;
+                    throw new RelayBusyException(response.StatusCode, retry?.Delta ?? (retry?.Date is { } at ? at - DateTimeOffset.UtcNow : null));
+                }
+                response.EnsureSuccessStatusCode();
+                var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+                return Algorand.Utils.Encoder.DecodeFromMsgPack<CertifiedBlock>(bytes);
             }
         }
     }
