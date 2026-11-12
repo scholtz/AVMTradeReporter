@@ -382,6 +382,14 @@ namespace AVMTradeReporter.Model.Configuration
         /// How often to check memory usage in milliseconds. Default is 5000 ms (5 seconds).
         /// </summary>
         public int MemoryCheckIntervalMs { get; set; } = 5000;
+
+        /// <summary>
+        /// Minutes a single block may stay in flight (or the fetch loop may stay silent) before <c>/health</c> turns
+        /// unhealthy and the liveness probe restarts the pod; the restart resumes at the last fully stored block. A hung
+        /// block task otherwise freezes latest-block for ever without a single log line (2026-11 mainnet incident). Must
+        /// stay above the worst legitimate block: 4 fetch attempts over every algod with their HTTP timeouts. 0 disables.
+        /// </summary>
+        public int StallRestartMinutes { get; set; } = 30;
     }
 
     /// <summary>

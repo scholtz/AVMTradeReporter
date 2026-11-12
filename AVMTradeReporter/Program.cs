@@ -148,6 +148,7 @@ namespace AVMTradeReporter
 
             // GeckoTerminal / CoinGecko DEX integration (api/coingecko/*)
             builder.Services.AddSingleton<AVMTradeReporter.Services.CoinGecko.IIndexedBlockTracker, AVMTradeReporter.Services.CoinGecko.IndexedBlockTracker>();
+            builder.Services.AddSingleton<AVMTradeReporter.Services.IndexerStallMonitor>();
             builder.Services.AddSingleton<AVMTradeReporter.Services.CoinGecko.ICoinGeckoEventSource, AVMTradeReporter.Services.CoinGecko.ElasticCoinGeckoEventSource>();
             builder.Services.AddSingleton<AVMTradeReporter.Services.CoinGecko.ICoinGeckoService, AVMTradeReporter.Services.CoinGecko.CoinGeckoService>();
 
@@ -378,7 +379,9 @@ namespace AVMTradeReporter
             builder.Services.AddHealthChecks()
                 .AddCheck<HealthChecks.ElasticsearchHealthCheck>("elasticsearch")
                 .AddCheck<HealthChecks.AssetCacheHealthCheck>("asset-cache")
-                .AddCheck<HealthChecks.PoolCacheHealthCheck>("pool-cache");
+                .AddCheck<HealthChecks.PoolCacheHealthCheck>("pool-cache")
+                // a hung block task / fetch loop leaves no other trace: unhealthy = the liveness probe restarts the pod
+                .AddCheck<HealthChecks.IndexerStallHealthCheck>("indexer-stall");
 
             var app = builder.Build();
 

@@ -34,6 +34,7 @@ namespace AVMTradeReporter.Services
         private readonly TransactionProcessor _transactionProcessor;
         private readonly BlockRepository _blockRepository;
         private readonly IIndexedBlockTracker? _blockTracker;
+        private readonly IndexerStallMonitor? _stallMonitor;
 
         // Not-yet-stored documents, per block: a block counts as indexed (latest-block watermark) only once ITS documents
         // are acknowledged by Elasticsearch - see PendingBlockBatches.
@@ -62,10 +63,12 @@ namespace AVMTradeReporter.Services
             IAssetRepository assetRepository,
             TransactionProcessor transactionProcessor,
             BlockRepository blockRepository,
-            IIndexedBlockTracker? blockTracker = null
+            IIndexedBlockTracker? blockTracker = null,
+            IndexerStallMonitor? stallMonitor = null
             )
         {
             _blockTracker = blockTracker;
+            _stallMonitor = stallMonitor;
             _logger = logger;
             _appConfig = appConfig;
             _indexerRepository = indexerRepository;
@@ -147,6 +150,7 @@ namespace AVMTradeReporter.Services
 
             while (!stoppingToken.IsCancellationRequested)
             {
+                _stallMonitor?.Heartbeat();
                 try
                 {
                     if (Indexer == null)
@@ -262,6 +266,7 @@ namespace AVMTradeReporter.Services
                         await Task.Delay(_appConfig.Value.DelayMs.Value);
                     }
 #if DEBUG
+                    _stallMonitor?.LoopStopped(); // a DEBUG build processes one block and ends the loop on purpose
                     return;
 #endif
                     // 
@@ -279,6 +284,7 @@ namespace AVMTradeReporter.Services
                 }
             }
 
+            _stallMonitor?.LoopStopped(); // shutdown: silence is expected from here on
             _logger.LogInformation("Trade Reporter Background Service stopped.");
         }
 
@@ -560,6 +566,10 @@ namespace AVMTradeReporter.Services
         private async Task ProcessBlockWorkAsync(ulong blockId, CancellationToken cancellationToken)
         {
             _pending.Open(blockId, null);
+            // A block that never returns from here (an await that never completes) freezes the watermark without a trace:
+            // the stall monitor turns /health unhealthy after BlockProcessing.StallRestartMinutes and the restart
+            // re-processes the block from StoredThrough.
+            _stallMonitor?.BlockStarted(blockId);
             try
             {
                 _logger.LogInformation("Loading block {blockId}", blockId);
@@ -586,6 +596,12 @@ namespace AVMTradeReporter.Services
                 // shutdown: the block is not closed (it must not complete) - the restart re-processes it from StoredThrough
                 throw;
             }
+            finally
+            {
+                // also when the block was handed to RecoverLostBlockAsync: its bounded waiting is not a hang, its
+                // processing is watched again there
+                _stallMonitor?.BlockFinished(blockId);
+            }
         }
 
         private async Task RecoverLostBlockAsync(ulong blockId, CancellationToken cancellationToken)
@@ -598,7 +614,15 @@ namespace AVMTradeReporter.Services
                     var block = await TryFetchBlockAsync(blockId, headerOnly: false);
                     if (block?.Block == null) continue;
                     _logger.LogInformation("Block {blockId} recovered on background attempt {attempt}", blockId, attempt);
-                    await ProcessFetchedBlockAsync(blockId, block, cancellationToken);
+                    _stallMonitor?.BlockStarted(blockId);
+                    try
+                    {
+                        await ProcessFetchedBlockAsync(blockId, block, cancellationToken);
+                    }
+                    finally
+                    {
+                        _stallMonitor?.BlockFinished(blockId);
+                    }
                     return;
                 }
                 // Lost for the indexer itself as well (see CLAUDE.md, known limits): the watermark must not wait for ever.

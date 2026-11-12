@@ -404,6 +404,20 @@ purpose (CoinGecko's indexer cannot sign ARC-14). Rules that are easy to break:
   only a destroyed-asset tombstone (`IAssetRepository.IsDeletedAsync`) excludes a pool for good.
   `Protocols` is not pre-filled (config binding appends to a default list) - use
   `PublishedProtocols`.
+- **A hung block task restarts the pod (`IndexerStallMonitor` + `indexer-stall` health check).** The
+  watermark and `StoredThrough` wait for every block, so one block task that never returns (an
+  await that never completes) freezes `latest-block` for ever without a log line, and once every
+  `MaxConcurrentTasks` slot plus the synchronous path hang, the fetch loop stops too. 2026-11
+  mainnet incident (reconstructed from the indexer document - `StoredThrough` frozen at a block of
+  11-07, `Round` at a block of 11-11 - the old pod's log was gone, so the hanging await itself is
+  unknown): first hang 11-07, loop dead 11-11, pod "healthy" throughout; the next deploy
+  rewound 108 826 blocks and the post-promote smoke test failed on a stale `latest-block` while it
+  replayed (hours - not a reason to roll back, the rollback replays the same range). A block in
+  flight (or a silent fetch loop) for more than `BlockProcessing.StallRestartMinutes` (30, 0 = off)
+  now makes `/health` unhealthy; the liveness restart resumes at `StoredThrough + 1`, i.e. the hung
+  block. Never "fix" a hang by completing the block anyway (that is silent data loss), and keep
+  the threshold above the worst legitimate block (4 fetch attempts x every algod's HTTP timeout);
+  the bounded lost-block retry (`RecoverLostBlockAsync`) is deliberately not counted while it waits.
 - More deliberate limits: stores report per document (`StoreResult`); a document Elasticsearch
   rejects is retried on the next flushes `PendingBlockBatches.DefaultMaxRejections` (3) times, then
   dropped (logged, the block completes without it), while an *unreachable* Elasticsearch keeps
