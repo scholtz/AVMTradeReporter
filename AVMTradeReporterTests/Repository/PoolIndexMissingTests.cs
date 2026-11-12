@@ -157,7 +157,7 @@ namespace AVMTradeReporterTests.Repository
 
         [TestCase("trades")]
         [TestCase("liquidity")]
-        public void EventSource_AgainstAMissingIndex_ThrowsTheRecognisableAnswer(string index)
+        public async Task EventSource_AgainstAMissingIndex_ThrowsTheRecognisableAnswer(string index)
         {
             // the source does not decide what a missing index means (no data on Voi, lost data elsewhere): it lets CoinGeckoService see it
             using var elastic = new FakeElastic(HttpStatusCode.NotFound, IndexNotFoundFor(index));
@@ -165,19 +165,19 @@ namespace AVMTradeReporterTests.Repository
             var source = new ElasticCoinGeckoEventSource(services, Options.Create(new AppConfiguration()));
 
             var ex = index == "trades"
-                ? Assert.CatchAsync(() => source.GetTradesAsync(10, 20, 100, CancellationToken.None))
-                : Assert.CatchAsync(() => source.GetLiquidityAsync(10, 20, 100, CancellationToken.None));
+                ? await Assert.CatchAsync(() => source.GetTradesAsync(10, 20, 100, CancellationToken.None))
+                : await Assert.CatchAsync(() => source.GetLiquidityAsync(10, 20, 100, CancellationToken.None));
             Assert.That(ElasticErrors.IsIndexNotFound(ex, index), Is.True, $"recognised: {ex}");
         }
 
         [Test]
-        public void EventSource_AgainstAWrongUrl_StillFails()
+        public async Task EventSource_AgainstAWrongUrl_StillFails()
         {
             using var elastic = new FakeElastic(HttpStatusCode.NotFound, "<html>not found</html>");
             var services = new ServiceCollection().AddSingleton(elastic.CreateClient()).BuildServiceProvider();
             var source = new ElasticCoinGeckoEventSource(services, Options.Create(new AppConfiguration()));
 
-            var ex = Assert.CatchAsync(() => source.GetTradesAsync(10, 20, 100, CancellationToken.None));
+            var ex = await Assert.CatchAsync(() => source.GetTradesAsync(10, 20, 100, CancellationToken.None));
             Assert.That(ElasticErrors.IsIndexNotFound(ex, "trades"), Is.False, "a proxy 404 is a failure, not an empty result");
         }
     }

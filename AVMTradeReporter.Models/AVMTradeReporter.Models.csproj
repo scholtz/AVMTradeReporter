@@ -19,6 +19,8 @@
 
   <ItemGroup>
     <PackageReference Include="Algorand4" Version="4.7.4.2026080422" />
+    <!-- transitive (Algorand4): pinned to the release that fixes GHSA-qhrr-8q5h-9q3h - remove once Algorand4 references it -->
+    <PackageReference Include="MessagePack" Version="3.1.12" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
   </ItemGroup>
 
