@@ -399,14 +399,6 @@ namespace AVMTradeReporter.Model.Configuration
         /// </summary>
         public int CatchUpMaxConcurrentTasks { get; set; } = 16;
 
-        /// <summary>
-        /// Blocks started per second while catching up, at most. One block is one algod request, and a public algod
-        /// answers a client that is too fast with HTTP 429 (testnet / Voi use Nodely's free tier: 50 requests per second
-        /// per IP, plus a daily quota) - which turns into failed fetches, i.e. a slower and riskier catch-up than a paced
-        /// one. Raise it, or set 0 = no cap, where every configured algod is an own node.
-        /// </summary>
-        public int CatchUpMaxBlocksPerSecond { get; set; } = 40;
-
         /// <summary>Seconds between two writes of the indexer document while catching up (at the tip: every block).</summary>
         public double CatchUpIndexerPersistSeconds { get; set; } = 1;
 

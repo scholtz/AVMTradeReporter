@@ -25,4 +25,4 @@ jobs:
       - name: GeckoTerminal integration - unit, conformance and performance suites
         run: >-
           dotnet test AVMTradeReporterTests -c Release --no-build --nologo
-          --filter "FullyQualifiedName~Services.CoinGecko|FullyQualifiedName~CoinGeckoController|FullyQualifiedName~AVMTradeReporterTests.Conformance|FullyQualifiedName~AVMTradeReporterTests.Performance|FullyQualifiedName~StableSwapDustPriceTests|FullyQualifiedName~IndexerSyncPolicyTests|FullyQualifiedName~IndexerStallMonitorTests"
+          --filter "FullyQualifiedName~Services.CoinGecko|FullyQualifiedName~CoinGeckoController|FullyQualifiedName~AVMTradeReporterTests.Conformance|FullyQualifiedName~AVMTradeReporterTests.Performance|FullyQualifiedName~StableSwapDustPriceTests|FullyQualifiedName~IndexerSyncPolicyTests|FullyQualifiedName~IndexerStallMonitorTests|FullyQualifiedName~AlgodBlockAvailabilityTests|FullyQualifiedName~AlgodRateLimiterTests"

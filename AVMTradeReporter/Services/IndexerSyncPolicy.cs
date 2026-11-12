@@ -34,18 +34,6 @@ namespace AVMTradeReporter.Services
             => Math.Max(1, catchingUp && !memoryPressure ? Math.Max(maxConcurrentTasks, catchUpMaxConcurrentTasks) : maxConcurrentTasks);
 
         /// <summary>
-        /// How long the fetch loop waits before it starts the next block of a catch-up: nothing while fewer than
-        /// <paramref name="maxBlocksPerSecond"/> blocks were started in the current one-second window, the rest of the
-        /// window once that many were. A cap of zero or less never waits.
-        /// </summary>
-        public static TimeSpan CatchUpPacingDelay(int startedInWindow, TimeSpan windowElapsed, int maxBlocksPerSecond)
-        {
-            if (maxBlocksPerSecond <= 0 || startedInWindow < maxBlocksPerSecond) return TimeSpan.Zero;
-            var rest = TimeSpan.FromSeconds(1) - windowElapsed;
-            return rest > TimeSpan.Zero ? rest : TimeSpan.Zero;
-        }
-
-        /// <summary>
         /// At the tip the indexer document is written with every block (other tooling reads <c>Round</c>). While catching
         /// up that is one Elasticsearch write per block on the fetch loop itself, so it is written every
         /// <paramref name="interval"/> only: after a crash the persisted <c>Round</c> is at most that much behind, and

@@ -62,37 +62,6 @@ namespace AVMTradeReporterTests.Services
         }
 
         [Test]
-        public void CatchUp_IsPacedBelowTheRateAPublicAlgodAccepts()
-        {
-            // testnet / Voi run on Nodely's free tier, which answers 429 above 50 requests per second per IP; one block is one request
-            Assert.That(new AppConfiguration().BlockProcessing.CatchUpMaxBlocksPerSecond, Is.InRange(1, 49));
-
-            var half = TimeSpan.FromMilliseconds(500);
-            Assert.That(IndexerSyncPolicy.CatchUpPacingDelay(startedInWindow: 39, windowElapsed: half, maxBlocksPerSecond: 40), Is.EqualTo(TimeSpan.Zero));
-            Assert.That(IndexerSyncPolicy.CatchUpPacingDelay(40, half, 40), Is.EqualTo(half), "the 41st block waits for the rest of the second");
-            Assert.That(IndexerSyncPolicy.CatchUpPacingDelay(40, TimeSpan.FromSeconds(2), 40), Is.EqualTo(TimeSpan.Zero), "the window is over");
-            Assert.That(IndexerSyncPolicy.CatchUpPacingDelay(10_000, half, 0), Is.EqualTo(TimeSpan.Zero), "0 = no cap");
-
-            // a whole simulated minute never starts more than the cap in any second
-            const int max = 40;
-            var clock = TimeSpan.Zero;
-            var windowStart = TimeSpan.Zero;
-            var inWindow = 0;
-            var perSecond = new Dictionary<int, int>();
-            for (var block = 0; block < 2400; block++)
-            {
-                if (clock - windowStart >= TimeSpan.FromSeconds(1)) { windowStart = clock; inWindow = 0; }
-                var wait = IndexerSyncPolicy.CatchUpPacingDelay(inWindow, clock - windowStart, max);
-                if (wait > TimeSpan.Zero) { clock += wait; windowStart = clock; inWindow = 0; }
-                inWindow++;
-                perSecond[(int)clock.TotalSeconds] = perSecond.GetValueOrDefault((int)clock.TotalSeconds) + 1;
-                clock += TimeSpan.FromMilliseconds(2); // the loop itself is much faster than the cap
-            }
-            Assert.That(perSecond.Values.Max(), Is.LessThanOrEqualTo(max));
-            Assert.That(clock.TotalSeconds, Is.InRange(59, 61), "2400 blocks at 40 per second");
-        }
-
-        [Test]
         public void MemoryPressure_KeepsACatchUpAtTheSlotsOfTheTip()
         {
             Assert.That(IndexerSyncPolicy.ConcurrencyLimit(true, 3, 16, memoryPressure: true), Is.EqualTo(3));
