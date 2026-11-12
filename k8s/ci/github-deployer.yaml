@@ -1,70 +1,202 @@
-# Identity of the GitHub Actions deploy jobs (deploy.yml -> stage, promote-production.yml -> production / voi).
+# Identities of the GitHub Actions deploy jobs - one ServiceAccount per GitHub environment:
+#   github-deployer-stage       -> deploy.yml           (environment "stage",          no reviewer, every push)
+#   github-deployer-production  -> promote-production   (environment "production",     required reviewer)
+#   github-deployer-voi         -> promote-production   (environment "production-voi")
 #
 # Why: the KUBE_CONFIG secrets used to be a copy of a personal/admin kubeconfig whose credential expires ~30 days
 # after it is issued - the stage deploy broke 2026-09-09 (fixed 09-12 by pasting a fresh one) and again from
 # 2026-10-18 on with "failed to download openapi: the server has asked for the client to provide credentials"
-# (HTTP 401). A ServiceAccount with a `kubernetes.io/service-account-token` Secret has a token that does not expire;
-# it is revoked by deleting the Secret (a new token is minted by re-applying this file).
+# (HTTP 401). A `kubernetes.io/service-account-token` Secret holds a token that does not expire; it is revoked by
+# deleting that Secret (re-applying this file mints a new one).
 #
-# Apply once with cluster-admin rights, then build the kubeconfig with k8s/ci/make-kubeconfig.sh:
-#   kubectl apply -f k8s/ci/github-deployer.yaml
+# Least privilege, because stage, production and voi share the namespace biatec-scan: every Role only reaches its
+# own environment's objects by name (`resourceNames`), so the stage job - which runs on every push without a
+# reviewer - can neither read production's Secrets nor patch production's Deployments. No Role may create
+# Deployments / Pods (that would allow mounting any Secret) or list Secrets: the workflows only `kubectl apply`
+# objects that already exist (get + patch), `kubectl rollout restart` (patch) and `kubectl rollout status`
+# (get / watch). A NEW object (another Deployment, Service, ...) is therefore created once by an admin, and its name
+# added to the Role here. The images PersistentVolume (k8s/main/pv-images.yaml) must already exist, too.
 #
-# Permissions = exactly what the workflows do, all in namespace biatec-scan (stage, production and voi live there):
-#   - kubectl apply of Deployments, Services, Ingresses, ConfigMaps, the images PVC (+ the cluster scoped images PV)
-#   - kubectl create secret ... | kubectl apply (stage / voi secrets)
-#   - kubectl rollout restart / status
+# Apply with cluster-admin rights via k8s/ci/make-kubeconfig.sh (which also builds the kubeconfigs).
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: github-deployer
+  name: github-deployer-stage
   namespace: biatec-scan
 ---
 apiVersion: v1
 kind: Secret
 metadata:
-  name: github-deployer-token
+  name: github-deployer-stage-token
   namespace: biatec-scan
   annotations:
-    kubernetes.io/service-account.name: github-deployer
+    kubernetes.io/service-account.name: github-deployer-stage
 type: kubernetes.io/service-account-token
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: github-deployer
+  name: github-deployer-stage
   namespace: biatec-scan
 rules:
   - apiGroups: ["apps"]
     resources: ["deployments"]
-    verbs: ["get", "list", "watch", "create", "update", "patch"]
-  - apiGroups: ["apps"]
-    resources: ["replicasets"]
-    verbs: ["get", "list", "watch"] # rollout status
+    resourceNames: ["avm-trade-reporter-stage-app-deployment", "avmtradereporter-subscriber-stage"]
+    verbs: ["get", "list", "watch", "patch", "update"]
   - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["get", "list", "watch"] # rollout status
-  - apiGroups: [""]
-    resources: ["services", "configmaps", "secrets", "persistentvolumeclaims"]
-    verbs: ["get", "list", "create", "update", "patch"]
+    resources: ["services"]
+    resourceNames: ["avm-trade-reporter-stage-service"]
+    verbs: ["get", "patch", "update"]
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingresses"]
-    verbs: ["get", "list", "create", "update", "patch"]
+    resourceNames: ["avm-trade-reporter-stage-ingress-main2"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["avm-trade-reporter-stage-main-conf"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["avm-trade-reporter-stage-secret", "avm-trade-reporter-subscriber-stage-secret"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    resourceNames: ["avm-trade-reporter-images-pvc"]
+    verbs: ["get", "patch", "update"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: github-deployer
+  name: github-deployer-stage
   namespace: biatec-scan
 subjects:
   - kind: ServiceAccount
-    name: github-deployer
+    name: github-deployer-stage
     namespace: biatec-scan
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: github-deployer
+  name: github-deployer-stage
 ---
-# k8s/main/pv-images.yaml also applies the (cluster scoped) PersistentVolume - only that one PV.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: github-deployer-production
+  namespace: biatec-scan
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: github-deployer-production-token
+  namespace: biatec-scan
+  annotations:
+    kubernetes.io/service-account.name: github-deployer-production
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: github-deployer-production
+  namespace: biatec-scan
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["avm-trade-reporter-app-deployment", "avm-trade-reporter2-app-deployment", "avmtradereporter-subscriber"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["services"]
+    resourceNames: ["avm-trade-reporter-service", "avm-trade-reporter-nodeport-service", "avm-trade-reporter2-service"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    resourceNames: ["avm-trade-reporter-ingress-main", "avm-trade-reporter-ingress-main2", "avm-trade-reporter2-ingress-main"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["avm-trade-reporter-main-conf"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    resourceNames: ["avm-trade-reporter-images-pvc"]
+    verbs: ["get", "patch", "update"]
+  # production's Secrets are managed by hand in the cluster, the workflow never touches them
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: github-deployer-production
+  namespace: biatec-scan
+subjects:
+  - kind: ServiceAccount
+    name: github-deployer-production
+    namespace: biatec-scan
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: github-deployer-production
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: github-deployer-voi
+  namespace: biatec-scan
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: github-deployer-voi-token
+  namespace: biatec-scan
+  annotations:
+    kubernetes.io/service-account.name: github-deployer-voi
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: github-deployer-voi
+  namespace: biatec-scan
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["avm-trade-reporter-voi-app-deployment", "avmtradereporter-subscriber-voi"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["services"]
+    resourceNames: ["avm-trade-reporter-voi-service"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    resourceNames: ["avm-trade-reporter-voi-ingress-main"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["avm-trade-reporter-voi-main-conf"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["avm-trade-reporter-voi-secret", "avm-trade-reporter-subscriber-voi-secret"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    resourceNames: ["avm-trade-reporter-images-pvc"]
+    verbs: ["get", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: github-deployer-voi
+  namespace: biatec-scan
+subjects:
+  - kind: ServiceAccount
+    name: github-deployer-voi
+    namespace: biatec-scan
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: github-deployer-voi
+---
+# k8s/main/pv-images.yaml also applies the (cluster scoped) images PersistentVolume - only that one PV, which must
+# already exist (`create` cannot be limited to a name).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -73,7 +205,7 @@ rules:
   - apiGroups: [""]
     resources: ["persistentvolumes"]
     resourceNames: ["avm-trade-reporter-images-pv"]
-    verbs: ["get", "update", "patch"]
+    verbs: ["get", "patch", "update"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -81,7 +213,13 @@ metadata:
   name: github-deployer-images-pv
 subjects:
   - kind: ServiceAccount
-    name: github-deployer
+    name: github-deployer-stage
+    namespace: biatec-scan
+  - kind: ServiceAccount
+    name: github-deployer-production
+    namespace: biatec-scan
+  - kind: ServiceAccount
+    name: github-deployer-voi
     namespace: biatec-scan
 roleRef:
   apiGroup: rbac.authorization.k8s.io

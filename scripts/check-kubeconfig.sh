@@ -6,17 +6,24 @@
 #
 # Prints only non-secret facts: the API server host, the kind of credential and its expiry. Never the credential.
 #
-# Usage: scripts/check-kubeconfig.sh [--namespace NS] [--warn-days N]
-#   --warn-days N  warn (GitHub ::warning) when the credential expires within N days (default 14);
-#                  exit 2 when it expires within N days and --fail-on-warn is given (scheduled check)
+# Usage: scripts/check-kubeconfig.sh [--namespace NS] [--can-i "VERB RESOURCE[/NAME]"] [--warn-days N] [--fail-on-warn]
+#   --namespace NS   namespace of the permission check (default: $NAMESPACE, else biatec-scan)
+#   --can-i "..."    the permission that proves the credential may deploy (default "patch deployments.apps"); the
+#                    per-environment deployers only reach their own objects, so pass one of them by name, e.g.
+#                    "patch deployments.apps/avm-trade-reporter-stage-app-deployment"
+#   --warn-days N    warn (GitHub ::warning) when the credential expires within N days (default 14)
+#   --fail-on-warn   exit 2 on that warning (the scheduled check), instead of 0 (deploys go on)
+# Exit codes: 0 ok, 1 rejected / expired / not permitted / unreachable, 2 expiring (with --fail-on-warn), 64 usage.
 set -euo pipefail
 
 NAMESPACE="${NAMESPACE:-biatec-scan}"
+CAN_I="patch deployments.apps"
 WARN_DAYS=14
 FAIL_ON_WARN=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --namespace) NAMESPACE="$2"; shift 2 ;;
+    --can-i) CAN_I="$2"; shift 2 ;;
     --warn-days) WARN_DAYS="$2"; shift 2 ;;
     --fail-on-warn) FAIL_ON_WARN=1; shift ;;
     *) echo "unknown argument $1" >&2; exit 64 ;;
@@ -47,10 +54,15 @@ if [ -n "$token" ]; then
     payload=$(printf '%s' "$token" | cut -d. -f2 | tr '_-' '/+')
     while [ $(( ${#payload} % 4 )) -ne 0 ]; do payload="${payload}="; done
     claims=$(printf '%s' "$payload" | base64 -d 2>/dev/null || true)
-    sub=$(printf '%s' "$claims" | jq -r '.sub // empty' 2>/dev/null || true)
-    exp=$(printf '%s' "$claims" | jq -r '.exp // empty' 2>/dev/null || true)
-    kind="ServiceAccount token (JWT) for ${sub:-unknown subject}"
-    if [ -n "$exp" ]; then expires_epoch="$exp"; else kind="$kind, no expiry (long-lived)"; fi
+    if command -v jq >/dev/null 2>&1 && printf '%s' "$claims" | jq -e . >/dev/null 2>&1; then
+      sub=$(printf '%s' "$claims" | jq -r '.sub // empty')
+      exp=$(printf '%s' "$claims" | jq -r '.exp // empty')
+      kind="ServiceAccount token (JWT) for ${sub:-unknown subject}"
+      if [ -n "$exp" ]; then expires_epoch="$exp"; else kind="$kind, no expiry (long-lived)"; fi
+    else
+      # never claim "long-lived" for a token whose claims could not be read
+      kind="JWT bearer token, expiry unknown (jq missing or the claims did not decode)"
+    fi
   elif [[ "$token" == kubeconfig-u-* || "$token" == token-* ]]; then
     kind="Rancher API token (its lifetime is set by Rancher - default kubeconfig token TTL is 30 days)"
   else
@@ -85,17 +97,20 @@ if [ -n "$expires_epoch" ]; then
 fi
 
 # --- does the cluster accept it, and may it deploy? ---
-if ! output=$(kubectl auth can-i patch deployments.apps -n "$NAMESPACE" --request-timeout=30s 2>&1); then
+# shellcheck disable=SC2086 # CAN_I is "verb resource[/name]" - two words on purpose
+if ! output=$(kubectl auth can-i $CAN_I -n "$NAMESPACE" --request-timeout=30s 2>&1); then
+  answer=$(printf '%s\n' "$output" | grep -vE '^(Warning|W[0-9]{4}) ' | tail -1)
   if printf '%s' "$output" | grep -qiE "provide credentials|Unauthorized|401"; then
     echo "::error::The cluster REJECTED the deployer credential (HTTP 401 Unauthorized - expired or revoked: $kind). $REMEDY"
-  elif [ "$output" = "no" ]; then
-    echo "::error::The deployer credential is valid but may not patch Deployments in namespace $NAMESPACE (RBAC). Apply k8s/ci/github-deployer.yaml."
+  elif [[ "$answer" == no* ]]; then
+    # "no", or "no - <reason>" from webhook authorizers
+    echo "::error::The deployer credential is valid but may not '$CAN_I' in namespace $NAMESPACE ($answer). Apply k8s/ci/github-deployer.yaml (k8s/ci/make-kubeconfig.sh)."
   else
     echo "::error::Could not reach / authenticate to the cluster: $output"
   fi
   exit 1
 fi
-echo "Cluster accepts the credential; it may patch Deployments in $NAMESPACE."
+echo "Cluster accepts the credential; it may '$CAN_I' in $NAMESPACE."
 
 if [ "$warn" -eq 1 ] && [ "$FAIL_ON_WARN" -eq 1 ]; then
   exit 2

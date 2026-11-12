@@ -90,45 +90,20 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
-
-      - name: Configure kubeconfig
-        run: |
-          mkdir -p "$HOME/.kube"
-          echo "$KUBE_CONFIG" | base64 -d > "$HOME/.kube/config"
-          chmod 600 "$HOME/.kube/config"
-        env:
-          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
-
-      # Fails here - before any manifest is committed back to master or applied - when the cluster rejects the
-      # KUBE_CONFIG credential (it used to expire ~30 days after it was issued and every deploy then died at the
-      # first kubectl call with "failed to download openapi: the server has asked for the client to provide
-      # credentials"), and warns two weeks before it expires. See docs/CICD_GITHUB_ACTIONS.md, "Deployer credentials".
-      - name: Check cluster credentials
-        run: bash scripts/check-kubeconfig.sh --namespace "$NAMESPACE"
+      # kubectl + KUBE_CONFIG + credential check: fails here, before anything is applied, when the cluster rejects
+      # the deployer credential (see docs/CICD_GITHUB_ACTIONS.md, "Deployer credentials")
+      - name: Kubernetes deployer setup
+        uses: ./.github/actions/kube-setup
+        with:
+          kube-config: ${{ secrets.KUBE_CONFIG }}
+          namespace: ${{ env.NAMESPACE }}
+          can-i: patch deployments.apps/avm-trade-reporter-stage-app-deployment
 
       - name: Update stage manifests with new image tags
         run: |
           version="${{ needs.build.outputs.version }}"
           sed -i "s~${IMAGE_API}.*~${IMAGE_API}:${version}~g" k8s/stage/deployment-api-stage.yaml
           sed -i "s~${IMAGE_SUBSCRIBER}.*~${IMAGE_SUBSCRIBER}:${version}~g" k8s/stage/subscriber-deployment-stage.yaml
-
-      - name: Commit updated stage manifests
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          if ! git diff --quiet -- k8s/stage/deployment-api-stage.yaml k8s/stage/subscriber-deployment-stage.yaml; then
-            git add k8s/stage/deployment-api-stage.yaml k8s/stage/subscriber-deployment-stage.yaml
-            git commit -m "cicd deploy ${{ needs.build.outputs.version }} to stage [skip ci]"
-            for i in 1 2 3 4 5; do
-              git pull --rebase origin master && git push && break
-              echo "Push attempt $i failed, retrying..."
-              sleep $((i * 3))
-            done
-          else
-            echo "No manifest changes to commit"
-          fi
 
       # Stage's Elastic/Redis credentials live only as GitHub secrets, never committed to the repo.
       # This step (re-)creates the Secret from those GitHub secrets on every deploy, so rotating a
@@ -174,6 +149,24 @@ jobs:
           kubectl rollout status deployment/avm-trade-reporter-stage-app-deployment -n "$NAMESPACE"
           kubectl rollout restart deployment/avmtradereporter-subscriber-stage -n "$NAMESPACE"
           kubectl rollout status deployment/avmtradereporter-subscriber-stage -n "$NAMESPACE"
+
+      # committed only after a successful rollout, so the manifests on master always reflect what really runs
+      # (they used to be committed first - master collected deploys that never reached the cluster)
+      - name: Commit updated stage manifests
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet -- k8s/stage/deployment-api-stage.yaml k8s/stage/subscriber-deployment-stage.yaml; then
+            git add k8s/stage/deployment-api-stage.yaml k8s/stage/subscriber-deployment-stage.yaml
+            git commit -m "cicd deploy ${{ needs.build.outputs.version }} to stage [skip ci]"
+            for i in 1 2 3 4 5; do
+              git pull --rebase origin master && git push && break
+              echo "Push attempt $i failed, retrying..."
+              sleep $((i * 3))
+            done
+          else
+            echo "No manifest changes to commit"
+          fi
 
       - name: Remove kubeconfig
         if: always()

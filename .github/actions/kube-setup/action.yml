@@ -1,0 +1,46 @@
+# kubectl + the deployer kubeconfig (KUBE_CONFIG of the job's environment) + the credential check, shared by the
+# deploy jobs (deploy.yml, promote-production.yml) and the weekly credential check (kube-credentials.yml).
+#
+# The check fails the job - before any manifest is committed back to master or applied - when the cluster rejects
+# the credential (it used to expire ~30 days after it was issued and every deploy then died at the first kubectl call
+# with "failed to download openapi: the server has asked for the client to provide credentials"), and warns two
+# weeks before it expires. See docs/CICD_GITHUB_ACTIONS.md, "Deployer credentials". Needs the repository checked out.
+name: Kubernetes deployer setup
+description: Installs kubectl, writes the deployer kubeconfig and verifies the cluster accepts it.
+inputs:
+  kube-config:
+    description: The base64 encoded kubeconfig (secrets.KUBE_CONFIG of the job's environment)
+    required: true
+  namespace:
+    description: Namespace the deployer works in
+    required: true
+  can-i:
+    description: 'Permission proving the credential may deploy, e.g. "patch deployments.apps/<name>"'
+    required: true
+  check-args:
+    description: Extra arguments of scripts/check-kubeconfig.sh (e.g. "--warn-days 14 --fail-on-warn")
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v4
+
+    - name: Configure kubeconfig
+      shell: bash
+      run: |
+        mkdir -p "$HOME/.kube"
+        echo "$KUBE_CONFIG" | base64 -d > "$HOME/.kube/config"
+        chmod 600 "$HOME/.kube/config"
+      env:
+        KUBE_CONFIG: ${{ inputs.kube-config }}
+
+    - name: Check cluster credentials
+      shell: bash
+      # shellcheck disable=SC2086 # CHECK_ARGS is a list of arguments
+      run: bash "$GITHUB_WORKSPACE/scripts/check-kubeconfig.sh" --namespace "$NAMESPACE_INPUT" --can-i "$CAN_I" $CHECK_ARGS
+      env:
+        NAMESPACE_INPUT: ${{ inputs.namespace }}
+        CAN_I: ${{ inputs.can-i }}
+        CHECK_ARGS: ${{ inputs.check-args }}

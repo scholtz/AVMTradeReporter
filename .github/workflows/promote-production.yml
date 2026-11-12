@@ -227,23 +227,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
-
-      - name: Configure kubeconfig
-        run: |
-          mkdir -p "$HOME/.kube"
-          echo "$KUBE_CONFIG" | base64 -d > "$HOME/.kube/config"
-          chmod 600 "$HOME/.kube/config"
-        env:
-          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
-
-      # Fails here - before any manifest is committed back to master or applied - when the cluster rejects the
-      # KUBE_CONFIG credential (it used to expire ~30 days after it was issued and every deploy then died at the
-      # first kubectl call with "failed to download openapi: the server has asked for the client to provide
-      # credentials"), and warns two weeks before it expires. See docs/CICD_GITHUB_ACTIONS.md, "Deployer credentials".
-      - name: Check cluster credentials
-        run: bash scripts/check-kubeconfig.sh --namespace "$NAMESPACE"
+      # kubectl + KUBE_CONFIG + credential check: fails here, before anything is applied, when the cluster rejects
+      # the deployer credential (see docs/CICD_GITHUB_ACTIONS.md, "Deployer credentials")
+      - name: Kubernetes deployer setup
+        uses: ./.github/actions/kube-setup
+        with:
+          kube-config: ${{ secrets.KUBE_CONFIG }}
+          namespace: ${{ env.NAMESPACE }}
+          can-i: patch deployments.apps/avm-trade-reporter-app-deployment
 
       - name: Update production manifests with new image tags
         run: |
@@ -251,22 +242,6 @@ jobs:
           sed -i "s~${IMAGE_API}.*~${IMAGE_API}:${version}~g" k8s/main/deployment-api.yaml
           sed -i "s~${IMAGE_API}.*~${IMAGE_API}:${version}~g" k8s/main/deployment2-api.yaml
           sed -i "s~${IMAGE_SUBSCRIBER}.*~${IMAGE_SUBSCRIBER}:${version}~g" k8s/main/subscriber-deployment.yaml
-
-      - name: Commit updated production manifests
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          if ! git diff --quiet -- k8s/main/deployment-api.yaml k8s/main/deployment2-api.yaml k8s/main/subscriber-deployment.yaml; then
-            git add k8s/main/deployment-api.yaml k8s/main/deployment2-api.yaml k8s/main/subscriber-deployment.yaml
-            git commit -m "cicd promote ${{ needs.resolve-version.outputs.version }} to production [skip ci]"
-            for i in 1 2 3 4 5; do
-              git pull --rebase origin master && git push && break
-              echo "Push attempt $i failed, retrying..."
-              sleep $((i * 3))
-            done
-          else
-            echo "No manifest changes to commit"
-          fi
 
       # Must run BEFORE "Apply Kubernetes manifests": on a freshly scheduled Pod, kubectl apply
       # schedules Pods immediately, so if the ConfigMap a Pod's volume mounts doesn't exist yet, the
@@ -298,6 +273,24 @@ jobs:
           kubectl rollout status deployment/avm-trade-reporter2-app-deployment -n "$NAMESPACE"
           kubectl rollout restart deployment/avmtradereporter-subscriber -n "$NAMESPACE"
           kubectl rollout status deployment/avmtradereporter-subscriber -n "$NAMESPACE"
+
+      # committed only after a successful rollout, so the manifests on master always reflect what really runs
+      # (they used to be committed first - master collected deploys that never reached the cluster)
+      - name: Commit updated production manifests
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet -- k8s/main/deployment-api.yaml k8s/main/deployment2-api.yaml k8s/main/subscriber-deployment.yaml; then
+            git add k8s/main/deployment-api.yaml k8s/main/deployment2-api.yaml k8s/main/subscriber-deployment.yaml
+            git commit -m "cicd promote ${{ needs.resolve-version.outputs.version }} to production [skip ci]"
+            for i in 1 2 3 4 5; do
+              git pull --rebase origin master && git push && break
+              echo "Push attempt $i failed, retrying..."
+              sleep $((i * 3))
+            done
+          else
+            echo "No manifest changes to commit"
+          fi
 
       - name: Remove kubeconfig
         if: always()
@@ -337,45 +330,20 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
-
-      - name: Configure kubeconfig
-        run: |
-          mkdir -p "$HOME/.kube"
-          echo "$KUBE_CONFIG" | base64 -d > "$HOME/.kube/config"
-          chmod 600 "$HOME/.kube/config"
-        env:
-          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
-
-      # Fails here - before any manifest is committed back to master or applied - when the cluster rejects the
-      # KUBE_CONFIG credential (it used to expire ~30 days after it was issued and every deploy then died at the
-      # first kubectl call with "failed to download openapi: the server has asked for the client to provide
-      # credentials"), and warns two weeks before it expires. See docs/CICD_GITHUB_ACTIONS.md, "Deployer credentials".
-      - name: Check cluster credentials
-        run: bash scripts/check-kubeconfig.sh --namespace "$NAMESPACE"
+      # kubectl + KUBE_CONFIG + credential check: fails here, before anything is applied, when the cluster rejects
+      # the deployer credential (see docs/CICD_GITHUB_ACTIONS.md, "Deployer credentials")
+      - name: Kubernetes deployer setup
+        uses: ./.github/actions/kube-setup
+        with:
+          kube-config: ${{ secrets.KUBE_CONFIG }}
+          namespace: ${{ env.NAMESPACE }}
+          can-i: patch deployments.apps/avm-trade-reporter-voi-app-deployment
 
       - name: Update voi manifests with new image tags
         run: |
           version="${{ needs.resolve-version.outputs.version }}"
           sed -i "s~${IMAGE_API}.*~${IMAGE_API}:${version}~g" k8s/voi/deployment-api-voi.yaml
           sed -i "s~${IMAGE_SUBSCRIBER}.*~${IMAGE_SUBSCRIBER}:${version}~g" k8s/voi/subscriber-deployment-voi.yaml
-
-      - name: Commit updated voi manifests
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          if ! git diff --quiet -- k8s/voi/deployment-api-voi.yaml k8s/voi/subscriber-deployment-voi.yaml; then
-            git add k8s/voi/deployment-api-voi.yaml k8s/voi/subscriber-deployment-voi.yaml
-            git commit -m "cicd promote ${{ needs.resolve-version.outputs.version }} to production-voi [skip ci]"
-            for i in 1 2 3 4 5; do
-              git pull --rebase origin master && git push && break
-              echo "Push attempt $i failed, retrying..."
-              sleep $((i * 3))
-            done
-          else
-            echo "No manifest changes to commit"
-          fi
 
       # Voi's Elastic/Redis credentials live only as GitHub Environment secrets ("production-voi"),
       # never committed to the repo. Re-created on every promote so rotating a GitHub secret and
@@ -418,6 +386,24 @@ jobs:
           kubectl rollout status deployment/avm-trade-reporter-voi-app-deployment -n "$NAMESPACE"
           kubectl rollout restart deployment/avmtradereporter-subscriber-voi -n "$NAMESPACE"
           kubectl rollout status deployment/avmtradereporter-subscriber-voi -n "$NAMESPACE"
+
+      # committed only after a successful rollout, so the manifests on master always reflect what really runs
+      # (they used to be committed first - master collected deploys that never reached the cluster)
+      - name: Commit updated voi manifests
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet -- k8s/voi/deployment-api-voi.yaml k8s/voi/subscriber-deployment-voi.yaml; then
+            git add k8s/voi/deployment-api-voi.yaml k8s/voi/subscriber-deployment-voi.yaml
+            git commit -m "cicd promote ${{ needs.resolve-version.outputs.version }} to production-voi [skip ci]"
+            for i in 1 2 3 4 5; do
+              git pull --rebase origin master && git push && break
+              echo "Push attempt $i failed, retrying..."
+              sleep $((i * 3))
+            done
+          else
+            echo "No manifest changes to commit"
+          fi
 
       - name: Remove kubeconfig
         if: always()

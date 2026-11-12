@@ -87,34 +87,44 @@ running under that Environment, so no workflow changes are needed to adopt this 
 
 ## Deployer credentials (`KUBE_CONFIG`)
 
-Every deploy job writes the base64 `KUBE_CONFIG` secret of its Environment to `~/.kube/config` and runs
-`scripts/check-kubeconfig.sh` **before** it commits manifests back to `master` or applies anything. The check prints
-the API server, the kind of credential and its expiry (never the credential itself), fails with an explanation when
-the cluster rejects it, and warns 14 days before it expires. `.github/workflows/kube-credentials.yml` runs the same
-check every Monday for `stage` and `production-voi` and fails 14 days ahead of an expiry (`production` is checked by
-its promote job instead - it needs a reviewer, a scheduled job would wait for one every week).
+Every deploy job starts with the local action `.github/actions/kube-setup`: it installs kubectl, writes the base64
+`KUBE_CONFIG` secret of the job's Environment to `~/.kube/config` and runs `scripts/check-kubeconfig.sh` **before**
+anything is applied. The check prints the API server, the kind of credential and its expiry (never the credential
+itself), fails with an explanation when the cluster rejects it or it may not deploy, and warns 14 days before it
+expires. `.github/workflows/kube-credentials.yml` runs the same check every Monday for `stage` and `production-voi`
+and fails 14 days ahead of an expiry (`production` is checked by its promote job instead - it needs a reviewer, a
+scheduled job would wait for one every week). The manifests are committed back to `master` only **after** a
+successful rollout, so `master` always shows what really runs.
 
 **History:** the secrets used to hold a copy of a personal/admin kubeconfig whose credential expires about 30 days
 after it is issued. The stage deploy broke on 2026-09-09 (fixed 2026-09-12 by pasting fresh kubeconfigs into all
-three Environments) and again from 2026-10-18 until 2026-11-12, every run failing at the first `kubectl` call with
+three Environments) and again from 2026-10-18, every run failing at the first `kubectl` call with
 `failed to download openapi: the server has asked for the client to provide credentials` - an HTTP 401: the cluster
 rejected the expired credential. Because the manifests were committed before that call, `master` collected
 `cicd deploy ... to stage` commits for versions that never reached the cluster.
 
-**Fix / rotation:** use the dedicated `github-deployer` ServiceAccount (`k8s/ci/github-deployer.yaml`). Its token
-Secret (`kubernetes.io/service-account-token`) does not expire, it is revoked by deleting the Secret, and its RBAC
-covers exactly what the workflows do in `biatec-scan` (Deployments, Services, Ingresses, ConfigMaps, Secrets, the
-images PVC, rollouts) plus the one cluster scoped images PersistentVolume. With a cluster-admin kubectl context:
+**Fix / rotation:** one ServiceAccount per Environment (`k8s/ci/github-deployer.yaml`): `github-deployer-stage`,
+`github-deployer-production`, `github-deployer-voi`. Each token Secret (`kubernetes.io/service-account-token`) does
+not expire and is revoked by deleting it. Stage, production and voi share the namespace `biatec-scan`, so every Role
+only reaches its own environment's objects by name - the stage job (every push, no reviewer) can neither read
+production's Secrets nor patch production's Deployments - and no Role may create Deployments / Pods or list Secrets.
+With a cluster-admin kubectl context:
 
 ```bash
-k8s/ci/make-kubeconfig.sh --set-secrets   # applies the RBAC, builds + verifies the kubeconfig, sets the 3 secrets
-rm github-deployer.kubeconfig
+k8s/ci/make-kubeconfig.sh --set-secrets   # applies the RBAC, builds + verifies the 3 kubeconfigs, sets the secrets
 gh run rerun <failed run id> --failed --repo scholtz/AVMTradeReporter
 ```
 
-If the admin context reaches the cluster through a proxy (a Rancher `/k8s/clusters/...` URL does not accept
+The kubeconfigs are written to a temporary directory outside the repository and deleted after `--set-secrets`. If
+the admin context reaches the cluster through a proxy (a Rancher `/k8s/clusters/...` URL does not accept
 ServiceAccount tokens), pass the cluster's own API endpoint: `KUBE_SERVER=https://<host>:6443 k8s/ci/make-kubeconfig.sh --set-secrets`.
-To revoke: `kubectl -n biatec-scan delete secret github-deployer-token` (re-applying the YAML mints a new token).
+To revoke one: `kubectl -n biatec-scan delete secret github-deployer-stage-token` (re-running the script mints a new
+token and updates the secret).
+
+**Limits by design:** the deployers only `kubectl apply` objects that already exist (get + patch). A new object - a
+new Deployment, Service, Ingress, ConfigMap or Secret name, or the images PersistentVolume after a cluster rebuild -
+is created once by an admin, and its name added to the matching Role in `k8s/ci/github-deployer.yaml`. Until then
+the deploy fails with `forbidden`, naming the object.
 
 ## One-time cluster prerequisites
 
