@@ -59,7 +59,8 @@ environment.
 
 Create the Environment first (**Settings → Environments → New environment → `stage`**), then add these
 under its own **Environment secrets** section (not the repo-level Secrets tab). They are used **only**
-by the `deploy-stage` job.
+by the `deploy-stage` job (and the weekly credential check). Besides the ones below, it holds `KUBE_CONFIG` - see
+"`KUBE_CONFIG` - one per Environment".
 
 | Secret | Purpose |
 |---|---|
@@ -69,21 +70,19 @@ by the `deploy-stage` job.
 
 ### `production` Environment secrets
 
-Create this Environment too (**Settings → Environments → New environment → `production`**) - it holds
-**no secrets today**. Production's own credentials (`avm-trade-reporter-secret` /
-`avm-trade-reporter2-secret` / `avm-trade-reporter-subscriber-secret` in the `biatec-scan` namespace -
-the mainnet Elastic/Redis/Algod config) are **not** managed by this workflow at all and continue to be
-set by hand directly in the cluster, same as before this change. The Environment still needs to exist
-so the `deploy-production` job (in `promote-production.yml`)'s `environment: production` reference
-resolves and (optionally) so you can attach protection rules (e.g. required reviewers) to production
-promotions.
+Create this Environment too (**Settings → Environments → New environment → `production`**). Its only secret is
+`KUBE_CONFIG` - the kubeconfig of the `github-deployer-production` ServiceAccount (see "Deployer credentials").
+Production's own credentials (`avm-trade-reporter-secret` / `avm-trade-reporter2-secret` /
+`avm-trade-reporter-subscriber-secret` in the `biatec-scan` namespace - the mainnet Elastic/Redis/Algod config) are
+**not** managed by this workflow and continue to be set by hand directly in the cluster. Attach protection rules
+(required reviewers) here: they gate production promotions.
 
-### Splitting `KUBE_CONFIG` per environment (optional hardening)
+### `KUBE_CONFIG` - one per Environment
 
-If you'd rather the stage job's kubeconfig not be able to touch production resources (or vice versa),
-add a `KUBE_CONFIG` secret inside the `stage` and/or `production` Environment itself - an
-Environment-scoped secret of the same name silently takes priority over the repo-level one for jobs
-running under that Environment, so no workflow changes are needed to adopt this later.
+Every deploy Environment holds its own `KUBE_CONFIG` - `stage`, `production` and `production-voi` - each the
+kubeconfig of that environment's own deployer ServiceAccount, whose Role only reaches that environment's objects (a
+repository-level `KUBE_CONFIG` is not used; an Environment secret of the same name would take priority anyway).
+`k8s/ci/make-kubeconfig.sh --set-secrets` sets all three. Details and rotation: "Deployer credentials" below.
 
 ## Deployer credentials (`KUBE_CONFIG`)
 
@@ -152,5 +151,7 @@ the deploy fails with `forbidden`, naming the object.
 - `promote-production.yml`: `k8s/main/deployment-api.yaml`, `k8s/main/deployment2-api.yaml`,
   `k8s/main/subscriber-deployment.yaml` (production image tags), only when manually triggered.
 
-Each deploy job commits its own manifest changes back to `master` with `[skip ci]` so the checked-in
-YAML always reflects what's actually deployed, then applies them with `kubectl apply`.
+Each deploy job first applies the manifests with `kubectl apply` and watches the rollout, then - whenever the apply
+succeeded - records the deployed image tags on `master` with `[skip ci]` (only the tags are re-applied on a fresh
+`origin/master`, so concurrent edits to the same files are kept). The checked-in YAML therefore reflects what the
+cluster actually got; a run that failed before the apply records nothing.

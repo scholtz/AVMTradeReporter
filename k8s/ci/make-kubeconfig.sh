@@ -22,14 +22,30 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# environment -> ServiceAccount | a Deployment it must be able to patch | an object of ANOTHER environment it must
-# not reach (proves the separation). A plain function instead of associative arrays: runs on macOS' bash 3.2, too.
+# Plain functions instead of associative arrays: runs on macOS' bash 3.2, too.
 ENVIRONMENTS="stage production production-voi"
+# environment -> its ServiceAccount and a Deployment it must be able to patch
 env_info() {
   case "$1" in
-    stage) echo "github-deployer-stage|avm-trade-reporter-stage-app-deployment|get secrets/avm-trade-reporter-secret" ;;
-    production) echo "github-deployer-production|avm-trade-reporter-app-deployment|get secrets/avm-trade-reporter-stage-secret" ;;
-    production-voi) echo "github-deployer-voi|avm-trade-reporter-voi-app-deployment|patch deployments.apps/avm-trade-reporter-app-deployment" ;;
+    stage) echo "github-deployer-stage|avm-trade-reporter-stage-app-deployment" ;;
+    production) echo "github-deployer-production|avm-trade-reporter-app-deployment" ;;
+    production-voi) echo "github-deployer-voi|avm-trade-reporter-voi-app-deployment" ;;
+  esac
+}
+# the objects of an environment (Deployments, Secrets - production's are managed by hand -, ConfigMaps): every OTHER
+# environment's credential must be denied on each of them
+env_objects() {
+  case "$1" in
+    stage) echo "deployments.apps/avm-trade-reporter-stage-app-deployment deployments.apps/avmtradereporter-subscriber-stage
+                 secrets/avm-trade-reporter-stage-secret secrets/avm-trade-reporter-subscriber-stage-secret
+                 configmaps/avm-trade-reporter-stage-main-conf" ;;
+    production) echo "deployments.apps/avm-trade-reporter-app-deployment deployments.apps/avm-trade-reporter2-app-deployment
+                      deployments.apps/avmtradereporter-subscriber secrets/avm-trade-reporter-secret
+                      secrets/avm-trade-reporter2-secret secrets/avm-trade-reporter-subscriber-secret
+                      configmaps/avm-trade-reporter-main-conf" ;;
+    production-voi) echo "deployments.apps/avm-trade-reporter-voi-app-deployment deployments.apps/avmtradereporter-subscriber-voi
+                          secrets/avm-trade-reporter-voi-secret secrets/avm-trade-reporter-subscriber-voi-secret
+                          configmaps/avm-trade-reporter-voi-main-conf" ;;
   esac
 }
 
@@ -62,7 +78,7 @@ fi
 kubectl apply -f "$here/github-deployer.yaml"
 
 for env in $ENVIRONMENTS; do
-  IFS='|' read -r sa own foreign <<< "$(env_info "$env")"
+  IFS='|' read -r sa own <<< "$(env_info "$env")"
   secret="$sa-token"
   token=""
   ca=""
@@ -104,12 +120,20 @@ EOF
 
   echo "== $env ($sa)"
   KUBECONFIG="$file" bash "$check" --namespace "$NAMESPACE" --can-i "patch deployments.apps/$own"
-  # shellcheck disable=SC2086 # "verb resource/name"
-  if [ "$(KUBECONFIG="$file" kubectl auth can-i $foreign -n "$NAMESPACE" 2>/dev/null)" != "no" ]; then
-    echo "The $env deployer may '$foreign' - it must not reach another environment's objects" >&2
-    exit 1
-  fi
-  echo "Cannot '$foreign' (another environment) - separated."
+  denied=0
+  for other in $ENVIRONMENTS; do
+    [ "$other" = "$env" ] && continue
+    for object in $(env_objects "$other"); do
+      for verb in get patch; do
+        if [ "$(KUBECONFIG="$file" kubectl auth can-i "$verb" "$object" -n "$NAMESPACE" 2>/dev/null)" != "no" ]; then
+          echo "The $env deployer may '$verb $object' of $other - it must not reach another environment's objects" >&2
+          exit 1
+        fi
+        denied=$((denied + 1))
+      done
+    done
+  done
+  echo "Denied on all $denied checks against the other environments' objects - separated."
 
   if [ "$SET_SECRETS" -eq 1 ]; then
     encoded=$(base64 -w0 "$file" 2>/dev/null || base64 "$file" | tr -d '\n')

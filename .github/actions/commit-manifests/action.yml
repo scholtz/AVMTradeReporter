@@ -1,15 +1,19 @@
-# Commits the manifests a deploy job applied back to master, so master shows the spec the cluster got.
+# Records the image version a deploy job applied in the manifests on master, so master shows what the cluster got.
 #
 # Run it after the rollout step with `if: always() && steps.apply.outcome == 'success'`: the rollout is always
-# watched (a push problem can no longer skip `kubectl rollout status`), and master records the applied spec also
-# when the rollout fails. The commit is made on a fresh worktree of origin/master with the applied files copied in -
-# not rebased - so another deploy's commit to the same image line can never leave a conflicted rebase behind; a push
-# that still fails after the retries fails the step.
+# watched (a push problem can no longer skip `kubectl rollout status`), and master records the applied version also
+# when the rollout failed. The change is re-applied with scripts/set-image-tags.sh on a fresh worktree of
+# origin/master - not rebased, not copied - so another deploy's commit to the same image line cannot leave a
+# conflicted rebase behind, and other edits to those manifests that landed on master meanwhile are kept. A push that
+# still fails after the retries fails the step.
 name: Commit deployed manifests
-description: Commits the applied manifests to master (fresh worktree, retried, fails loudly).
+description: Records the applied image version in the manifests on master (fresh worktree, retried, fails loudly).
 inputs:
   files:
-    description: Space separated manifest paths, as updated in the workspace
+    description: Space separated manifest paths
+    required: true
+  version:
+    description: The image version that was applied
     required: true
   message:
     description: Commit message
@@ -21,28 +25,21 @@ runs:
       shell: bash
       env:
         FILES: ${{ inputs.files }}
+        VERSION: ${{ inputs.version }}
         MESSAGE: ${{ inputs.message }}
       run: |
         set -euo pipefail
         read -r -a files <<< "$FILES"
-        if git diff --quiet -- "${files[@]}"; then
-          echo "No manifest changes to commit"
-          exit 0
-        fi
-        applied=$(mktemp -d)
-        for f in "${files[@]}"; do
-          mkdir -p "$applied/$(dirname "$f")"
-          cp "$f" "$applied/$f"
-        done
+        set_tags="$GITHUB_WORKSPACE/scripts/set-image-tags.sh"
         worktree=$(mktemp -d)
-        trap 'git worktree remove --force "$worktree" >/dev/null 2>&1 || true; rm -rf "$applied"' EXIT
+        trap 'git worktree remove --force "$worktree" >/dev/null 2>&1 || true' EXIT
         for attempt in 1 2 3 4 5; do
           git fetch --quiet origin master
           git worktree remove --force "$worktree" >/dev/null 2>&1 || true
           git worktree add --quiet --detach "$worktree" origin/master
-          for f in "${files[@]}"; do cp "$applied/$f" "$worktree/$f"; done
+          (cd "$worktree" && bash "$set_tags" "$VERSION" "${files[@]}")
           if git -C "$worktree" diff --quiet -- "${files[@]}"; then
-            echo "master already has these manifests"
+            echo "master already records version $VERSION"
             exit 0
           fi
           git -C "$worktree" -c user.name="github-actions[bot]" -c user.email="github-actions[bot]@users.noreply.github.com" \
@@ -54,5 +51,5 @@ runs:
           echo "Push attempt $attempt failed, retrying on a fresh master..."
           sleep $((attempt * 3))
         done
-        echo "::error::Could not push the deployed manifests to master - master does not show the spec applied to the cluster."
+        echo "::error::Could not push the deployed manifests to master - master does not show the version applied to the cluster."
         exit 1

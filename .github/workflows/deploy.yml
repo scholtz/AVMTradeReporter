@@ -105,8 +105,7 @@ jobs:
       - name: Update stage manifests with new image tags
         run: |
           version="${{ needs.build.outputs.version }}"
-          sed -i "s~${IMAGE_API}.*~${IMAGE_API}:${version}~g" k8s/stage/deployment-api-stage.yaml
-          sed -i "s~${IMAGE_SUBSCRIBER}.*~${IMAGE_SUBSCRIBER}:${version}~g" k8s/stage/subscriber-deployment-stage.yaml
+          bash scripts/set-image-tags.sh "$version" k8s/stage/deployment-api-stage.yaml k8s/stage/subscriber-deployment-stage.yaml
 
       # Stage's Elastic/Redis credentials live only as GitHub secrets, never committed to the repo.
       # This step (re-)creates the Secret from those GitHub secrets on every deploy, so rotating a
@@ -153,6 +152,7 @@ jobs:
         uses: ./.github/actions/commit-manifests
         with:
           files: k8s/stage/deployment-api-stage.yaml k8s/stage/subscriber-deployment-stage.yaml
+          version: ${{ needs.build.outputs.version }}
           message: "cicd deploy ${{ needs.build.outputs.version }} to stage [skip ci]"
 
       - name: Remove kubeconfig

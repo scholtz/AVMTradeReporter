@@ -37,12 +37,16 @@ fmt_epoch() { date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -r "$1
 REMEDY="Regenerate the deployer kubeconfig with k8s/ci/make-kubeconfig.sh (non-expiring ServiceAccount token) and update the KUBE_CONFIG secret of the stage, production and production-voi environments - see docs/CICD_GITHUB_ACTIONS.md, 'Deployer credentials'."
 
 # --- what kind of credential is it, and when does it expire (from the kubeconfig itself, no cluster call) ---
-server=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || true)
-user_json=$(kubectl config view --minify --raw -o jsonpath='{.users[0].user}' 2>/dev/null || true)
+view_err=$(mktemp)
+server=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>"$view_err" || true)
+user_json=$(kubectl config view --minify --raw -o jsonpath='{.users[0].user}' 2>>"$view_err" || true)
 if [ -z "$server" ] || [ -z "$user_json" ]; then
-  echo "::error::The kubeconfig is empty or unreadable (is the KUBE_CONFIG secret set and base64 encoded?). $REMEDY"
+  reason=$(head -c 300 "$view_err" | tr '\n' ' ')
+  rm -f "$view_err"
+  echo "::error::The kubeconfig is empty or unreadable${reason:+ ($reason)} - is the KUBE_CONFIG secret set, base64 encoded, with a current-context? $REMEDY"
   exit 1
 fi
+rm -f "$view_err"
 echo "API server: ${server%%\?*}"
 
 expires_epoch=""

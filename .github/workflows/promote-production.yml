@@ -242,9 +242,7 @@ jobs:
       - name: Update production manifests with new image tags
         run: |
           version="${{ needs.resolve-version.outputs.version }}"
-          sed -i "s~${IMAGE_API}.*~${IMAGE_API}:${version}~g" k8s/main/deployment-api.yaml
-          sed -i "s~${IMAGE_API}.*~${IMAGE_API}:${version}~g" k8s/main/deployment2-api.yaml
-          sed -i "s~${IMAGE_SUBSCRIBER}.*~${IMAGE_SUBSCRIBER}:${version}~g" k8s/main/subscriber-deployment.yaml
+          bash scripts/set-image-tags.sh "$version" k8s/main/deployment-api.yaml k8s/main/deployment2-api.yaml k8s/main/subscriber-deployment.yaml
 
       # Must run BEFORE "Apply Kubernetes manifests": on a freshly scheduled Pod, kubectl apply
       # schedules Pods immediately, so if the ConfigMap a Pod's volume mounts doesn't exist yet, the
@@ -285,6 +283,7 @@ jobs:
         uses: ./.github/actions/commit-manifests
         with:
           files: k8s/main/deployment-api.yaml k8s/main/deployment2-api.yaml k8s/main/subscriber-deployment.yaml
+          version: ${{ needs.resolve-version.outputs.version }}
           message: "cicd promote ${{ needs.resolve-version.outputs.version }} to production [skip ci]"
 
       - name: Remove kubeconfig
@@ -340,8 +339,7 @@ jobs:
       - name: Update voi manifests with new image tags
         run: |
           version="${{ needs.resolve-version.outputs.version }}"
-          sed -i "s~${IMAGE_API}.*~${IMAGE_API}:${version}~g" k8s/voi/deployment-api-voi.yaml
-          sed -i "s~${IMAGE_SUBSCRIBER}.*~${IMAGE_SUBSCRIBER}:${version}~g" k8s/voi/subscriber-deployment-voi.yaml
+          bash scripts/set-image-tags.sh "$version" k8s/voi/deployment-api-voi.yaml k8s/voi/subscriber-deployment-voi.yaml
 
       # Voi's Elastic/Redis credentials live only as GitHub Environment secrets ("production-voi"),
       # never committed to the repo. Re-created on every promote so rotating a GitHub secret and
@@ -389,6 +387,7 @@ jobs:
         uses: ./.github/actions/commit-manifests
         with:
           files: k8s/voi/deployment-api-voi.yaml k8s/voi/subscriber-deployment-voi.yaml
+          version: ${{ needs.resolve-version.outputs.version }}
           message: "cicd promote ${{ needs.resolve-version.outputs.version }} to production-voi [skip ci]"
 
       - name: Remove kubeconfig
