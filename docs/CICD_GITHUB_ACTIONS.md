@@ -79,14 +79,10 @@ Production's own credentials (`avm-trade-reporter-secret` / `avm-trade-reporter2
 
 ### `KUBE_CONFIG` - one per Environment
 
-Every deploy Environment holds its own `KUBE_CONFIG` (a repository-level `KUBE_CONFIG` is not used; an Environment
-secret of the same name would take priority anyway):
-
-- `stage`: a token of a ServiceAccount scoped to the namespace **`biatec-scan-testnet`** only, minted by the cluster
-  admin outside this repository (a bound token, valid 30 days - the weekly check fails two weeks before it expires;
-  re-mint it and update the secret then). Stage lives in that namespace and must never change `biatec-scan`.
-- `production`, `production-voi`: the kubeconfigs of the `github-deployer-production` / `github-deployer-voi`
-  ServiceAccounts, set by `k8s/ci/make-kubeconfig.sh --set-secrets`. Details and rotation: "Deployer credentials".
+Every deploy Environment holds its own `KUBE_CONFIG` - `stage`, `production` and `production-voi` - each the
+kubeconfig of that environment's own deployer ServiceAccount, whose Role only reaches that environment's objects (a
+repository-level `KUBE_CONFIG` is not used; an Environment secret of the same name would take priority anyway).
+`k8s/ci/make-kubeconfig.sh --set-secrets` sets all three. Details and rotation: "Deployer credentials" below.
 
 ## Deployer credentials (`KUBE_CONFIG`)
 
@@ -94,12 +90,11 @@ Every deploy job starts with the local action `.github/actions/kube-setup`: it i
 `KUBE_CONFIG` secret of the job's Environment to `~/.kube/config` and runs `scripts/check-kubeconfig.sh` **before**
 anything is applied. The check prints the API server, the kind of credential and its expiry (never the credential
 itself), fails with an explanation when the cluster rejects it or it may not deploy, and warns 14 days before it
-expires. `.github/workflows/kube-credentials.yml` runs the same check every Monday for `stage` (in
-`biatec-scan-testnet`) and `production-voi`
+expires. `.github/workflows/kube-credentials.yml` runs the same check every Monday for `stage` and `production-voi`
 and fails 14 days ahead of an expiry (`production` is checked by its promote job instead - it needs a reviewer, a
 scheduled job would wait for one every week). Before anything in the cluster changes, a preflight step runs a
-server-side dry run of the manifests (production / stage: also of their images PV/PVC); for Voi it checks that the
-objects it patches exist, and for stage that every stage manifest names only `biatec-scan-testnet`. The manifests are committed back to `master` only after a **successful** rollout
+server-side dry run of the manifests (production: also of the images PV/PVC) and, for stage and Voi, checks that the
+shared images PVC exists. The manifests are committed back to `master` only after a **successful** rollout
 (`.github/actions/commit-manifests`): promote-production's gate reads `master`'s stage manifest as "stage runs this
 version", and after a failed rollout the old pods keep serving - so `master` keeps showing the version that serves.
 The commit is made on a fresh `origin/master` worktree (no rebase that another deploy's commit could conflict with),
@@ -115,10 +110,8 @@ three Environments) and again from 2026-10-18, every run failing at the first `k
 rejected the expired credential. Because the manifests were committed before that call, `master` collected
 `cicd deploy ... to stage` commits for versions that never reached the cluster.
 
-**Fix / rotation:** stage moved into its own namespace `biatec-scan-testnet` with a credential that reaches only
-that namespace (see "`KUBE_CONFIG` - one per Environment"); its icon cache is its own PV + PVC on the same host
-directory as production's (`k8s/stage/pv-images-stage.yaml`). For production and Voi, one ServiceAccount per
-Environment (`k8s/ci/github-deployer.yaml`): `github-deployer-production`, `github-deployer-voi`. Each token Secret (`kubernetes.io/service-account-token`) does
+**Fix / rotation:** one ServiceAccount per Environment (`k8s/ci/github-deployer.yaml`): `github-deployer-stage`,
+`github-deployer-production`, `github-deployer-voi`. Each token Secret (`kubernetes.io/service-account-token`) does
 not expire and is revoked by deleting it. Every Role only reaches its own environment's objects by name, no Role may
 create Deployments / Pods or list Secrets, and only the production deployer touches the shared images PV/PVC.
 
@@ -126,15 +119,19 @@ The ServiceAccounts and their token Secrets live in their own namespace `github-
 deployer has any right there): a pod can only mount Secrets of its own namespace, so no pod template in `biatec-scan`
 can reach another deployer's token. The Roles - and the deployers' work - stay in `biatec-scan`.
 
-Stage - every push, no reviewer - is isolated from production by its namespace: its credential cannot reach
-`biatec-scan`, and its pods cannot mount Secrets of another namespace. Between production and Voi the Roles limit
-each credential through the API, but that is **not a security boundary**: they share `biatec-scan`, so a deployer
-that may patch its own Deployment may also change its pod template, and a pod can mount any Secret of its
-namespace. Both are manual promotes (production behind a reviewer).
+This limits each credential through the API, but it is **not a security boundary** between the apps: they
+share the namespace `biatec-scan`, so a deployer that may patch its own Deployment may also change its pod template,
+and a pod can mount any Secret of its namespace. Isolating the stage job (every push, no reviewer) from production
+needs stage in its own namespace - blocked today by the shared icon cache (a PersistentVolume binds to one PVC in one
+namespace) - or an admission policy pinning the pod templates' Secret / ServiceAccount references.
 With a cluster-admin kubectl context:
 
 ```bash
-k8s/ci/make-kubeconfig.sh --set-secrets   # production + Voi: applies the RBAC, builds + verifies the kubeconfigs, sets the secrets
+k8s/ci/make-kubeconfig.sh --set-secrets   # applies the RBAC, builds + verifies the 3 kubeconfigs, then sets the secrets
+k8s/ci/make-kubeconfig.sh --only stage --set-secrets   # just one environment (repeatable --only)
+# on a control-plane node (context server https://127.0.0.1:6443) pass the external endpoint, and without a logged-in
+# gh CLI drop --set-secrets: the script then writes <env>.kubeconfig.base64 to paste into the KUBE_CONFIG secret
+KUBE_SERVER=https://188.34.137.167:6443 k8s/ci/make-kubeconfig.sh --only stage
 gh workflow run deploy.yml --ref master --repo scholtz/AVMTradeReporter   # deploys the current master to stage
 ```
 
@@ -146,15 +143,15 @@ another branch deploys stage but records nothing on `master`; it does push the d
 The image tag is per day (`1.<y>.<m>.<d>-main`, shared by every build of that day), so the promote gate ("stage runs
 this version") cannot tell two builds of one day apart - only deploy `master`, and its newest run. Making the tag
 unique per build (e.g. with the commit SHA) is the root fix, left for a follow-up.
-Nothing is set unless both kubeconfigs verified.
+Nothing is set unless all three kubeconfigs verified.
 
 The kubeconfigs are written to a temporary directory outside the repository and deleted after `--set-secrets`. If
 the admin context reaches the cluster through a proxy (a Rancher `/k8s/clusters/...` URL does not accept
 ServiceAccount tokens), pass the cluster's own API endpoint: `KUBE_SERVER=https://<host>:6443 k8s/ci/make-kubeconfig.sh --set-secrets`.
-To revoke one: `kubectl -n github-deployers delete secret github-deployer-voi-token` (re-running the script mints a new
+To revoke one: `kubectl -n github-deployers delete secret github-deployer-stage-token` (re-running the script mints a new
 token and updates the secret).
 
-**Limits by design:** the production / Voi deployers only `kubectl apply` objects that already exist (get + patch). A new object - a
+**Limits by design:** the deployers only `kubectl apply` objects that already exist (get + patch). A new object - a
 new Deployment, Service, Ingress, ConfigMap or Secret name, or the images PV/PVC after a cluster rebuild -
 is created once by an admin, and its name added to the matching Role in `k8s/ci/github-deployer.yaml`. Until then
 the deploy fails with `forbidden`, naming the object.
@@ -164,22 +161,6 @@ the deploy fails with `forbidden`, naming the object.
 - The `biatec-scan` namespace, and production's Secrets (`avm-trade-reporter-secret`,
   `avm-trade-reporter2-secret`, `avm-trade-reporter-subscriber-secret`) must already exist (unchanged
   from before this workflow).
-- The `biatec-scan-testnet` namespace and the stage deployer's ServiceAccount / Role in it (plus the ClusterRole
-  that lets it create the stage images PV) - created by the cluster admin; the stage deploy creates everything else
-  in that namespace itself.
-- **Moving stage out of `biatec-scan` (2026-11-12):** the old stage objects there are not touched by any deploy any
-  more and must be deleted once by an admin - above all the old Ingress, which claims the same host
-  `api.testnet.scan.biatec.io` as the new one:
-  `kubectl -n biatec-scan delete ingress avm-trade-reporter-stage-ingress-main2 && kubectl -n biatec-scan delete
-  deployment avm-trade-reporter-stage-app-deployment avmtradereporter-subscriber-stage && kubectl -n biatec-scan
-  delete service avm-trade-reporter-stage-service && kubectl -n biatec-scan delete configmap
-  avm-trade-reporter-stage-main-conf && kubectl -n biatec-scan delete secret avm-trade-reporter-stage-secret
-  avm-trade-reporter-subscriber-stage-secret`. Do it **before** the first deploy into `biatec-scan-testnet`: otherwise
-  two Ingresses claim the host (the old one may keep the traffic) and the old subscriber keeps indexing testnet next
-  to the new one. If `k8s/ci/make-kubeconfig.sh` ever ran before this move, also revoke its stage identity:
-  `kubectl -n github-deployers delete serviceaccount github-deployer-stage --ignore-not-found && kubectl -n
-  github-deployers delete secret github-deployer-stage-token --ignore-not-found && kubectl -n biatec-scan delete
-  role,rolebinding github-deployer-stage --ignore-not-found`.
 - DNS records for the two new stage hostnames must point at the same ingress-nginx load balancer IP
   as the production hostnames, before the first `deploy-stage` run, so cert-manager can issue TLS
   certificates for them:
@@ -189,7 +170,7 @@ the deploy fails with `forbidden`, naming the object.
 ## Manifests updated by these workflows
 
 - `deploy.yml`: `k8s/stage/deployment-api-stage.yaml`, `k8s/stage/subscriber-deployment-stage.yaml`
-  (stage image tags, namespace `biatec-scan-testnet`), on every push to `master`.
+  (stage image tags), on every push to `master`.
 - `promote-production.yml`: `k8s/main/deployment-api.yaml`, `k8s/main/deployment2-api.yaml`,
   `k8s/main/subscriber-deployment.yaml` (production image tags), only when manually triggered.
 
