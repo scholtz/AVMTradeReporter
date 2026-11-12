@@ -6,7 +6,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: avmtradereporter-subscriber-stage
-  namespace: biatec-scan
+  namespace: biatec-scan-testnet
 spec:
   replicas: 1
   selector:

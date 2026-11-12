@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Builds the kubeconfigs of the GitHub Actions deploy jobs from the per-environment deployer ServiceAccounts
 # (non-expiring, revocable tokens - see k8s/ci/github-deployer.yaml), verifies each one, and with --set-secrets stores
-# them base64 encoded as the KUBE_CONFIG secret of their environment (stage, production, production-voi).
+# them base64 encoded as the KUBE_CONFIG secret of their environment (production, production-voi). Stage is not
+# managed here: its KUBE_CONFIG is scoped to the namespace biatec-scan-testnet (created by the cluster admin).
 #
 # Run with a kubectl context that has cluster-admin rights on the cluster (to apply the RBAC):
 #   k8s/ci/make-kubeconfig.sh --set-secrets   # the usual way: nothing is left on disk
@@ -24,11 +25,10 @@ while [ $# -gt 0 ]; do
 done
 
 # Plain functions instead of associative arrays: runs on macOS' bash 3.2, too.
-ENVIRONMENTS="stage production production-voi"
+ENVIRONMENTS="production production-voi"
 # environment -> its ServiceAccount and a Deployment it must be able to patch
 env_info() {
   case "$1" in
-    stage) echo "github-deployer-stage|avm-trade-reporter-stage-app-deployment" ;;
     production) echo "github-deployer-production|avm-trade-reporter-app-deployment" ;;
     production-voi) echo "github-deployer-voi|avm-trade-reporter-voi-app-deployment" ;;
   esac

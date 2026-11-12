@@ -1,7 +1,8 @@
-# Identities of the GitHub Actions deploy jobs - one ServiceAccount per GitHub environment:
-#   github-deployer-stage       -> deploy.yml           (environment "stage",          no reviewer, every push)
+# Identities of the production GitHub Actions deploy jobs - one ServiceAccount per GitHub environment:
 #   github-deployer-production  -> promote-production   (environment "production",     required reviewer)
 #   github-deployer-voi         -> promote-production   (environment "production-voi")
+# Stage is NOT here: it deploys into its own namespace biatec-scan-testnet with a credential scoped to that namespace
+# only (created by the cluster admin outside this repo), and never touches biatec-scan.
 #
 # Why: the KUBE_CONFIG secrets used to be a copy of a personal/admin kubeconfig whose credential expires ~30 days
 # after it is issued - the stage deploy broke 2026-09-09 (fixed 09-12 by pasting a fresh one) and again from
@@ -21,78 +22,16 @@
 # namespace, so a pod template change in biatec-scan cannot reach another deployer's token. The Roles and
 # RoleBindings stay in biatec-scan, where the deployers work.
 #
-# Not a security boundary between the APPS: stage, production and voi share the namespace biatec-scan, so a deployer
-# that may patch its own Deployment can also change that Deployment's pod template - and a pod can mount any Secret
-# of its namespace (e.g. production's Elastic / Redis credentials). Real isolation of the stage job (every push, no
-# reviewer) from production needs stage in its own namespace (blocked today by the shared icon cache: a
-# PersistentVolume binds to one PVC in one namespace) or an admission policy that pins the pod templates' Secret /
-# ServiceAccount references.
+# Not a security boundary between production and voi: they share the namespace biatec-scan, so a deployer that may
+# patch its own Deployment can also change that Deployment's pod template - and a pod can mount any Secret of its
+# namespace. Both deploy jobs are manual promotes (production behind a reviewer). Stage - every push, no reviewer -
+# is isolated: it lives in biatec-scan-testnet.
 #
 # Apply with cluster-admin rights via k8s/ci/make-kubeconfig.sh (which also builds the kubeconfigs).
 apiVersion: v1
 kind: Namespace
 metadata:
   name: github-deployers
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: github-deployer-stage
-  namespace: github-deployers
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: github-deployer-stage-token
-  namespace: github-deployers
-  annotations:
-    kubernetes.io/service-account.name: github-deployer-stage
-type: kubernetes.io/service-account-token
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: github-deployer-stage
-  namespace: biatec-scan
-rules:
-  - apiGroups: ["apps"]
-    resources: ["deployments"]
-    resourceNames: ["avm-trade-reporter-stage-app-deployment", "avmtradereporter-subscriber-stage"]
-    verbs: ["get", "list", "watch", "patch"]
-  - apiGroups: [""]
-    resources: ["services"]
-    resourceNames: ["avm-trade-reporter-stage-service"]
-    verbs: ["get", "patch"]
-  - apiGroups: ["networking.k8s.io"]
-    resources: ["ingresses"]
-    resourceNames: ["avm-trade-reporter-stage-ingress-main2"]
-    verbs: ["get", "patch"]
-  - apiGroups: [""]
-    resources: ["configmaps"]
-    resourceNames: ["avm-trade-reporter-stage-main-conf"]
-    verbs: ["get", "patch"]
-  - apiGroups: [""]
-    resources: ["secrets"]
-    resourceNames: ["avm-trade-reporter-stage-secret", "avm-trade-reporter-subscriber-stage-secret"]
-    verbs: ["get", "patch"]
-  - apiGroups: [""]
-    resources: ["persistentvolumeclaims"]
-    resourceNames: ["avm-trade-reporter-images-pvc"]
-    verbs: ["get"]  # read only: the preflight that the shared icon cache exists (only production may change it)
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: github-deployer-stage
-  namespace: biatec-scan
-subjects:
-  - kind: ServiceAccount
-    name: github-deployer-stage
-    namespace: github-deployers
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: github-deployer-stage
 ---
 apiVersion: v1
 kind: ServiceAccount
