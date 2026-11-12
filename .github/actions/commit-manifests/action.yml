@@ -1,0 +1,58 @@
+# Commits the manifests a deploy job applied back to master, so master shows the spec the cluster got.
+#
+# Run it after the rollout step with `if: always() && steps.apply.outcome == 'success'`: the rollout is always
+# watched (a push problem can no longer skip `kubectl rollout status`), and master records the applied spec also
+# when the rollout fails. The commit is made on a fresh worktree of origin/master with the applied files copied in -
+# not rebased - so another deploy's commit to the same image line can never leave a conflicted rebase behind; a push
+# that still fails after the retries fails the step.
+name: Commit deployed manifests
+description: Commits the applied manifests to master (fresh worktree, retried, fails loudly).
+inputs:
+  files:
+    description: Space separated manifest paths, as updated in the workspace
+    required: true
+  message:
+    description: Commit message
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Commit and push the deployed manifests
+      shell: bash
+      env:
+        FILES: ${{ inputs.files }}
+        MESSAGE: ${{ inputs.message }}
+      run: |
+        set -euo pipefail
+        read -r -a files <<< "$FILES"
+        if git diff --quiet -- "${files[@]}"; then
+          echo "No manifest changes to commit"
+          exit 0
+        fi
+        applied=$(mktemp -d)
+        for f in "${files[@]}"; do
+          mkdir -p "$applied/$(dirname "$f")"
+          cp "$f" "$applied/$f"
+        done
+        worktree=$(mktemp -d)
+        trap 'git worktree remove --force "$worktree" >/dev/null 2>&1 || true; rm -rf "$applied"' EXIT
+        for attempt in 1 2 3 4 5; do
+          git fetch --quiet origin master
+          git worktree remove --force "$worktree" >/dev/null 2>&1 || true
+          git worktree add --quiet --detach "$worktree" origin/master
+          for f in "${files[@]}"; do cp "$applied/$f" "$worktree/$f"; done
+          if git -C "$worktree" diff --quiet -- "${files[@]}"; then
+            echo "master already has these manifests"
+            exit 0
+          fi
+          git -C "$worktree" -c user.name="github-actions[bot]" -c user.email="github-actions[bot]@users.noreply.github.com" \
+            commit --quiet -m "$MESSAGE" -- "${files[@]}"
+          if git -C "$worktree" push --quiet origin HEAD:master; then
+            echo "Committed: $MESSAGE"
+            exit 0
+          fi
+          echo "Push attempt $attempt failed, retrying on a fresh master..."
+          sleep $((attempt * 3))
+        done
+        echo "::error::Could not push the deployed manifests to master - master does not show the spec applied to the cluster."
+        exit 1

@@ -30,6 +30,10 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# GNU date (Linux runners) with a BSD date fallback (macOS)
+to_epoch() { date -d "$1" +%s 2>/dev/null || date -j -f "%b %d %T %Y %Z" "$1" +%s 2>/dev/null || true; }
+fmt_epoch() { date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ; }
+
 REMEDY="Regenerate the deployer kubeconfig with k8s/ci/make-kubeconfig.sh (non-expiring ServiceAccount token) and update the KUBE_CONFIG secret of the stage, production and production-voi environments - see docs/CICD_GITHUB_ACTIONS.md, 'Deployer credentials'."
 
 # --- what kind of credential is it, and when does it expire (from the kubeconfig itself, no cluster call) ---
@@ -72,7 +76,7 @@ elif [ -n "$cert_data" ]; then
   not_after=$(printf '%s' "$cert_data" | base64 -d | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2 || true)
   subject=$(printf '%s' "$cert_data" | base64 -d | openssl x509 -noout -subject 2>/dev/null | sed 's/^subject=//' || true)
   kind="client certificate (${subject:-unknown subject})"
-  if [ -n "$not_after" ]; then expires_epoch=$(date -d "$not_after" +%s 2>/dev/null || true); fi
+  if [ -n "$not_after" ]; then expires_epoch=$(to_epoch "$not_after"); fi
 elif [ -n "$exec_cmd" ]; then
   kind="exec credential plugin '$exec_cmd' (needs that binary and its login on the runner)"
 elif [ -n "$auth_provider" ]; then
@@ -84,7 +88,7 @@ warn=0
 if [ -n "$expires_epoch" ]; then
   now=$(date +%s)
   days_left=$(( (expires_epoch - now) / 86400 ))
-  expires_at=$(date -u -d "@$expires_epoch" +%Y-%m-%dT%H:%M:%SZ)
+  expires_at=$(fmt_epoch "$expires_epoch")
   if [ "$expires_epoch" -le "$now" ]; then
     echo "::error::The deployer credential EXPIRED at $expires_at. $REMEDY"
     exit 1

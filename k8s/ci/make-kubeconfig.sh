@@ -22,14 +22,16 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# environment -> ServiceAccount, a Deployment it must be able to patch, and an object of ANOTHER environment it
-# must not be able to read (proves the separation)
-ENVIRONMENTS=(stage production production-voi)
-declare -A SA=( [stage]=github-deployer-stage [production]=github-deployer-production [production-voi]=github-deployer-voi )
-declare -A OWN=( [stage]=avm-trade-reporter-stage-app-deployment [production]=avm-trade-reporter-app-deployment
-                 [production-voi]=avm-trade-reporter-voi-app-deployment )
-declare -A FOREIGN=( [stage]="get secrets/avm-trade-reporter-secret" [production]="get secrets/avm-trade-reporter-stage-secret"
-                     [production-voi]="patch deployments.apps/avm-trade-reporter-app-deployment" )
+# environment -> ServiceAccount | a Deployment it must be able to patch | an object of ANOTHER environment it must
+# not reach (proves the separation). A plain function instead of associative arrays: runs on macOS' bash 3.2, too.
+ENVIRONMENTS="stage production production-voi"
+env_info() {
+  case "$1" in
+    stage) echo "github-deployer-stage|avm-trade-reporter-stage-app-deployment|get secrets/avm-trade-reporter-secret" ;;
+    production) echo "github-deployer-production|avm-trade-reporter-app-deployment|get secrets/avm-trade-reporter-stage-secret" ;;
+    production-voi) echo "github-deployer-voi|avm-trade-reporter-voi-app-deployment|patch deployments.apps/avm-trade-reporter-app-deployment" ;;
+  esac
+}
 
 here=$(cd "$(dirname "$0")" && pwd)
 check="$here/../../scripts/check-kubeconfig.sh"
@@ -38,7 +40,7 @@ check="$here/../../scripts/check-kubeconfig.sh"
 # only what this script created (its own temp directory, or just its files in a given --out-dir)
 written=()
 cleanup() {
-  if [ -n "${OWN_DIR:-}" ]; then rm -rf "$OWN_DIR"; else rm -f "${written[@]}"; fi
+  if [ -n "${OWN_DIR:-}" ]; then rm -rf "$OWN_DIR"; else rm -f ${written[@]+"${written[@]}"}; fi
 }
 if [ -z "$OUT_DIR" ]; then
   OUT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/github-deployer.XXXXXX")
@@ -59,8 +61,8 @@ fi
 
 kubectl apply -f "$here/github-deployer.yaml"
 
-for env in "${ENVIRONMENTS[@]}"; do
-  sa="${SA[$env]}"
+for env in $ENVIRONMENTS; do
+  IFS='|' read -r sa own foreign <<< "$(env_info "$env")"
   secret="$sa-token"
   token=""
   ca=""
@@ -101,13 +103,13 @@ EOF
   )
 
   echo "== $env ($sa)"
-  KUBECONFIG="$file" bash "$check" --namespace "$NAMESPACE" --can-i "patch deployments.apps/${OWN[$env]}"
-  # shellcheck disable=SC2086
-  if [ "$(KUBECONFIG="$file" kubectl auth can-i ${FOREIGN[$env]} -n "$NAMESPACE" 2>/dev/null)" != "no" ]; then
-    echo "The $env deployer may '${FOREIGN[$env]}' - it must not reach another environment's objects" >&2
+  KUBECONFIG="$file" bash "$check" --namespace "$NAMESPACE" --can-i "patch deployments.apps/$own"
+  # shellcheck disable=SC2086 # "verb resource/name"
+  if [ "$(KUBECONFIG="$file" kubectl auth can-i $foreign -n "$NAMESPACE" 2>/dev/null)" != "no" ]; then
+    echo "The $env deployer may '$foreign' - it must not reach another environment's objects" >&2
     exit 1
   fi
-  echo "Cannot '${FOREIGN[$env]}' (another environment) - separated."
+  echo "Cannot '$foreign' (another environment) - separated."
 
   if [ "$SET_SECRETS" -eq 1 ]; then
     encoded=$(base64 -w0 "$file" 2>/dev/null || base64 "$file" | tr -d '\n')

@@ -93,9 +93,11 @@ anything is applied. The check prints the API server, the kind of credential and
 itself), fails with an explanation when the cluster rejects it or it may not deploy, and warns 14 days before it
 expires. `.github/workflows/kube-credentials.yml` runs the same check every Monday for `stage` and `production-voi`
 and fails 14 days ahead of an expiry (`production` is checked by its promote job instead - it needs a reviewer, a
-scheduled job would wait for one every week). The manifests are committed back to `master` only after
-`kubectl apply` succeeded - the moment the cluster's spec changed - so `master` shows the applied spec, also when the
-rollout then fails. Overlapping deploys of one environment are serialized (`concurrency`).
+scheduled job would wait for one every week). The manifests are committed back to `master` after the rollout step,
+whenever `kubectl apply` succeeded (`.github/actions/commit-manifests`): the rollout is always watched, and `master`
+shows the spec the cluster got - also when the rollout failed. The commit is made on a fresh `origin/master` worktree
+(no rebase that another deploy's commit could conflict with) and a push that keeps failing fails the job. Overlapping
+deploys of one environment are serialized (`concurrency`).
 
 **History:** the secrets used to hold a copy of a personal/admin kubeconfig whose credential expires about 30 days
 after it is issued. The stage deploy broke on 2026-09-09 (fixed 2026-09-12 by pasting fresh kubeconfigs into all

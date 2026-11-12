@@ -134,33 +134,10 @@ jobs:
           kubectl create configmap avm-trade-reporter-stage-main-conf --from-file=k8s/stage/conf-api-stage -n "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Apply Kubernetes manifests (stage)
+        id: apply
         run: |
           kubectl apply -f k8s/stage/deployment-api-stage.yaml -n "$NAMESPACE"
           kubectl apply -f k8s/stage/subscriber-deployment-stage.yaml -n "$NAMESPACE"
-
-      # committed right after the manifests were applied - the moment the cluster's spec changed - so master shows the
-      # applied spec (also when the rollout below fails); it used to be committed before any kubectl call, and master
-      # collected deploys that never reached the cluster
-      - name: Commit updated stage manifests
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          if ! git diff --quiet -- k8s/stage/deployment-api-stage.yaml k8s/stage/subscriber-deployment-stage.yaml; then
-            git add k8s/stage/deployment-api-stage.yaml k8s/stage/subscriber-deployment-stage.yaml
-            git commit -m "cicd deploy ${{ needs.build.outputs.version }} to stage [skip ci]"
-            pushed=0
-            for i in 1 2 3 4 5; do
-              if git pull --rebase origin master && git push; then pushed=1; break; fi
-              echo "Push attempt $i failed, retrying..."
-              sleep $((i * 3))
-            done
-            if [ "$pushed" -ne 1 ]; then
-              echo "::error::Could not push the deployed manifests to master - master does not show the version applied to the cluster."
-              exit 1
-            fi
-          else
-            echo "No manifest changes to commit"
-          fi
 
       - name: Roll out stage deployments
         run: |
@@ -168,6 +145,15 @@ jobs:
           kubectl rollout status deployment/avm-trade-reporter-stage-app-deployment -n "$NAMESPACE"
           kubectl rollout restart deployment/avmtradereporter-subscriber-stage -n "$NAMESPACE"
           kubectl rollout status deployment/avmtradereporter-subscriber-stage -n "$NAMESPACE"
+
+      # after the rollout (always watched), whenever the manifests were applied: master shows the spec the cluster
+      # got, also when the rollout failed - see .github/actions/commit-manifests
+      - name: Commit updated stage manifests
+        if: always() && steps.apply.outcome == 'success'
+        uses: ./.github/actions/commit-manifests
+        with:
+          files: k8s/stage/deployment-api-stage.yaml k8s/stage/subscriber-deployment-stage.yaml
+          message: "cicd deploy ${{ needs.build.outputs.version }} to stage [skip ci]"
 
       - name: Remove kubeconfig
         if: always()
