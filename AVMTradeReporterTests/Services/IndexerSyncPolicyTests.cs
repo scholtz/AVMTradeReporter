@@ -62,6 +62,18 @@ namespace AVMTradeReporterTests.Services
         }
 
         [Test]
+        public void Relays_AreAskedFirst_OnlyForBlocksOurOwnNodeMayNotKeep()
+        {
+            const int beyond = 500;
+            Assert.That(IndexerSyncPolicy.FetchFromRelaysFirst(catchingUp: true, knownTip: 66_845_524, round: 66_736_698, beyond), Is.True, "the 2026-11 backlog");
+            Assert.That(IndexerSyncPolicy.FetchFromRelaysFirst(true, 10_000, 9_499, beyond), Is.True);
+            Assert.That(IndexerSyncPolicy.FetchFromRelaysFirst(true, 10_000, 9_500, beyond), Is.False, "a short lag: our own algod has the block");
+            Assert.That(IndexerSyncPolicy.FetchFromRelaysFirst(false, 10_000, 1_000, beyond), Is.False, "not catching up");
+            Assert.That(IndexerSyncPolicy.FetchFromRelaysFirst(true, 0, 1_000, beyond), Is.False, "tip unknown");
+            Assert.That(IndexerSyncPolicy.FetchFromRelaysFirst(true, 10_000, 9_990, 0), Is.True, "0: every block of a catch-up (a deployment without an own node)");
+        }
+
+        [Test]
         public void MemoryPressure_KeepsACatchUpAtTheSlotsOfTheTip()
         {
             Assert.That(IndexerSyncPolicy.ConcurrencyLimit(true, 3, 16, memoryPressure: true), Is.EqualTo(3));

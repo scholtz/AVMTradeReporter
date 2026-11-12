@@ -34,6 +34,15 @@ namespace AVMTradeReporter.Services
             => Math.Max(1, catchingUp && !memoryPressure ? Math.Max(maxConcurrentTasks, catchUpMaxConcurrentTasks) : maxConcurrentTasks);
 
         /// <summary>
+        /// A block is asked from the archival relays before any algod only while catching up, and only when it is more
+        /// than <paramref name="firstBeyondLagBlocks"/> behind the tip: an own node keeps about a thousand rounds, so a
+        /// short lag is cleared by it at once and does not wait for relays on the other side of the world. With an
+        /// unknown tip the relays are not asked first.
+        /// </summary>
+        public static bool FetchFromRelaysFirst(bool catchingUp, ulong knownTip, ulong round, int firstBeyondLagBlocks)
+            => catchingUp && knownTip > round && knownTip - round > (ulong)Math.Max(0, firstBeyondLagBlocks);
+
+        /// <summary>
         /// At the tip the indexer document is written with every block (other tooling reads <c>Round</c>). While catching
         /// up that is one Elasticsearch write per block on the fetch loop itself, so it is written every
         /// <paramref name="interval"/> only: after a crash the persisted <c>Round</c> is at most that much behind, and

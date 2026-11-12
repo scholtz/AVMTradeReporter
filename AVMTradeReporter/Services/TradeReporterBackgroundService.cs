@@ -35,6 +35,7 @@ namespace AVMTradeReporter.Services
         private readonly BlockRepository _blockRepository;
         private readonly IIndexedBlockTracker? _blockTracker;
         private readonly IndexerStallMonitor? _stallMonitor;
+        private readonly ArchivalRelayBlockSource? _relayBlocks;
 
         // Not-yet-stored documents, per block: a block counts as indexed (latest-block watermark) only once ITS documents
         // are acknowledged by Elasticsearch - see PendingBlockBatches.
@@ -77,11 +78,13 @@ namespace AVMTradeReporter.Services
             TransactionProcessor transactionProcessor,
             BlockRepository blockRepository,
             IIndexedBlockTracker? blockTracker = null,
-            IndexerStallMonitor? stallMonitor = null
+            IndexerStallMonitor? stallMonitor = null,
+            ArchivalRelayBlockSource? relayBlocks = null
             )
         {
             _blockTracker = blockTracker;
             _stallMonitor = stallMonitor;
+            _relayBlocks = relayBlocks;
             _logger = logger;
             _appConfig = appConfig;
             _indexerRepository = indexerRepository;
@@ -244,11 +247,20 @@ namespace AVMTradeReporter.Services
                     }
                     if (!waited)
                     {
-                        // Every algod failed - an outage or a flaky proxy. A short pause with the round unchanged, instead of
-                        // fetching (and possibly giving up on) a block that may not exist yet.
-                        _logger.LogWarning("No algod could wait for round {round}; retrying shortly", Indexer?.Round);
-                        await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
-                        continue;
+                        // Every algod failed - an outage or a flaky proxy. The archival relays can still say whether the
+                        // round exists (they answer 404 for a block that does not): indexing goes on through them while
+                        // our algod is down. Otherwise a short pause with the round unchanged, instead of fetching (and
+                        // possibly giving up on) a block that may not exist yet.
+                        if (await TryFetchBlockFromRelaysAsync(Indexer.Round) != null)
+                        {
+                            _logger.LogWarning("No algod could wait for round {round}, but the archival relays have it - going on through the relays", Indexer.Round);
+                        }
+                        else
+                        {
+                            _logger.LogWarning("No algod could wait for round {round}; retrying shortly", Indexer?.Round);
+                            await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+                            continue;
+                        }
                     }
 #endif
                     UpdateCatchUpMode();
@@ -627,6 +639,17 @@ namespace AVMTradeReporter.Services
         /// <summary>Loads a block from the first algod that answers (primary, then the fallbacks); null when none does.</summary>
         private async Task<CertifiedBlock?> TryFetchBlockAsync(ulong blockId, bool headerOnly)
         {
+            // Syncing a backlog: the blocks come from the archival relay nodes over the gossip protocol, which is what they
+            // are there for - not from an algod API (our own node does not keep old blocks, a public one is rate limited).
+            // The decision is taken once per fetch (the mode may change while it runs), and only for blocks old enough
+            // that an own node may not keep them any more: a short lag is cleared by our own algod.
+            var relaysFirst = !headerOnly && IndexerSyncPolicy.FetchFromRelaysFirst(_catchingUp, _knownTip, blockId, _appConfig.Value.ArchivalRelays.FirstBeyondLagBlocks);
+            if (relaysFirst)
+            {
+                var relayed = await TryFetchBlockFromRelaysAsync(blockId);
+                if (relayed != null) return relayed;
+            }
+
             var algods = Algods().ToList();
             List<int>? notKept = null;
             foreach (var index in _algodAvailability.Order(blockId))
@@ -654,7 +677,26 @@ namespace AVMTradeReporter.Services
                     if (IsBlockNotKept(ex)) (notKept ??= new List<int>()).Add(index);
                 }
             }
-            return null;
+            // No algod has the block: unless they were asked first, the archival relays are the last resort.
+            return relaysFirst ? null : await TryFetchBlockFromRelaysAsync(blockId);
+        }
+
+        private async Task<CertifiedBlock?> TryFetchBlockFromRelaysAsync(ulong blockId)
+        {
+            if (_relayBlocks is not { Enabled: true }) return null;
+            try
+            {
+                return await _relayBlocks.TryFetchBlockAsync(blockId, _processingCts.Token);
+            }
+            catch (OperationCanceledException) when (_processingCts.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "The archival relays failed to return block {blockId}", blockId);
+                return null;
+            }
         }
 
         /// <summary>

@@ -33,6 +33,11 @@ namespace AVMTradeReporter.Model.Configuration
         public AlgodConfiguration Algod3 { get; set; } = new AlgodConfiguration();
 
         /// <summary>
+        /// Archival relay nodes: where a catch-up gets its blocks from (gossip protocol, not an algod API).
+        /// </summary>
+        public ArchivalRelayConfiguration ArchivalRelays { get; set; } = new ArchivalRelayConfiguration();
+
+        /// <summary>
         /// Elasticsearch configuration
         /// </summary>
         public ElasticConfiguration Elastic { get; set; } = new ElasticConfiguration();
@@ -362,6 +367,44 @@ namespace AVMTradeReporter.Model.Configuration
         public int StaleRelaySeconds { get; set; } = 600;
     }
 
+    /// <summary>
+    /// Block fetching from the network's archival relay nodes over the gossip protocol (see
+    /// <c>ArchivalRelayBlockSource</c>): the block source of a catch-up, and the last resort when no algod returns a block.
+    /// </summary>
+    public class ArchivalRelayConfiguration
+    {
+        /// <summary>False: blocks are fetched from the configured algods only.</summary>
+        public bool Enabled { get; set; } = true;
+
+        /// <summary>
+        /// Relay base addresses (<c>http://host:port</c>) to use instead of the ones discovered through the
+        /// <c>_archive._tcp</c> DNS SRV record of <see cref="GossipDiscoveryConfiguration.Network"/>. Empty = discover.
+        /// </summary>
+        public List<string> Hosts { get; set; } = new();
+
+        /// <summary>
+        /// Requests one relay serves for this indexer at the same time. Every discovered relay is used, so this is what
+        /// keeps a catch-up from leaning on a single one.
+        /// </summary>
+        public int MaxInFlightPerRelay { get; set; } = 4;
+
+        /// <summary>
+        /// While catching up, a block is asked from the relays first only when it is more than this many rounds behind
+        /// the tip; nearer blocks go to the algods first (an own node keeps about 1 000 rounds), the relays being their
+        /// last resort. 0 = every block of a catch-up comes from the relays.
+        /// </summary>
+        public int FirstBeyondLagBlocks { get; set; } = 500;
+
+        /// <summary>Relays asked for one block before the algods are.</summary>
+        public int MaxAttempts { get; set; } = 3;
+
+        /// <summary>Seconds after which a relay that has not answered counts as failed for that block.</summary>
+        public int RequestTimeoutSeconds { get; set; } = 15;
+
+        /// <summary>Minutes after which the relay list is discovered again.</summary>
+        public int RediscoverMinutes { get; set; } = 60;
+    }
+
     public class BlockProcessingConfiguration
     {
         /// <summary>
@@ -393,11 +436,12 @@ namespace AVMTradeReporter.Model.Configuration
         public int CatchUpLagBlocks { get; set; } = 20;
 
         /// <summary>
-        /// Concurrent block tasks while catching up. A block is mostly waiting (algod fetch, the Elasticsearch refresh its
+        /// Concurrent block tasks while catching up. A block is mostly waiting (the fetch, the Elasticsearch refresh its
         /// bulk waits for), so this is far above <see cref="MaxConcurrentTasks"/>; the memory threshold still applies.
-        /// Benchmarked 2026-11 against a public archival algod: fetch throughput stops growing at about 16.
+        /// Benchmarked 2026-11 through <c>ArchivalRelayBlockSource</c> against the 13 mainnet archival relays, 2 000
+        /// old blocks: 128 blocks/s at 32 parallel fetches, 138 at 64, no failure - beyond 32 there is little to gain.
         /// </summary>
-        public int CatchUpMaxConcurrentTasks { get; set; } = 16;
+        public int CatchUpMaxConcurrentTasks { get; set; } = 32;
 
         /// <summary>Seconds between two writes of the indexer document while catching up (at the tip: every block).</summary>
         public double CatchUpIndexerPersistSeconds { get; set; } = 1;
