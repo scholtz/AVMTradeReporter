@@ -128,6 +128,10 @@ With a cluster-admin kubectl context:
 
 ```bash
 k8s/ci/make-kubeconfig.sh --set-secrets   # applies the RBAC, builds + verifies the 3 kubeconfigs, then sets the secrets
+k8s/ci/make-kubeconfig.sh --only stage --set-secrets   # just one environment (repeatable --only)
+# on a control-plane node (context server https://127.0.0.1:6443) pass the external endpoint, and without a logged-in
+# gh CLI drop --set-secrets: the script then writes <env>.kubeconfig.base64 to paste into the KUBE_CONFIG secret
+KUBE_SERVER=https://188.34.137.167:6443 k8s/ci/make-kubeconfig.sh --only stage
 gh workflow run deploy.yml --ref master --repo scholtz/AVMTradeReporter   # deploys the current master to stage
 ```
 

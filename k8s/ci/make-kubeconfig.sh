@@ -6,8 +6,12 @@
 # Run with a kubectl context that has cluster-admin rights on the cluster (to apply the RBAC):
 #   k8s/ci/make-kubeconfig.sh --set-secrets   # the usual way: nothing is left on disk
 #   k8s/ci/make-kubeconfig.sh                 # only build + verify, the files are kept in a temp directory
+#   k8s/ci/make-kubeconfig.sh --only stage --set-secrets   # only that environment's secret (repeatable)
 #   KUBE_SERVER=https://host:6443 k8s/ci/make-kubeconfig.sh --set-secrets
-#       # the API server the runners should use, when the current context goes through a proxy (e.g. Rancher)
+#       # the API server the runners should use, when the current context goes through a proxy (e.g. Rancher) or a
+#       # loopback address (kubectl run on a control-plane node: https://127.0.0.1:6443 is unreachable from GitHub)
+# Without --set-secrets (e.g. no gh CLI on that host) each kubeconfig is also written base64 encoded
+# (<env>.kubeconfig.base64) - paste it into the KUBE_CONFIG secret of the environment, then delete the directory.
 set -euo pipefail
 
 NAMESPACE=biatec-scan
@@ -15,16 +19,26 @@ DEPLOYER_NAMESPACE=github-deployers # the ServiceAccounts + token Secrets (see g
 REPO=scholtz/AVMTradeReporter
 SET_SECRETS=0
 OUT_DIR=""
+ONLY=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --set-secrets) SET_SECRETS=1; shift ;;
     --out-dir) OUT_DIR="$2"; shift 2 ;;
+    --only)
+      case "${2:-}" in
+        stage | production | production-voi) ONLY="${ONLY:+$ONLY }$2"; shift 2 ;;
+        *) echo "--only takes stage, production or production-voi" >&2; exit 64 ;;
+      esac
+      ;;
     *) echo "unknown argument $1" >&2; exit 64 ;;
   esac
 done
 
 # Plain functions instead of associative arrays: runs on macOS' bash 3.2, too.
 ENVIRONMENTS="stage production production-voi"
+# the environments whose kubeconfig is built, verified and (with --set-secrets) stored; the separation checks always
+# cover all environments' objects
+SELECTED="${ONLY:-$ENVIRONMENTS}"
 # environment -> its ServiceAccount and a Deployment it must be able to patch
 env_info() {
   case "$1" in
@@ -83,10 +97,20 @@ if [[ "$server" == */k8s/clusters/* ]]; then
   echo "Set KUBE_SERVER to the cluster's own API endpoint (e.g. https://<node>:6443) and run again." >&2
   exit 1
 fi
+# (an explicit KUBE_SERVER is trusted as given)
+if [ -z "${KUBE_SERVER:-}" ]; then
+  case "$server" in
+    https://127.* | https://localhost* | https://\[::1\]*)
+      echo "The current context's API server ($server) is a loopback address - GitHub's runners cannot reach it." >&2
+      echo "Set KUBE_SERVER to the cluster's external API endpoint (e.g. KUBE_SERVER=https://188.34.137.167:6443) and run again." >&2
+      exit 1
+      ;;
+  esac
+fi
 
 kubectl apply -f "$here/github-deployer.yaml"
 
-for env in $ENVIRONMENTS; do
+for env in $SELECTED; do
   IFS='|' read -r sa own <<< "$(env_info "$env")"
   secret="$sa-token"
   token=""
@@ -183,12 +207,12 @@ EOF
   echo "Denied on all $denied checks against the other environments' objects and broad / shared-volume access - separated."
 done
 
-# only after ALL three verified: a verification failure above leaves every environment's secret as it was. A failing
-# `gh secret set` (permissions, network) is reported with which environments already got their new secret - re-running
-# the script is safe: it re-verifies and sets all three again.
+# only after ALL selected verified: a verification failure above leaves every environment's secret as it was. A
+# failing `gh secret set` (permissions, network) is reported with which environments already got their new secret -
+# re-running the script is safe: it re-verifies and sets them again.
 if [ "$SET_SECRETS" -eq 1 ]; then
   done_envs=""
-  for env in $ENVIRONMENTS; do
+  for env in $SELECTED; do
     file="$OUT_DIR/$env.kubeconfig"
     encoded=$(base64 -w0 "$file" 2>/dev/null || base64 "$file" | tr -d '\n')
     if ! printf '%s' "$encoded" | gh secret set KUBE_CONFIG --env "$env" --repo "$REPO"; then
@@ -200,6 +224,12 @@ if [ "$SET_SECRETS" -eq 1 ]; then
   done
   echo "Done (the kubeconfigs were removed). Deploy the current master again: gh workflow run deploy.yml --ref master --repo $REPO"
 else
-  echo "Verified kubeconfigs in $OUT_DIR - they contain credentials: store them (base64) as KUBE_CONFIG of their"
-  echo "environment and delete the directory, or simply run: $0 --set-secrets"
+  for env in $SELECTED; do
+    b64="$OUT_DIR/$env.kubeconfig.base64"
+    written+=("$b64")
+    ( umask 077; base64 -w0 "$OUT_DIR/$env.kubeconfig" > "$b64" 2>/dev/null || base64 "$OUT_DIR/$env.kubeconfig" | tr -d '\n' > "$b64" )
+    echo "KUBE_CONFIG of environment $env: $b64"
+  done
+  echo "Verified kubeconfigs in $OUT_DIR - they contain credentials: paste each .base64 file into the KUBE_CONFIG secret"
+  echo "of its environment, then delete the directory (or run with --set-secrets where the gh CLI is logged in)."
 fi
