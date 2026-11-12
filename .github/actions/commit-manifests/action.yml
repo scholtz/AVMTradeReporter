@@ -1,0 +1,88 @@
+# Records the image version a deploy job rolled out in the manifests on master, so master names the version that
+# serves.
+#
+# Run it as the step after the rollout, with the default `if: success()`: promote-production's gate reads master's
+# stage manifest as "stage runs this version", so a failed rollout (the old pods keep serving) must not be recorded.
+# The change is re-applied with scripts/set-image-tags.sh on a fresh worktree of
+# origin/master - not rebased, not copied - so another deploy's commit to the same image line cannot leave a
+# conflicted rebase behind, and other edits to those manifests that landed on master meanwhile are kept. A push that
+# still fails after the retries fails the step.
+name: Commit deployed manifests
+description: Records the applied image version in the manifests on master (fresh worktree, retried, fails loudly).
+inputs:
+  files:
+    description: Space separated manifest paths
+    required: true
+  version:
+    description: The image version that was applied
+    required: true
+  message:
+    description: Commit message
+    required: true
+  forward-only:
+    description: >-
+      "true": refuse to record a version older than the one master names (stage: a re-run of an older run would
+      make the promote gate trust an outdated record). Production / Voi leave it off - promoting an older version is
+      a deliberate rollback.
+    required: false
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - name: Commit and push the deployed manifests
+      shell: bash
+      env:
+        FILES: ${{ inputs.files }}
+        VERSION: ${{ inputs.version }}
+        MESSAGE: ${{ inputs.message }}
+        FORWARD_ONLY: ${{ inputs.forward-only }}
+      run: |
+        set -euo pipefail
+        read -r -a files <<< "$FILES"
+        set_tags="$GITHUB_WORKSPACE/scripts/set-image-tags.sh"
+        worktree=""
+        cleanup() {
+          if [ -n "$worktree" ]; then git worktree remove --force "$worktree" >/dev/null 2>&1 || rm -rf "$worktree"; fi
+          git worktree prune >/dev/null 2>&1 || true
+        }
+        trap cleanup EXIT
+        for attempt in 1 2 3 4 5; do
+          [ "$attempt" -gt 1 ] && sleep $((attempt * 3))
+          # a fresh directory per attempt: a half-done checkout of a failed attempt cannot block the next one
+          cleanup
+          worktree=$(mktemp -d)
+          rmdir "$worktree"
+          # a transient fetch / checkout failure is retried like a rejected push
+          if ! git fetch --quiet origin master || ! git worktree add --quiet --detach "$worktree" origin/master; then
+            echo "Fetching master failed (attempt $attempt), retrying..."
+            continue
+          fi
+          # forward-only: never move master's record backwards (e.g. a re-run of an older run); the versions
+          # (1.<y>.<m>.<d>-main) sort by date
+          recorded=""
+          if [ "${FORWARD_ONLY:-false}" = true ]; then
+            recorded=$(bash "$set_tags" --current "$worktree/${files[0]}" || true)
+          fi
+          if [ -n "$recorded" ] && [ "$recorded" != "$VERSION" ] \
+             && [ "$(printf '%s\n%s\n' "$VERSION" "$recorded" | sort -V | tail -n1)" = "$recorded" ]; then
+            echo "::error::This run rolled out $VERSION, but master already records the newer $recorded - the cluster now runs an older version than master says. Deploy the current master again: gh workflow run deploy.yml --ref master"
+            exit 1
+          fi
+          if ! (cd "$worktree" && bash "$set_tags" "$VERSION" "${files[@]}"); then
+            echo "::error::master's manifests changed shape (see above) - record $VERSION on master by hand; the rollout itself succeeded."
+            exit 1
+          fi
+          if git -C "$worktree" diff --quiet -- "${files[@]}"; then
+            echo "master already records version $VERSION"
+            exit 0
+          fi
+          git -C "$worktree" -c user.name="github-actions[bot]" -c user.email="github-actions[bot]@users.noreply.github.com" \
+            commit --quiet -m "$MESSAGE" -- "${files[@]}"
+          if git -C "$worktree" push --quiet origin HEAD:master; then
+            echo "Committed: $MESSAGE"
+            exit 0
+          fi
+          echo "Push attempt $attempt failed, retrying on a fresh master..."
+        done
+        echo "::error::Could not push the deployed manifests to master - master does not show the version applied to the cluster."
+        exit 1

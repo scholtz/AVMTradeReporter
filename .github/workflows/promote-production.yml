@@ -97,10 +97,10 @@ jobs:
           version="${{ steps.resolve.outputs.version }}"
           if [ "${{ inputs.network }}" = "algorand" ]; then
             other_name="voi"
-            other_version=$(grep -oE "${IMAGE_API}:[^\"[:space:]]+" k8s/voi/deployment-api-voi.yaml | head -n1 | cut -d: -f2)
+            other_version=$(bash scripts/set-image-tags.sh --current k8s/voi/deployment-api-voi.yaml || true)
           else
             other_name="algorand"
-            other_version=$(grep -oE "${IMAGE_API}:[^\"[:space:]]+" k8s/main/deployment-api.yaml | head -n1 | cut -d: -f2)
+            other_version=$(bash scripts/set-image-tags.sh --current k8s/main/deployment-api.yaml || true)
           fi
           if [ -n "$other_version" ] && [ "$other_version" != "$version" ]; then
             echo "::warning::Promoting only '${{ inputs.network }}' to $version - '$other_name' stays on $other_version. Re-run with network=all to keep both in sync."
@@ -126,7 +126,7 @@ jobs:
       - name: Stage must run the version being promoted
         run: |
           version="${{ needs.resolve-version.outputs.version }}"
-          staged=$(grep -oE "${IMAGE_API}:[^\"[:space:]]+" k8s/stage/deployment-api-stage.yaml | head -n1 | cut -d: -f2)
+          staged=$(bash scripts/set-image-tags.sh --current k8s/stage/deployment-api-stage.yaml || true)
           echo "promoting: $version / stage runs: $staged"
           if [ "${{ inputs.skip_stage_verification }}" = "true" ]; then
             echo "::warning::skip_stage_verification is set - promoting $version without proving it on stage"
@@ -215,6 +215,9 @@ jobs:
   # ---------------------------------------------------------------------
   deploy-production:
     name: Deploy to production (Algorand mainnet)
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
     needs: [resolve-version, verify-images, promote-tag, verify-stage]
     if: inputs.network == 'algorand' || inputs.network == 'all'
     runs-on: ubuntu-latest
@@ -227,39 +230,26 @@ jobs:
         with:
           fetch-depth: 0
 
+      # kubectl + KUBE_CONFIG + credential check: fails here, before anything is applied, when the cluster rejects
+      # the deployer credential (see docs/CICD_GITHUB_ACTIONS.md, "Deployer credentials")
+      - name: Kubernetes deployer setup
+        uses: ./.github/actions/kube-setup
+        with:
+          kube-config: ${{ secrets.KUBE_CONFIG }}
+          namespace: ${{ env.NAMESPACE }}
+          can-i: patch deployments.apps/avm-trade-reporter-app-deployment
+
       - name: Update production manifests with new image tags
         run: |
           version="${{ needs.resolve-version.outputs.version }}"
-          sed -i "s~${IMAGE_API}.*~${IMAGE_API}:${version}~g" k8s/main/deployment-api.yaml
-          sed -i "s~${IMAGE_API}.*~${IMAGE_API}:${version}~g" k8s/main/deployment2-api.yaml
-          sed -i "s~${IMAGE_SUBSCRIBER}.*~${IMAGE_SUBSCRIBER}:${version}~g" k8s/main/subscriber-deployment.yaml
+          bash scripts/set-image-tags.sh "$version" k8s/main/deployment-api.yaml k8s/main/deployment2-api.yaml k8s/main/subscriber-deployment.yaml
 
-      - name: Commit updated production manifests
+      # before ANY change to the cluster: a server-side dry run of the images PV/PVC and the manifests (a forbidden or
+      # invalid object fails here), and the ConfigMap the next step patches must exist (the deployers cannot create it)
+      - name: Preflight manifests
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          if ! git diff --quiet -- k8s/main/deployment-api.yaml k8s/main/deployment2-api.yaml k8s/main/subscriber-deployment.yaml; then
-            git add k8s/main/deployment-api.yaml k8s/main/deployment2-api.yaml k8s/main/subscriber-deployment.yaml
-            git commit -m "cicd promote ${{ needs.resolve-version.outputs.version }} to production [skip ci]"
-            for i in 1 2 3 4 5; do
-              git pull --rebase origin master && git push && break
-              echo "Push attempt $i failed, retrying..."
-              sleep $((i * 3))
-            done
-          else
-            echo "No manifest changes to commit"
-          fi
-
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
-
-      - name: Configure kubeconfig
-        run: |
-          mkdir -p "$HOME/.kube"
-          echo "$KUBE_CONFIG" | base64 -d > "$HOME/.kube/config"
-          chmod 600 "$HOME/.kube/config"
-        env:
-          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+          kubectl apply --dry-run=server -n "$NAMESPACE" -f k8s/main/pv-images.yaml -f k8s/main/deployment-api.yaml -f k8s/main/deployment2-api.yaml -f k8s/main/subscriber-deployment.yaml
+          bash scripts/check-objects.sh patch:configmaps/avm-trade-reporter-main-conf
 
       # Must run BEFORE "Apply Kubernetes manifests": on a freshly scheduled Pod, kubectl apply
       # schedules Pods immediately, so if the ConfigMap a Pod's volume mounts doesn't exist yet, the
@@ -292,6 +282,15 @@ jobs:
           kubectl rollout restart deployment/avmtradereporter-subscriber -n "$NAMESPACE"
           kubectl rollout status deployment/avmtradereporter-subscriber -n "$NAMESPACE"
 
+      # only after a SUCCESSFUL rollout, as in deploy.yml: master names the version that serves (after a failed rollout
+      # the old pods keep serving) - resolve-version's network drift warning compares these manifests
+      - name: Commit updated production manifests
+        uses: ./.github/actions/commit-manifests
+        with:
+          files: k8s/main/deployment-api.yaml k8s/main/deployment2-api.yaml k8s/main/subscriber-deployment.yaml
+          version: ${{ needs.resolve-version.outputs.version }}
+          message: "cicd promote ${{ needs.resolve-version.outputs.version }} to production [skip ci]"
+
       - name: Remove kubeconfig
         if: always()
         run: rm -f "$HOME/.kube/config"
@@ -316,6 +315,9 @@ jobs:
   # ---------------------------------------------------------------------
   deploy-production-voi:
     name: Deploy to production (Voi mainnet)
+    concurrency:
+      group: deploy-production-voi
+      cancel-in-progress: false
     needs: [resolve-version, verify-images, promote-tag, verify-stage]
     if: |
       (inputs.network == 'voi' || inputs.network == 'all') &&
@@ -330,38 +332,29 @@ jobs:
         with:
           fetch-depth: 0
 
+      # kubectl + KUBE_CONFIG + credential check: fails here, before anything is applied, when the cluster rejects
+      # the deployer credential (see docs/CICD_GITHUB_ACTIONS.md, "Deployer credentials")
+      - name: Kubernetes deployer setup
+        uses: ./.github/actions/kube-setup
+        with:
+          kube-config: ${{ secrets.KUBE_CONFIG }}
+          namespace: ${{ env.NAMESPACE }}
+          can-i: patch deployments.apps/avm-trade-reporter-voi-app-deployment
+
       - name: Update voi manifests with new image tags
         run: |
           version="${{ needs.resolve-version.outputs.version }}"
-          sed -i "s~${IMAGE_API}.*~${IMAGE_API}:${version}~g" k8s/voi/deployment-api-voi.yaml
-          sed -i "s~${IMAGE_SUBSCRIBER}.*~${IMAGE_SUBSCRIBER}:${version}~g" k8s/voi/subscriber-deployment-voi.yaml
+          bash scripts/set-image-tags.sh "$version" k8s/voi/deployment-api-voi.yaml k8s/voi/subscriber-deployment-voi.yaml
 
-      - name: Commit updated voi manifests
+      # before ANY change to the cluster: a server-side dry run of the manifests (a forbidden or invalid object fails
+      # here), and the Secrets / ConfigMap the next steps patch plus the shared icon cache the API pods mount must exist
+      # (the deployers cannot create objects) - fail now, not half-way or after a 20-minute rollout of Pending pods
+      - name: Preflight manifests
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          if ! git diff --quiet -- k8s/voi/deployment-api-voi.yaml k8s/voi/subscriber-deployment-voi.yaml; then
-            git add k8s/voi/deployment-api-voi.yaml k8s/voi/subscriber-deployment-voi.yaml
-            git commit -m "cicd promote ${{ needs.resolve-version.outputs.version }} to production-voi [skip ci]"
-            for i in 1 2 3 4 5; do
-              git pull --rebase origin master && git push && break
-              echo "Push attempt $i failed, retrying..."
-              sleep $((i * 3))
-            done
-          else
-            echo "No manifest changes to commit"
-          fi
-
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
-
-      - name: Configure kubeconfig
-        run: |
-          mkdir -p "$HOME/.kube"
-          echo "$KUBE_CONFIG" | base64 -d > "$HOME/.kube/config"
-          chmod 600 "$HOME/.kube/config"
-        env:
-          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+          kubectl apply --dry-run=server -n "$NAMESPACE" -f k8s/voi/deployment-api-voi.yaml -f k8s/voi/subscriber-deployment-voi.yaml
+          bash scripts/check-objects.sh patch:secrets/avm-trade-reporter-voi-secret \
+            patch:secrets/avm-trade-reporter-subscriber-voi-secret patch:configmaps/avm-trade-reporter-voi-main-conf \
+            get:persistentvolumeclaims/avm-trade-reporter-images-pvc
 
       # Voi's Elastic/Redis credentials live only as GitHub Environment secrets ("production-voi"),
       # never committed to the repo. Re-created on every promote so rotating a GitHub secret and
@@ -389,10 +382,6 @@ jobs:
         run: |
           kubectl create configmap avm-trade-reporter-voi-main-conf --from-file=k8s/voi/conf-api-voi -n "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
-      - name: Apply shared images PV/PVC
-        run: |
-          kubectl apply -f k8s/main/pv-images.yaml -n "$NAMESPACE"
-
       - name: Apply Kubernetes manifests (voi)
         run: |
           kubectl apply -f k8s/voi/deployment-api-voi.yaml -n "$NAMESPACE"
@@ -404,6 +393,15 @@ jobs:
           kubectl rollout status deployment/avm-trade-reporter-voi-app-deployment -n "$NAMESPACE"
           kubectl rollout restart deployment/avmtradereporter-subscriber-voi -n "$NAMESPACE"
           kubectl rollout status deployment/avmtradereporter-subscriber-voi -n "$NAMESPACE"
+
+      # only after a SUCCESSFUL rollout, as in deploy.yml: master names the version that serves (after a failed rollout
+      # the old pods keep serving) - resolve-version's network drift warning compares these manifests
+      - name: Commit updated voi manifests
+        uses: ./.github/actions/commit-manifests
+        with:
+          files: k8s/voi/deployment-api-voi.yaml k8s/voi/subscriber-deployment-voi.yaml
+          version: ${{ needs.resolve-version.outputs.version }}
+          message: "cicd promote ${{ needs.resolve-version.outputs.version }} to production-voi [skip ci]"
 
       - name: Remove kubeconfig
         if: always()

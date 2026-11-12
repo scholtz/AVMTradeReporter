@@ -1,0 +1,237 @@
+# Identities of the GitHub Actions deploy jobs - one ServiceAccount per GitHub environment:
+#   github-deployer-stage       -> deploy.yml           (environment "stage",          no reviewer, every push)
+#   github-deployer-production  -> promote-production   (environment "production",     required reviewer)
+#   github-deployer-voi         -> promote-production   (environment "production-voi")
+#
+# Why: the KUBE_CONFIG secrets used to be a copy of a personal/admin kubeconfig whose credential expires ~30 days
+# after it is issued - the stage deploy broke 2026-09-09 (fixed 09-12 by pasting a fresh one) and again from
+# 2026-10-18 on with "failed to download openapi: the server has asked for the client to provide credentials"
+# (HTTP 401). A `kubernetes.io/service-account-token` Secret holds a token that does not expire; it is revoked by
+# deleting that Secret (re-applying this file mints a new one).
+#
+# Least privilege: every Role only reaches its own environment's objects by name (`resourceNames`), so no
+# environment's credential can read another environment's Secrets or patch its Deployments through the API. No Role
+# may create Deployments / Pods or list Secrets: the workflows only `kubectl apply` objects that already exist
+# (get + patch), `kubectl rollout restart` (patch) and `kubectl rollout status` (get / watch). Only the production
+# deployer touches the images PV/PVC that all environments mount. A NEW object (another Deployment, Service, ...) is
+# therefore created once by an admin, and its name added to the Role here.
+#
+# The ServiceAccounts and their token Secrets live in their own namespace, github-deployers, which holds nothing
+# else and in which no deployer has any right: a pod can only mount Secrets / use ServiceAccounts of its OWN
+# namespace, so a pod template change in biatec-scan cannot reach another deployer's token. The Roles and
+# RoleBindings stay in biatec-scan, where the deployers work.
+#
+# Not a security boundary between the APPS: stage, production and voi share the namespace biatec-scan, so a deployer
+# that may patch its own Deployment can also change that Deployment's pod template - and a pod can mount any Secret
+# of its namespace (e.g. production's Elastic / Redis credentials). Real isolation of the stage job (every push, no
+# reviewer) from production needs stage in its own namespace (blocked today by the shared icon cache: a
+# PersistentVolume binds to one PVC in one namespace) or an admission policy that pins the pod templates' Secret /
+# ServiceAccount references.
+#
+# Apply with cluster-admin rights via k8s/ci/make-kubeconfig.sh (which also builds the kubeconfigs).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: github-deployers
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: github-deployer-stage
+  namespace: github-deployers
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: github-deployer-stage-token
+  namespace: github-deployers
+  annotations:
+    kubernetes.io/service-account.name: github-deployer-stage
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: github-deployer-stage
+  namespace: biatec-scan
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["avm-trade-reporter-stage-app-deployment", "avmtradereporter-subscriber-stage"]
+    verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: [""]
+    resources: ["services"]
+    resourceNames: ["avm-trade-reporter-stage-service"]
+    verbs: ["get", "patch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    resourceNames: ["avm-trade-reporter-stage-ingress-main2"]
+    verbs: ["get", "patch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["avm-trade-reporter-stage-main-conf"]
+    verbs: ["get", "patch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["avm-trade-reporter-stage-secret", "avm-trade-reporter-subscriber-stage-secret"]
+    verbs: ["get", "patch"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    resourceNames: ["avm-trade-reporter-images-pvc"]
+    verbs: ["get"]  # read only: the preflight that the shared icon cache exists (only production may change it)
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: github-deployer-stage
+  namespace: biatec-scan
+subjects:
+  - kind: ServiceAccount
+    name: github-deployer-stage
+    namespace: github-deployers
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: github-deployer-stage
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: github-deployer-production
+  namespace: github-deployers
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: github-deployer-production-token
+  namespace: github-deployers
+  annotations:
+    kubernetes.io/service-account.name: github-deployer-production
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: github-deployer-production
+  namespace: biatec-scan
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["avm-trade-reporter-app-deployment", "avm-trade-reporter2-app-deployment", "avmtradereporter-subscriber"]
+    verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: [""]
+    resources: ["services"]
+    resourceNames: ["avm-trade-reporter-service", "avm-trade-reporter-nodeport-service", "avm-trade-reporter2-service"]
+    verbs: ["get", "patch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    resourceNames: ["avm-trade-reporter-ingress-main", "avm-trade-reporter-ingress-main2", "avm-trade-reporter2-ingress-main"]
+    verbs: ["get", "patch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["avm-trade-reporter-main-conf"]
+    verbs: ["get", "patch"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    resourceNames: ["avm-trade-reporter-images-pvc"]
+    verbs: ["get", "patch"]
+  # production's Secrets are managed by hand in the cluster, the workflow never touches them
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: github-deployer-production
+  namespace: biatec-scan
+subjects:
+  - kind: ServiceAccount
+    name: github-deployer-production
+    namespace: github-deployers
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: github-deployer-production
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: github-deployer-voi
+  namespace: github-deployers
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: github-deployer-voi-token
+  namespace: github-deployers
+  annotations:
+    kubernetes.io/service-account.name: github-deployer-voi
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: github-deployer-voi
+  namespace: biatec-scan
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["avm-trade-reporter-voi-app-deployment", "avmtradereporter-subscriber-voi"]
+    verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: [""]
+    resources: ["services"]
+    resourceNames: ["avm-trade-reporter-voi-service"]
+    verbs: ["get", "patch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    resourceNames: ["avm-trade-reporter-voi-ingress-main"]
+    verbs: ["get", "patch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["avm-trade-reporter-voi-main-conf"]
+    verbs: ["get", "patch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["avm-trade-reporter-voi-secret", "avm-trade-reporter-subscriber-voi-secret"]
+    verbs: ["get", "patch"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    resourceNames: ["avm-trade-reporter-images-pvc"]
+    verbs: ["get"]  # read only: the preflight that the shared icon cache exists (only production may change it)
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: github-deployer-voi
+  namespace: biatec-scan
+subjects:
+  - kind: ServiceAccount
+    name: github-deployer-voi
+    namespace: github-deployers
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: github-deployer-voi
+---
+# The production job applies k8s/main/pv-images.yaml, including the (cluster scoped) images PersistentVolume - only
+# that one PV, which must already exist (`create` cannot be limited to a name).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: github-deployer-images-pv
+rules:
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    resourceNames: ["avm-trade-reporter-images-pv"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: github-deployer-images-pv
+subjects:
+  - kind: ServiceAccount
+    name: github-deployer-production
+    namespace: github-deployers
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: github-deployer-images-pv

@@ -361,3 +361,6 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# deployer kubeconfigs contain credentials (k8s/ci/make-kubeconfig.sh)
+*.kubeconfig

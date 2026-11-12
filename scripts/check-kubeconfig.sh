@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+# Checks the kubeconfig the deploy jobs use (KUBE_CONFIG secret, written to $KUBECONFIG / ~/.kube/config) BEFORE
+# anything is applied, and explains a failure instead of letting the first kubectl call die with
+#   "failed to download openapi: the server has asked for the client to provide credentials"
+# (= HTTP 401: the cluster rejected the credential - in practice an expired / revoked token or certificate).
+#
+# Prints only non-secret facts: the API server host, the kind of credential and its expiry. Never the credential.
+#
+# Usage: scripts/check-kubeconfig.sh [--namespace NS] [--can-i "VERB RESOURCE[/NAME]"] [--warn-days N] [--fail-on-warn]
+#   --namespace NS   namespace of the permission check (default: $NAMESPACE, else biatec-scan)
+#   --can-i "..."    the permission that proves the credential may deploy (default "patch deployments.apps"); the
+#                    per-environment deployers only reach their own objects, so pass one of them by name, e.g.
+#                    "patch deployments.apps/avm-trade-reporter-stage-app-deployment"
+#   --warn-days N    warn (GitHub ::warning) when the credential expires within N days (default 14)
+#   --fail-on-warn   exit 2 on that warning (the scheduled check), instead of 0 (deploys go on)
+# Exit codes: 0 ok, 1 rejected / expired / not permitted / unreachable, 2 expiring (with --fail-on-warn), 64 usage.
+set -euo pipefail
+
+NAMESPACE="${NAMESPACE:-biatec-scan}"
+CAN_I="patch deployments.apps"
+WARN_DAYS=14
+FAIL_ON_WARN=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --namespace) NAMESPACE="$2"; shift 2 ;;
+    --can-i) CAN_I="$2"; shift 2 ;;
+    --warn-days) WARN_DAYS="$2"; shift 2 ;;
+    --fail-on-warn) FAIL_ON_WARN=1; shift ;;
+    *) echo "unknown argument $1" >&2; exit 64 ;;
+  esac
+done
+
+# GNU date (Linux runners) with a BSD date fallback (macOS)
+to_epoch() { date -d "$1" +%s 2>/dev/null || date -j -f "%b %d %T %Y %Z" "$1" +%s 2>/dev/null || true; }
+fmt_epoch() { date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ; }
+
+REMEDY="Regenerate the deployer kubeconfig with k8s/ci/make-kubeconfig.sh (non-expiring ServiceAccount token) and update the KUBE_CONFIG secret of the stage, production and production-voi environments - see docs/CICD_GITHUB_ACTIONS.md, 'Deployer credentials'."
+
+# --- what kind of credential is it, and when does it expire (from the kubeconfig itself, no cluster call) ---
+view_err=$(mktemp)
+server=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>"$view_err" || true)
+user_json=$(kubectl config view --minify --raw -o jsonpath='{.users[0].user}' 2>>"$view_err" || true)
+if [ -z "$server" ] || [ -z "$user_json" ]; then
+  reason=$(head -c 300 "$view_err" | tr '\n' ' ')
+  rm -f "$view_err"
+  echo "::error::The kubeconfig is empty or unreadable${reason:+ ($reason)} - is the KUBE_CONFIG secret set, base64 encoded, with a current-context? $REMEDY"
+  exit 1
+fi
+rm -f "$view_err"
+echo "API server: ${server%%\?*}"
+
+expires_epoch=""
+expiry_known=0 # set when the expiry was read, or the credential provably has none
+kind="unknown"
+token=$(kubectl config view --minify --raw -o jsonpath='{.users[0].user.token}' 2>/dev/null || true)
+cert_data=$(kubectl config view --minify --raw -o jsonpath='{.users[0].user.client-certificate-data}' 2>/dev/null || true)
+exec_cmd=$(kubectl config view --minify --raw -o jsonpath='{.users[0].user.exec.command}' 2>/dev/null || true)
+auth_provider=$(kubectl config view --minify --raw -o jsonpath='{.users[0].user.auth-provider.name}' 2>/dev/null || true)
+
+if [ -n "$token" ]; then
+  if [[ "$token" == *.*.* ]]; then
+    # a JWT (ServiceAccount token): the payload is not secret (issuer, subject, expiry), the signature is never printed
+    payload=$(printf '%s' "$token" | cut -d. -f2 | tr '_-' '/+')
+    while [ $(( ${#payload} % 4 )) -ne 0 ]; do payload="${payload}="; done
+    claims=$(printf '%s' "$payload" | base64 -d 2>/dev/null || true)
+    if command -v jq >/dev/null 2>&1 && printf '%s' "$claims" | jq -e . >/dev/null 2>&1; then
+      sub=$(printf '%s' "$claims" | jq -r '.sub // empty')
+      exp=$(printf '%s' "$claims" | jq -r '.exp // empty')
+      kind="ServiceAccount token (JWT) for ${sub:-unknown subject}"
+      if [ -n "$exp" ]; then expires_epoch="$exp"; else kind="$kind, no expiry (long-lived)"; fi
+      expiry_known=1
+    else
+      # never claim "long-lived" for a token whose claims could not be read
+      kind="JWT bearer token, expiry unknown (jq missing or the claims did not decode)"
+    fi
+  elif [[ "$token" == kubeconfig-u-* || "$token" == token-* ]]; then
+    kind="Rancher API token (its lifetime is set by Rancher - default kubeconfig token TTL is 30 days)"
+  else
+    kind="opaque bearer token (lifetime set by the issuer, not visible here)"
+  fi
+elif [ -n "$cert_data" ]; then
+  not_after=$(printf '%s' "$cert_data" | base64 -d | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2 || true)
+  subject=$(printf '%s' "$cert_data" | base64 -d | openssl x509 -noout -subject 2>/dev/null | sed 's/^subject=//' || true)
+  kind="client certificate (${subject:-unknown subject})"
+  if [ -n "$not_after" ]; then expires_epoch=$(to_epoch "$not_after" || true); fi
+  if [ -n "$expires_epoch" ]; then expiry_known=1; fi
+elif [ -n "$exec_cmd" ]; then
+  kind="exec credential plugin '$exec_cmd' (needs that binary and its login on the runner)"
+elif [ -n "$auth_provider" ]; then
+  kind="auth-provider '$auth_provider' (deprecated in kubectl, usually needs an interactive login)"
+fi
+echo "Credential: $kind"
+
+warn=0
+if [ "$expiry_known" -eq 0 ]; then
+  # e.g. a Rancher kubeconfig token - the kind of credential that expired after 30 days and broke the deploys: the
+  # check cannot see it coming, so the scheduled check (--fail-on-warn) fails until it is replaced
+  echo "::warning::The expiry of the deployer credential ($kind) cannot be checked in advance. $REMEDY"
+  warn=1
+fi
+if [ -n "$expires_epoch" ]; then
+  now=$(date +%s)
+  days_left=$(( (expires_epoch - now) / 86400 ))
+  expires_at=$(fmt_epoch "$expires_epoch")
+  if [ "$expires_epoch" -le "$now" ]; then
+    echo "::error::The deployer credential EXPIRED at $expires_at. $REMEDY"
+    exit 1
+  fi
+  echo "Expires: $expires_at ($days_left days left)"
+  if [ "$days_left" -lt "$WARN_DAYS" ]; then
+    echo "::warning::The deployer credential expires in $days_left days ($expires_at). $REMEDY"
+    warn=1
+  fi
+fi
+
+# --- does the cluster accept it, and may it deploy? ---
+# shellcheck disable=SC2086 # CAN_I is "verb resource[/name]" - two words on purpose
+if ! output=$(kubectl auth can-i $CAN_I -n "$NAMESPACE" --request-timeout=30s 2>&1); then
+  # (|| true: an output of nothing but warnings must not abort the explanation under set -e / pipefail)
+  answer=$(printf '%s\n' "$output" | grep -vE '^(Warning|W[0-9]{4}) ' | tail -1 || true)
+  if printf '%s' "$output" | grep -qiE 'provide credentials|Unauthorized|\b401\b'; then
+    echo "::error::The cluster REJECTED the deployer credential (HTTP 401 Unauthorized - expired or revoked: $kind). $REMEDY"
+  elif [[ "$answer" == no* ]]; then
+    # "no", or "no - <reason>" from webhook authorizers
+    echo "::error::The deployer credential is valid but may not '$CAN_I' in namespace $NAMESPACE ($answer). Apply k8s/ci/github-deployer.yaml (k8s/ci/make-kubeconfig.sh)."
+  else
+    echo "::error::Could not reach / authenticate to the cluster: $output"
+  fi
+  exit 1
+fi
+echo "Cluster accepts the credential; it may '$CAN_I' in $NAMESPACE."
+
+if [ "$warn" -eq 1 ] && [ "$FAIL_ON_WARN" -eq 1 ]; then
+  exit 2
+fi

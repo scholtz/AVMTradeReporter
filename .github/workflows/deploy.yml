@@ -76,6 +76,9 @@ jobs:
 
   deploy-stage:
     name: Deploy to stage (testnet)
+    concurrency:
+      group: deploy-stage
+      cancel-in-progress: false
     needs: build
     runs-on: ubuntu-latest
     # Scoped to the "stage" GitHub Environment - ELASTIC_HOST/ELASTIC_API_KEY/REDIS_CONNECTION_STRING
@@ -90,38 +93,41 @@ jobs:
         with:
           fetch-depth: 0
 
+      # kubectl + KUBE_CONFIG + credential check: fails here, before anything is applied, when the cluster rejects
+      # the deployer credential (see docs/CICD_GITHUB_ACTIONS.md, "Deployer credentials")
+      - name: Kubernetes deployer setup
+        uses: ./.github/actions/kube-setup
+        with:
+          kube-config: ${{ secrets.KUBE_CONFIG }}
+          namespace: ${{ env.NAMESPACE }}
+          can-i: patch deployments.apps/avm-trade-reporter-stage-app-deployment
+
       - name: Update stage manifests with new image tags
         run: |
           version="${{ needs.build.outputs.version }}"
-          sed -i "s~${IMAGE_API}.*~${IMAGE_API}:${version}~g" k8s/stage/deployment-api-stage.yaml
-          sed -i "s~${IMAGE_SUBSCRIBER}.*~${IMAGE_SUBSCRIBER}:${version}~g" k8s/stage/subscriber-deployment-stage.yaml
+          bash scripts/set-image-tags.sh "$version" k8s/stage/deployment-api-stage.yaml k8s/stage/subscriber-deployment-stage.yaml
 
-      - name: Commit updated stage manifests
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          if ! git diff --quiet -- k8s/stage/deployment-api-stage.yaml k8s/stage/subscriber-deployment-stage.yaml; then
-            git add k8s/stage/deployment-api-stage.yaml k8s/stage/subscriber-deployment-stage.yaml
-            git commit -m "cicd deploy ${{ needs.build.outputs.version }} to stage [skip ci]"
-            for i in 1 2 3 4 5; do
-              git pull --rebase origin master && git push && break
-              echo "Push attempt $i failed, retrying..."
-              sleep $((i * 3))
-            done
-          else
-            echo "No manifest changes to commit"
-          fi
-
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
-
-      - name: Configure kubeconfig
-        run: |
-          mkdir -p "$HOME/.kube"
-          echo "$KUBE_CONFIG" | base64 -d > "$HOME/.kube/config"
-          chmod 600 "$HOME/.kube/config"
+      # before ANY change to the cluster: a server-side dry run of the manifests (a forbidden or invalid object fails
+      # here), and the Secrets / ConfigMap the next steps patch plus the shared icon cache the API pods mount must exist
+      # (the deployers cannot create objects) - fail now, not half-way or after a 20-minute rollout of Pending pods
+      - name: Preflight manifests
         env:
-          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          # never deploy an OLDER version than master records (a re-run of an older run): refused here, before the
+          # cluster changes - the commit step's forward-only check would only notice after the rollout
+          git fetch --quiet origin master
+          git show origin/master:k8s/stage/deployment-api-stage.yaml > "$RUNNER_TEMP/recorded-stage.yaml"
+          recorded=$(bash scripts/set-image-tags.sh --current "$RUNNER_TEMP/recorded-stage.yaml" || true)
+          if [ -n "$recorded" ] && [ "$recorded" != "$VERSION" ] \
+             && [ "$(printf '%s\n%s\n' "$VERSION" "$recorded" | sort -V | tail -n1)" = "$recorded" ]; then
+            echo "::error::master records the newer $recorded on stage - refusing to deploy the older $VERSION. Deploy the current master: gh workflow run deploy.yml --ref master"
+            exit 1
+          fi
+          kubectl apply --dry-run=server -n "$NAMESPACE" -f k8s/stage/deployment-api-stage.yaml -f k8s/stage/subscriber-deployment-stage.yaml
+          bash scripts/check-objects.sh patch:secrets/avm-trade-reporter-stage-secret \
+            patch:secrets/avm-trade-reporter-subscriber-stage-secret patch:configmaps/avm-trade-reporter-stage-main-conf \
+            get:persistentvolumeclaims/avm-trade-reporter-images-pvc
 
       # Stage's Elastic/Redis credentials live only as GitHub secrets, never committed to the repo.
       # This step (re-)creates the Secret from those GitHub secrets on every deploy, so rotating a
@@ -148,14 +154,6 @@ jobs:
         run: |
           kubectl create configmap avm-trade-reporter-stage-main-conf --from-file=k8s/stage/conf-api-stage -n "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
-      # avm-trade-reporter-images-pvc (k8s/main/pv-images.yaml) is the shared icon cache volume
-      # mounted by both stage and production API deployments (see k8s/main/pv-images.yaml header
-      # comment). It must exist before the deployment below is applied, or its Pods stay stuck
-      # Pending with "persistentvolumeclaim ... not found".
-      - name: Apply shared images PV/PVC
-        run: |
-          kubectl apply -f k8s/main/pv-images.yaml -n "$NAMESPACE"
-
       - name: Apply Kubernetes manifests (stage)
         run: |
           kubectl apply -f k8s/stage/deployment-api-stage.yaml -n "$NAMESPACE"
@@ -167,6 +165,19 @@ jobs:
           kubectl rollout status deployment/avm-trade-reporter-stage-app-deployment -n "$NAMESPACE"
           kubectl rollout restart deployment/avmtradereporter-subscriber-stage -n "$NAMESPACE"
           kubectl rollout status deployment/avmtradereporter-subscriber-stage -n "$NAMESPACE"
+
+      # only after a SUCCESSFUL rollout: promote-production's gate reads master's stage manifest as "stage runs this
+      # version". After a failed rollout the old pods keep serving, and master keeps saying so.
+      - name: Commit updated stage manifests
+        # only a deploy of master records on master: a workflow_dispatch from another branch does not write its build
+        # into master's stage record (note: it still pushes that day's tag - see docs, "Deployer credentials")
+        if: github.ref == 'refs/heads/master'
+        uses: ./.github/actions/commit-manifests
+        with:
+          files: k8s/stage/deployment-api-stage.yaml k8s/stage/subscriber-deployment-stage.yaml
+          version: ${{ needs.build.outputs.version }}
+          message: "cicd deploy ${{ needs.build.outputs.version }} to stage [skip ci]"
+          forward-only: "true"
 
       - name: Remove kubeconfig
         if: always()

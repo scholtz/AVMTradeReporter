@@ -53,13 +53,14 @@ environment.
 |---|---|---|
 | `DOCKERHUB_USERNAME` | `build` | Docker Hub username to push `scholtz2/avm-trade-reporter*` images. |
 | `DOCKERHUB_TOKEN` | `build` | Docker Hub access token (Account Settings → Security → New Access Token) for the user above. |
-| `KUBE_CONFIG` | `deploy-production`, `deploy-stage` | **Base64-encoded** kubeconfig with write access to the `biatec-scan` namespace (Deployments, Services, Ingresses, ConfigMaps, and - for stage only - Secrets). Generate with `kubectl config view --minify --flatten \| base64 -w0` from a context scoped to this namespace; a dedicated ServiceAccount + RBAC Role is recommended over reusing a personal/admin kubeconfig. Kept global because today one kubeconfig has access to both environments' resources in the same namespace/cluster - see "Splitting `KUBE_CONFIG` per environment" below if you want to change that. |
+| `KUBE_CONFIG` | *(not here any more)* | Lives in each deploy Environment (`stage`, `production`, `production-voi`) since 2026-09-12 - an Environment secret of the same name takes priority over a repository one. See "Deployer credentials" below for what it must contain. |
 
 ### `stage` Environment secrets
 
 Create the Environment first (**Settings → Environments → New environment → `stage`**), then add these
 under its own **Environment secrets** section (not the repo-level Secrets tab). They are used **only**
-by the `deploy-stage` job.
+by the `deploy-stage` job (and the weekly credential check). Besides the ones below, it holds `KUBE_CONFIG` - see
+"`KUBE_CONFIG` - one per Environment".
 
 | Secret | Purpose |
 |---|---|
@@ -69,21 +70,87 @@ by the `deploy-stage` job.
 
 ### `production` Environment secrets
 
-Create this Environment too (**Settings → Environments → New environment → `production`**) - it holds
-**no secrets today**. Production's own credentials (`avm-trade-reporter-secret` /
-`avm-trade-reporter2-secret` / `avm-trade-reporter-subscriber-secret` in the `biatec-scan` namespace -
-the mainnet Elastic/Redis/Algod config) are **not** managed by this workflow at all and continue to be
-set by hand directly in the cluster, same as before this change. The Environment still needs to exist
-so the `deploy-production` job (in `promote-production.yml`)'s `environment: production` reference
-resolves and (optionally) so you can attach protection rules (e.g. required reviewers) to production
-promotions.
+Create this Environment too (**Settings → Environments → New environment → `production`**). Its only secret is
+`KUBE_CONFIG` - the kubeconfig of the `github-deployer-production` ServiceAccount (see "Deployer credentials").
+Production's own credentials (`avm-trade-reporter-secret` / `avm-trade-reporter2-secret` /
+`avm-trade-reporter-subscriber-secret` in the `biatec-scan` namespace - the mainnet Elastic/Redis/Algod config) are
+**not** managed by this workflow and continue to be set by hand directly in the cluster. Attach protection rules
+(required reviewers) here: they gate production promotions.
 
-### Splitting `KUBE_CONFIG` per environment (optional hardening)
+### `KUBE_CONFIG` - one per Environment
 
-If you'd rather the stage job's kubeconfig not be able to touch production resources (or vice versa),
-add a `KUBE_CONFIG` secret inside the `stage` and/or `production` Environment itself - an
-Environment-scoped secret of the same name silently takes priority over the repo-level one for jobs
-running under that Environment, so no workflow changes are needed to adopt this later.
+Every deploy Environment holds its own `KUBE_CONFIG` - `stage`, `production` and `production-voi` - each the
+kubeconfig of that environment's own deployer ServiceAccount, whose Role only reaches that environment's objects (a
+repository-level `KUBE_CONFIG` is not used; an Environment secret of the same name would take priority anyway).
+`k8s/ci/make-kubeconfig.sh --set-secrets` sets all three. Details and rotation: "Deployer credentials" below.
+
+## Deployer credentials (`KUBE_CONFIG`)
+
+Every deploy job starts with the local action `.github/actions/kube-setup`: it installs kubectl, writes the base64
+`KUBE_CONFIG` secret of the job's Environment to `~/.kube/config` and runs `scripts/check-kubeconfig.sh` **before**
+anything is applied. The check prints the API server, the kind of credential and its expiry (never the credential
+itself), fails with an explanation when the cluster rejects it or it may not deploy, and warns 14 days before it
+expires. `.github/workflows/kube-credentials.yml` runs the same check every Monday for `stage` and `production-voi`
+and fails 14 days ahead of an expiry (`production` is checked by its promote job instead - it needs a reviewer, a
+scheduled job would wait for one every week). Before anything in the cluster changes, a preflight step runs a
+server-side dry run of the manifests (production: also of the images PV/PVC) and, for stage and Voi, checks that the
+shared images PVC exists. The manifests are committed back to `master` only after a **successful** rollout
+(`.github/actions/commit-manifests`): promote-production's gate reads `master`'s stage manifest as "stage runs this
+version", and after a failed rollout the old pods keep serving - so `master` keeps showing the version that serves.
+The commit is made on a fresh `origin/master` worktree (no rebase that another deploy's commit could conflict with),
+fetch / push failures are retried and a push that keeps failing fails the job. Overlapping deploys of one environment
+are serialized (`concurrency`): GitHub keeps at most one waiting deploy per environment, so a deploy that was still
+waiting when a newer push arrived shows as *cancelled* - the newer one deploys instead.
+A credential whose expiry cannot be read (e.g. a Rancher token) makes the weekly check fail until it is replaced.
+
+**History:** the secrets used to hold a copy of a personal/admin kubeconfig whose credential expires about 30 days
+after it is issued. The stage deploy broke on 2026-09-09 (fixed 2026-09-12 by pasting fresh kubeconfigs into all
+three Environments) and again from 2026-10-18, every run failing at the first `kubectl` call with
+`failed to download openapi: the server has asked for the client to provide credentials` - an HTTP 401: the cluster
+rejected the expired credential. Because the manifests were committed before that call, `master` collected
+`cicd deploy ... to stage` commits for versions that never reached the cluster.
+
+**Fix / rotation:** one ServiceAccount per Environment (`k8s/ci/github-deployer.yaml`): `github-deployer-stage`,
+`github-deployer-production`, `github-deployer-voi`. Each token Secret (`kubernetes.io/service-account-token`) does
+not expire and is revoked by deleting it. Every Role only reaches its own environment's objects by name, no Role may
+create Deployments / Pods or list Secrets, and only the production deployer touches the shared images PV/PVC.
+
+The ServiceAccounts and their token Secrets live in their own namespace `github-deployers` (nothing else in it, no
+deployer has any right there): a pod can only mount Secrets of its own namespace, so no pod template in `biatec-scan`
+can reach another deployer's token. The Roles - and the deployers' work - stay in `biatec-scan`.
+
+This limits each credential through the API, but it is **not a security boundary** between the apps: they
+share the namespace `biatec-scan`, so a deployer that may patch its own Deployment may also change its pod template,
+and a pod can mount any Secret of its namespace. Isolating the stage job (every push, no reviewer) from production
+needs stage in its own namespace - blocked today by the shared icon cache (a PersistentVolume binds to one PVC in one
+namespace) - or an admission policy pinning the pod templates' Secret / ServiceAccount references.
+With a cluster-admin kubectl context:
+
+```bash
+k8s/ci/make-kubeconfig.sh --set-secrets   # applies the RBAC, builds + verifies the 3 kubeconfigs, then sets the secrets
+gh workflow run deploy.yml --ref master --repo scholtz/AVMTradeReporter   # deploys the current master to stage
+```
+
+Do not re-run an *older* run. "Re-run failed jobs" of it is refused by the stage preflight before anything is
+deployed (master records a newer version). "Re-run all jobs" is worse: it rebuilds that old commit under *today's*
+tag, which passes every version check. Re-running the newest failed run is fine. A `deploy.yml` run dispatched from
+another branch deploys stage but records nothing on `master`; it does push the day's image tag, though.
+
+The image tag is per day (`1.<y>.<m>.<d>-main`, shared by every build of that day), so the promote gate ("stage runs
+this version") cannot tell two builds of one day apart - only deploy `master`, and its newest run. Making the tag
+unique per build (e.g. with the commit SHA) is the root fix, left for a follow-up.
+Nothing is set unless all three kubeconfigs verified.
+
+The kubeconfigs are written to a temporary directory outside the repository and deleted after `--set-secrets`. If
+the admin context reaches the cluster through a proxy (a Rancher `/k8s/clusters/...` URL does not accept
+ServiceAccount tokens), pass the cluster's own API endpoint: `KUBE_SERVER=https://<host>:6443 k8s/ci/make-kubeconfig.sh --set-secrets`.
+To revoke one: `kubectl -n github-deployers delete secret github-deployer-stage-token` (re-running the script mints a new
+token and updates the secret).
+
+**Limits by design:** the deployers only `kubectl apply` objects that already exist (get + patch). A new object - a
+new Deployment, Service, Ingress, ConfigMap or Secret name, or the images PV/PVC after a cluster rebuild -
+is created once by an admin, and its name added to the matching Role in `k8s/ci/github-deployer.yaml`. Until then
+the deploy fails with `forbidden`, naming the object.
 
 ## One-time cluster prerequisites
 
@@ -103,5 +170,7 @@ running under that Environment, so no workflow changes are needed to adopt this 
 - `promote-production.yml`: `k8s/main/deployment-api.yaml`, `k8s/main/deployment2-api.yaml`,
   `k8s/main/subscriber-deployment.yaml` (production image tags), only when manually triggered.
 
-Each deploy job commits its own manifest changes back to `master` with `[skip ci]` so the checked-in
-YAML always reflects what's actually deployed, then applies them with `kubectl apply`.
+Each deploy job first applies the manifests with `kubectl apply` and watches the rollout, then - only when the rollout
+succeeded - records the deployed image tags on `master` with `[skip ci]` (only the tags are re-applied on a fresh
+`origin/master`, so concurrent edits to the same files are kept). The checked-in YAML therefore names the version that
+actually serves; a failed run records nothing.
