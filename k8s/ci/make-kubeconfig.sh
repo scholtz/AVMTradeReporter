@@ -132,7 +132,7 @@ EOF
   denied=0
   for other in $ENVIRONMENTS; do
     [ "$other" = "$env" ] && continue
-    objects=$(env_objects "$other")
+    objects=$(env_objects "$other") || objects="" # kubectl's own error is printed above; explained below
     if [ -z "$objects" ] || [[ "$objects" == *UNRESTRICTED:* ]]; then
       echo "Role of $other is missing or has a rule without resourceNames - every rule must name its objects" >&2
       exit 1

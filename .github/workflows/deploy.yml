@@ -157,14 +157,15 @@ jobs:
       # only after a SUCCESSFUL rollout: promote-production's gate reads master's stage manifest as "stage runs this
       # version". After a failed rollout the old pods keep serving, and master keeps saying so.
       - name: Commit updated stage manifests
-        # only a deploy of master records on master: a workflow_dispatch from another branch must not make the promote
-        # gate believe that branch's (unreviewed) build is "what stage runs" on master
+        # only a deploy of master records on master: a workflow_dispatch from another branch does not write its build
+        # into master's stage record (note: it still pushes that day's tag - see docs, "Deployer credentials")
         if: github.ref == 'refs/heads/master'
         uses: ./.github/actions/commit-manifests
         with:
           files: k8s/stage/deployment-api-stage.yaml k8s/stage/subscriber-deployment-stage.yaml
           version: ${{ needs.build.outputs.version }}
           message: "cicd deploy ${{ needs.build.outputs.version }} to stage [skip ci]"
+          forward-only: "true"
 
       - name: Remove kubeconfig
         if: always()

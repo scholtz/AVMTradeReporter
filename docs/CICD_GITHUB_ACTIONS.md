@@ -132,7 +132,9 @@ gh workflow run deploy.yml --ref master --repo scholtz/AVMTradeReporter   # depl
 ```
 
 Do not re-run an *older* failed run: it re-deploys that run's (older) images; the commit step then refuses to move
-`master`'s record backwards and fails, and stage runs the older version until master is deployed again. Re-running the newest failed run is fine. A `deploy.yml` run dispatched from another branch deploys stage but records nothing on `master`.
+`master`'s record backwards and fails, and stage runs the older version until master is deployed again. Re-running the newest failed run is fine. A `deploy.yml` run dispatched from another branch deploys stage but records nothing on `master`. It does push the
+day's image tag (`1.<y>.<m>.<d>-main`, shared by every build of that day), though - the promote gate cannot tell
+such a build from master's; only dispatch `deploy.yml` from `master`.
 Nothing is set unless all three kubeconfigs verified.
 
 The kubeconfigs are written to a temporary directory outside the repository and deleted after `--set-secrets`. If

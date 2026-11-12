@@ -19,6 +19,13 @@ inputs:
   message:
     description: Commit message
     required: true
+  forward-only:
+    description: >-
+      "true": refuse to record a version older than the one master names (stage: a re-run of an older run would
+      make the promote gate trust an outdated record). Production / Voi leave it off - promoting an older version is
+      a deliberate rollback.
+    required: false
+    default: "false"
 runs:
   using: composite
   steps:
@@ -28,6 +35,7 @@ runs:
         FILES: ${{ inputs.files }}
         VERSION: ${{ inputs.version }}
         MESSAGE: ${{ inputs.message }}
+        FORWARD_ONLY: ${{ inputs.forward-only }}
       run: |
         set -euo pipefail
         read -r -a files <<< "$FILES"
@@ -42,9 +50,12 @@ runs:
             echo "Fetching master failed (attempt $attempt), retrying..."
             continue
           fi
-          # never move master's record backwards (e.g. a re-run of an older run): the versions (1.<y>.<m>.<d>-main)
-          # sort by date
-          recorded=$(grep -oE 'image:[[:space:]]*"?[^[:space:]"]+:[^[:space:]"]+' "$worktree/${files[0]}" | head -n1 | sed 's/.*://' || true)
+          # forward-only: never move master's record backwards (e.g. a re-run of an older run); the versions
+          # (1.<y>.<m>.<d>-main) sort by date
+          recorded=""
+          if [ "${FORWARD_ONLY:-false}" = true ]; then
+            recorded=$(bash "$set_tags" --current "$worktree/${files[0]}" || true)
+          fi
           if [ -n "$recorded" ] && [ "$recorded" != "$VERSION" ] \
              && [ "$(printf '%s\n%s\n' "$VERSION" "$recorded" | sort -V | tail -n1)" = "$recorded" ]; then
             echo "::error::This run rolled out $VERSION, but master already records the newer $recorded - the cluster now runs an older version than master says. Deploy the current master again: gh workflow run deploy.yml --ref master"
