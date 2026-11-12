@@ -53,7 +53,7 @@ environment.
 |---|---|---|
 | `DOCKERHUB_USERNAME` | `build` | Docker Hub username to push `scholtz2/avm-trade-reporter*` images. |
 | `DOCKERHUB_TOKEN` | `build` | Docker Hub access token (Account Settings → Security → New Access Token) for the user above. |
-| `KUBE_CONFIG` | `deploy-production`, `deploy-stage` | **Base64-encoded** kubeconfig with write access to the `biatec-scan` namespace (Deployments, Services, Ingresses, ConfigMaps, and - for stage only - Secrets). Generate with `kubectl config view --minify --flatten \| base64 -w0` from a context scoped to this namespace; a dedicated ServiceAccount + RBAC Role is recommended over reusing a personal/admin kubeconfig. Kept global because today one kubeconfig has access to both environments' resources in the same namespace/cluster - see "Splitting `KUBE_CONFIG` per environment" below if you want to change that. |
+| `KUBE_CONFIG` | *(not here any more)* | Lives in each deploy Environment (`stage`, `production`, `production-voi`) since 2026-09-12 - an Environment secret of the same name takes priority over a repository one. See "Deployer credentials" below for what it must contain. |
 
 ### `stage` Environment secrets
 
@@ -84,6 +84,37 @@ If you'd rather the stage job's kubeconfig not be able to touch production resou
 add a `KUBE_CONFIG` secret inside the `stage` and/or `production` Environment itself - an
 Environment-scoped secret of the same name silently takes priority over the repo-level one for jobs
 running under that Environment, so no workflow changes are needed to adopt this later.
+
+## Deployer credentials (`KUBE_CONFIG`)
+
+Every deploy job writes the base64 `KUBE_CONFIG` secret of its Environment to `~/.kube/config` and runs
+`scripts/check-kubeconfig.sh` **before** it commits manifests back to `master` or applies anything. The check prints
+the API server, the kind of credential and its expiry (never the credential itself), fails with an explanation when
+the cluster rejects it, and warns 14 days before it expires. `.github/workflows/kube-credentials.yml` runs the same
+check every Monday for `stage` and `production-voi` and fails 14 days ahead of an expiry (`production` is checked by
+its promote job instead - it needs a reviewer, a scheduled job would wait for one every week).
+
+**History:** the secrets used to hold a copy of a personal/admin kubeconfig whose credential expires about 30 days
+after it is issued. The stage deploy broke on 2026-09-09 (fixed 2026-09-12 by pasting fresh kubeconfigs into all
+three Environments) and again from 2026-10-18 until 2026-11-12, every run failing at the first `kubectl` call with
+`failed to download openapi: the server has asked for the client to provide credentials` - an HTTP 401: the cluster
+rejected the expired credential. Because the manifests were committed before that call, `master` collected
+`cicd deploy ... to stage` commits for versions that never reached the cluster.
+
+**Fix / rotation:** use the dedicated `github-deployer` ServiceAccount (`k8s/ci/github-deployer.yaml`). Its token
+Secret (`kubernetes.io/service-account-token`) does not expire, it is revoked by deleting the Secret, and its RBAC
+covers exactly what the workflows do in `biatec-scan` (Deployments, Services, Ingresses, ConfigMaps, Secrets, the
+images PVC, rollouts) plus the one cluster scoped images PersistentVolume. With a cluster-admin kubectl context:
+
+```bash
+k8s/ci/make-kubeconfig.sh --set-secrets   # applies the RBAC, builds + verifies the kubeconfig, sets the 3 secrets
+rm github-deployer.kubeconfig
+gh run rerun <failed run id> --failed --repo scholtz/AVMTradeReporter
+```
+
+If the admin context reaches the cluster through a proxy (a Rancher `/k8s/clusters/...` URL does not accept
+ServiceAccount tokens), pass the cluster's own API endpoint: `KUBE_SERVER=https://<host>:6443 k8s/ci/make-kubeconfig.sh --set-secrets`.
+To revoke: `kubectl -n biatec-scan delete secret github-deployer-token` (re-applying the YAML mints a new token).
 
 ## One-time cluster prerequisites
 

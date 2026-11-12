@@ -90,6 +90,24 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p "$HOME/.kube"
+          echo "$KUBE_CONFIG" | base64 -d > "$HOME/.kube/config"
+          chmod 600 "$HOME/.kube/config"
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+
+      # Fails here - before any manifest is committed back to master or applied - when the cluster rejects the
+      # KUBE_CONFIG credential (it used to expire ~30 days after it was issued and every deploy then died at the
+      # first kubectl call with "failed to download openapi: the server has asked for the client to provide
+      # credentials"), and warns two weeks before it expires. See docs/CICD_GITHUB_ACTIONS.md, "Deployer credentials".
+      - name: Check cluster credentials
+        run: bash scripts/check-kubeconfig.sh --namespace "$NAMESPACE"
+
       - name: Update stage manifests with new image tags
         run: |
           version="${{ needs.build.outputs.version }}"
@@ -111,17 +129,6 @@ jobs:
           else
             echo "No manifest changes to commit"
           fi
-
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
-
-      - name: Configure kubeconfig
-        run: |
-          mkdir -p "$HOME/.kube"
-          echo "$KUBE_CONFIG" | base64 -d > "$HOME/.kube/config"
-          chmod 600 "$HOME/.kube/config"
-        env:
-          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
 
       # Stage's Elastic/Redis credentials live only as GitHub secrets, never committed to the repo.
       # This step (re-)creates the Secret from those GitHub secrets on every deploy, so rotating a
