@@ -1,8 +1,9 @@
-# Records the image version a deploy job applied in the manifests on master, so master shows what the cluster got.
+# Records the image version a deploy job rolled out in the manifests on master, so master names the version that
+# serves.
 #
-# Run it after the rollout step with `if: always() && steps.apply.outcome == 'success'`: the rollout is always
-# watched (a push problem can no longer skip `kubectl rollout status`), and master records the applied version also
-# when the rollout failed. The change is re-applied with scripts/set-image-tags.sh on a fresh worktree of
+# Run it as the step after the rollout, with the default `if: success()`: promote-production's gate reads master's
+# stage manifest as "stage runs this version", so a failed rollout (the old pods keep serving) must not be recorded.
+# The change is re-applied with scripts/set-image-tags.sh on a fresh worktree of
 # origin/master - not rebased, not copied - so another deploy's commit to the same image line cannot leave a
 # conflicted rebase behind, and other edits to those manifests that landed on master meanwhile are kept. A push that
 # still fails after the retries fails the step.
@@ -41,7 +42,10 @@ runs:
             echo "Fetching master failed (attempt $attempt), retrying..."
             continue
           fi
-          (cd "$worktree" && bash "$set_tags" "$VERSION" "${files[@]}")
+          if ! (cd "$worktree" && bash "$set_tags" "$VERSION" "${files[@]}"); then
+            echo "::error::master's manifests changed shape (see above) - record $VERSION on master by hand; the rollout itself succeeded."
+            exit 1
+          fi
           if git -C "$worktree" diff --quiet -- "${files[@]}"; then
             echo "master already records version $VERSION"
             exit 0

@@ -16,8 +16,10 @@ version="$1"
 shift
 api="${IMAGE_API:-scholtz2/avm-trade-reporter}"
 subscriber="${IMAGE_SUBSCRIBER:-scholtz2/avm-trade-reporter-subscriber}"
-pattern_api="(image:[[:space:]]*\"?)${api}:[^[:space:]\"]+"
-pattern_subscriber="(image:[[:space:]]*\"?)${subscriber}:[^[:space:]\"]+"
+# the names are literal text in the patterns: escape the regex metacharacters (e.g. the dots of a registry host)
+re_escape() { printf '%s' "$1" | sed 's/[][\.*^$+?(){}|]/\\&/g'; }
+pattern_api="(image:[[:space:]]*\"?)$(re_escape "$api"):[^[:space:]\"]+"
+pattern_subscriber="(image:[[:space:]]*\"?)$(re_escape "$subscriber"):[^[:space:]\"]+"
 for manifest in "$@"; do
   # a manifest whose image line has another shape (registry prefix, digest, no tag) would silently keep the old image
   if ! grep -qE "$pattern_api|$pattern_subscriber" "$manifest"; then

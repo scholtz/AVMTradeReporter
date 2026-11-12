@@ -244,11 +244,12 @@ jobs:
           version="${{ needs.resolve-version.outputs.version }}"
           bash scripts/set-image-tags.sh "$version" k8s/main/deployment-api.yaml k8s/main/deployment2-api.yaml k8s/main/subscriber-deployment.yaml
 
-      # before ANY change to the cluster (Secrets, ConfigMap, manifests): a server-side dry run of the manifests - a
-      # forbidden or invalid object fails here
+      # before ANY change to the cluster: a server-side dry run of the images PV/PVC and the manifests (a forbidden or
+      # invalid object fails here), and the ConfigMap the next step patches must exist (the deployers cannot create it)
       - name: Preflight manifests
         run: |
           kubectl apply --dry-run=server -n "$NAMESPACE" -f k8s/main/pv-images.yaml -f k8s/main/deployment-api.yaml -f k8s/main/deployment2-api.yaml -f k8s/main/subscriber-deployment.yaml
+          bash scripts/check-objects.sh patch:configmaps/avm-trade-reporter-main-conf
 
       # Must run BEFORE "Apply Kubernetes manifests": on a freshly scheduled Pod, kubectl apply
       # schedules Pods immediately, so if the ConfigMap a Pod's volume mounts doesn't exist yet, the
@@ -281,8 +282,8 @@ jobs:
           kubectl rollout restart deployment/avmtradereporter-subscriber -n "$NAMESPACE"
           kubectl rollout status deployment/avmtradereporter-subscriber -n "$NAMESPACE"
 
-      # only after a SUCCESSFUL rollout: promote-production's gate reads master's stage manifest as "stage runs this
-      # version". After a failed rollout the old pods keep serving, and master keeps saying so.
+      # only after a SUCCESSFUL rollout, as in deploy.yml: master names the version that serves (after a failed rollout
+      # the old pods keep serving) - resolve-version's network drift warning compares these manifests
       - name: Commit updated production manifests
         uses: ./.github/actions/commit-manifests
         with:
@@ -345,16 +346,15 @@ jobs:
           version="${{ needs.resolve-version.outputs.version }}"
           bash scripts/set-image-tags.sh "$version" k8s/voi/deployment-api-voi.yaml k8s/voi/subscriber-deployment-voi.yaml
 
-      # before ANY change to the cluster (Secrets, ConfigMap, manifests): a server-side dry run of the manifests - a
-      # forbidden or invalid object fails here - and the shared icon cache their API pods mount, which only an admin can create
-      # (k8s/main/pv-images.yaml): fail now, not after a 20-minute rollout of Pending pods
+      # before ANY change to the cluster: a server-side dry run of the manifests (a forbidden or invalid object fails
+      # here), and the Secrets / ConfigMap the next steps patch plus the shared icon cache the API pods mount must exist
+      # (the deployers cannot create objects) - fail now, not half-way or after a 20-minute rollout of Pending pods
       - name: Preflight manifests
         run: |
           kubectl apply --dry-run=server -n "$NAMESPACE" -f k8s/voi/deployment-api-voi.yaml -f k8s/voi/subscriber-deployment-voi.yaml
-          if ! kubectl get pvc avm-trade-reporter-images-pvc -n "$NAMESPACE" -o name >/dev/null; then
-            echo "::error::PVC avm-trade-reporter-images-pvc is missing in $NAMESPACE - an admin must apply k8s/main/pv-images.yaml"
-            exit 1
-          fi
+          bash scripts/check-objects.sh patch:secrets/avm-trade-reporter-voi-secret \
+            patch:secrets/avm-trade-reporter-subscriber-voi-secret patch:configmaps/avm-trade-reporter-voi-main-conf \
+            get:persistentvolumeclaims/avm-trade-reporter-images-pvc
 
       # Voi's Elastic/Redis credentials live only as GitHub Environment secrets ("production-voi"),
       # never committed to the repo. Re-created on every promote so rotating a GitHub secret and
@@ -394,8 +394,8 @@ jobs:
           kubectl rollout restart deployment/avmtradereporter-subscriber-voi -n "$NAMESPACE"
           kubectl rollout status deployment/avmtradereporter-subscriber-voi -n "$NAMESPACE"
 
-      # only after a SUCCESSFUL rollout: promote-production's gate reads master's stage manifest as "stage runs this
-      # version". After a failed rollout the old pods keep serving, and master keeps saying so.
+      # only after a SUCCESSFUL rollout, as in deploy.yml: master names the version that serves (after a failed rollout
+      # the old pods keep serving) - resolve-version's network drift warning compares these manifests
       - name: Commit updated voi manifests
         uses: ./.github/actions/commit-manifests
         with:
