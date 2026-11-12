@@ -93,8 +93,9 @@ anything is applied. The check prints the API server, the kind of credential and
 itself), fails with an explanation when the cluster rejects it or it may not deploy, and warns 14 days before it
 expires. `.github/workflows/kube-credentials.yml` runs the same check every Monday for `stage` and `production-voi`
 and fails 14 days ahead of an expiry (`production` is checked by its promote job instead - it needs a reviewer, a
-scheduled job would wait for one every week). The manifests are committed back to `master` only **after** a
-successful rollout, so `master` always shows what really runs.
+scheduled job would wait for one every week). The manifests are committed back to `master` only after
+`kubectl apply` succeeded - the moment the cluster's spec changed - so `master` shows the applied spec, also when the
+rollout then fails. Overlapping deploys of one environment are serialized (`concurrency`).
 
 **History:** the secrets used to hold a copy of a personal/admin kubeconfig whose credential expires about 30 days
 after it is issued. The stage deploy broke on 2026-09-09 (fixed 2026-09-12 by pasting fresh kubeconfigs into all
@@ -105,9 +106,14 @@ rejected the expired credential. Because the manifests were committed before tha
 
 **Fix / rotation:** one ServiceAccount per Environment (`k8s/ci/github-deployer.yaml`): `github-deployer-stage`,
 `github-deployer-production`, `github-deployer-voi`. Each token Secret (`kubernetes.io/service-account-token`) does
-not expire and is revoked by deleting it. Stage, production and voi share the namespace `biatec-scan`, so every Role
-only reaches its own environment's objects by name - the stage job (every push, no reviewer) can neither read
-production's Secrets nor patch production's Deployments - and no Role may create Deployments / Pods or list Secrets.
+not expire and is revoked by deleting it. Every Role only reaches its own environment's objects by name, no Role may
+create Deployments / Pods or list Secrets, and only the production deployer touches the shared images PV/PVC.
+
+This limits each credential through the API, but it is **not a security boundary** between the environments: they
+share the namespace `biatec-scan`, so a deployer that may patch its own Deployment may also change its pod template,
+and a pod can mount any Secret of its namespace. Isolating the stage job (every push, no reviewer) from production
+needs stage in its own namespace - blocked today by the shared icon cache (a PersistentVolume binds to one PVC in one
+namespace) - or an admission policy pinning the pod templates' Secret / ServiceAccount references.
 With a cluster-admin kubectl context:
 
 ```bash
@@ -122,7 +128,7 @@ To revoke one: `kubectl -n biatec-scan delete secret github-deployer-stage-token
 token and updates the secret).
 
 **Limits by design:** the deployers only `kubectl apply` objects that already exist (get + patch). A new object - a
-new Deployment, Service, Ingress, ConfigMap or Secret name, or the images PersistentVolume after a cluster rebuild -
+new Deployment, Service, Ingress, ConfigMap or Secret name, or the images PV/PVC after a cluster rebuild -
 is created once by an admin, and its name added to the matching Role in `k8s/ci/github-deployer.yaml`. Until then
 the deploy fails with `forbidden`, naming the object.
 

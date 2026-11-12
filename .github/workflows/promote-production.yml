@@ -215,6 +215,9 @@ jobs:
   # ---------------------------------------------------------------------
   deploy-production:
     name: Deploy to production (Algorand mainnet)
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
     needs: [resolve-version, verify-images, promote-tag, verify-stage]
     if: inputs.network == 'algorand' || inputs.network == 'all'
     runs-on: ubuntu-latest
@@ -265,6 +268,30 @@ jobs:
           kubectl apply -f k8s/main/deployment2-api.yaml -n "$NAMESPACE"
           kubectl apply -f k8s/main/subscriber-deployment.yaml -n "$NAMESPACE"
 
+      # committed right after the manifests were applied - the moment the cluster's spec changed - so master shows the
+      # applied spec (also when the rollout below fails); it used to be committed before any kubectl call, and master
+      # collected deploys that never reached the cluster
+      - name: Commit updated production manifests
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet -- k8s/main/deployment-api.yaml k8s/main/deployment2-api.yaml k8s/main/subscriber-deployment.yaml; then
+            git add k8s/main/deployment-api.yaml k8s/main/deployment2-api.yaml k8s/main/subscriber-deployment.yaml
+            git commit -m "cicd promote ${{ needs.resolve-version.outputs.version }} to production [skip ci]"
+            pushed=0
+            for i in 1 2 3 4 5; do
+              if git pull --rebase origin master && git push; then pushed=1; break; fi
+              echo "Push attempt $i failed, retrying..."
+              sleep $((i * 3))
+            done
+            if [ "$pushed" -ne 1 ]; then
+              echo "::error::Could not push the deployed manifests to master - master does not show the version applied to the cluster."
+              exit 1
+            fi
+          else
+            echo "No manifest changes to commit"
+          fi
+
       - name: Roll out production deployments
         run: |
           kubectl rollout restart deployment/avm-trade-reporter-app-deployment -n "$NAMESPACE"
@@ -273,24 +300,6 @@ jobs:
           kubectl rollout status deployment/avm-trade-reporter2-app-deployment -n "$NAMESPACE"
           kubectl rollout restart deployment/avmtradereporter-subscriber -n "$NAMESPACE"
           kubectl rollout status deployment/avmtradereporter-subscriber -n "$NAMESPACE"
-
-      # committed only after a successful rollout, so the manifests on master always reflect what really runs
-      # (they used to be committed first - master collected deploys that never reached the cluster)
-      - name: Commit updated production manifests
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          if ! git diff --quiet -- k8s/main/deployment-api.yaml k8s/main/deployment2-api.yaml k8s/main/subscriber-deployment.yaml; then
-            git add k8s/main/deployment-api.yaml k8s/main/deployment2-api.yaml k8s/main/subscriber-deployment.yaml
-            git commit -m "cicd promote ${{ needs.resolve-version.outputs.version }} to production [skip ci]"
-            for i in 1 2 3 4 5; do
-              git pull --rebase origin master && git push && break
-              echo "Push attempt $i failed, retrying..."
-              sleep $((i * 3))
-            done
-          else
-            echo "No manifest changes to commit"
-          fi
 
       - name: Remove kubeconfig
         if: always()
@@ -316,6 +325,9 @@ jobs:
   # ---------------------------------------------------------------------
   deploy-production-voi:
     name: Deploy to production (Voi mainnet)
+    concurrency:
+      group: deploy-production-voi
+      cancel-in-progress: false
     needs: [resolve-version, verify-images, promote-tag, verify-stage]
     if: |
       (inputs.network == 'voi' || inputs.network == 'all') &&
@@ -371,24 +383,14 @@ jobs:
         run: |
           kubectl create configmap avm-trade-reporter-voi-main-conf --from-file=k8s/voi/conf-api-voi -n "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
-      - name: Apply shared images PV/PVC
-        run: |
-          kubectl apply -f k8s/main/pv-images.yaml -n "$NAMESPACE"
-
       - name: Apply Kubernetes manifests (voi)
         run: |
           kubectl apply -f k8s/voi/deployment-api-voi.yaml -n "$NAMESPACE"
           kubectl apply -f k8s/voi/subscriber-deployment-voi.yaml -n "$NAMESPACE"
 
-      - name: Roll out voi deployments
-        run: |
-          kubectl rollout restart deployment/avm-trade-reporter-voi-app-deployment -n "$NAMESPACE"
-          kubectl rollout status deployment/avm-trade-reporter-voi-app-deployment -n "$NAMESPACE"
-          kubectl rollout restart deployment/avmtradereporter-subscriber-voi -n "$NAMESPACE"
-          kubectl rollout status deployment/avmtradereporter-subscriber-voi -n "$NAMESPACE"
-
-      # committed only after a successful rollout, so the manifests on master always reflect what really runs
-      # (they used to be committed first - master collected deploys that never reached the cluster)
+      # committed right after the manifests were applied - the moment the cluster's spec changed - so master shows the
+      # applied spec (also when the rollout below fails); it used to be committed before any kubectl call, and master
+      # collected deploys that never reached the cluster
       - name: Commit updated voi manifests
         run: |
           git config user.name "github-actions[bot]"
@@ -396,14 +398,26 @@ jobs:
           if ! git diff --quiet -- k8s/voi/deployment-api-voi.yaml k8s/voi/subscriber-deployment-voi.yaml; then
             git add k8s/voi/deployment-api-voi.yaml k8s/voi/subscriber-deployment-voi.yaml
             git commit -m "cicd promote ${{ needs.resolve-version.outputs.version }} to production-voi [skip ci]"
+            pushed=0
             for i in 1 2 3 4 5; do
-              git pull --rebase origin master && git push && break
+              if git pull --rebase origin master && git push; then pushed=1; break; fi
               echo "Push attempt $i failed, retrying..."
               sleep $((i * 3))
             done
+            if [ "$pushed" -ne 1 ]; then
+              echo "::error::Could not push the deployed manifests to master - master does not show the version applied to the cluster."
+              exit 1
+            fi
           else
             echo "No manifest changes to commit"
           fi
+
+      - name: Roll out voi deployments
+        run: |
+          kubectl rollout restart deployment/avm-trade-reporter-voi-app-deployment -n "$NAMESPACE"
+          kubectl rollout status deployment/avm-trade-reporter-voi-app-deployment -n "$NAMESPACE"
+          kubectl rollout restart deployment/avmtradereporter-subscriber-voi -n "$NAMESPACE"
+          kubectl rollout status deployment/avmtradereporter-subscriber-voi -n "$NAMESPACE"
 
       - name: Remove kubeconfig
         if: always()

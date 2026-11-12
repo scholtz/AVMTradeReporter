@@ -76,6 +76,9 @@ jobs:
 
   deploy-stage:
     name: Deploy to stage (testnet)
+    concurrency:
+      group: deploy-stage
+      cancel-in-progress: false
     needs: build
     runs-on: ubuntu-latest
     # Scoped to the "stage" GitHub Environment - ELASTIC_HOST/ELASTIC_API_KEY/REDIS_CONNECTION_STRING
@@ -130,28 +133,14 @@ jobs:
         run: |
           kubectl create configmap avm-trade-reporter-stage-main-conf --from-file=k8s/stage/conf-api-stage -n "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
-      # avm-trade-reporter-images-pvc (k8s/main/pv-images.yaml) is the shared icon cache volume
-      # mounted by both stage and production API deployments (see k8s/main/pv-images.yaml header
-      # comment). It must exist before the deployment below is applied, or its Pods stay stuck
-      # Pending with "persistentvolumeclaim ... not found".
-      - name: Apply shared images PV/PVC
-        run: |
-          kubectl apply -f k8s/main/pv-images.yaml -n "$NAMESPACE"
-
       - name: Apply Kubernetes manifests (stage)
         run: |
           kubectl apply -f k8s/stage/deployment-api-stage.yaml -n "$NAMESPACE"
           kubectl apply -f k8s/stage/subscriber-deployment-stage.yaml -n "$NAMESPACE"
 
-      - name: Roll out stage deployments
-        run: |
-          kubectl rollout restart deployment/avm-trade-reporter-stage-app-deployment -n "$NAMESPACE"
-          kubectl rollout status deployment/avm-trade-reporter-stage-app-deployment -n "$NAMESPACE"
-          kubectl rollout restart deployment/avmtradereporter-subscriber-stage -n "$NAMESPACE"
-          kubectl rollout status deployment/avmtradereporter-subscriber-stage -n "$NAMESPACE"
-
-      # committed only after a successful rollout, so the manifests on master always reflect what really runs
-      # (they used to be committed first - master collected deploys that never reached the cluster)
+      # committed right after the manifests were applied - the moment the cluster's spec changed - so master shows the
+      # applied spec (also when the rollout below fails); it used to be committed before any kubectl call, and master
+      # collected deploys that never reached the cluster
       - name: Commit updated stage manifests
         run: |
           git config user.name "github-actions[bot]"
@@ -159,14 +148,26 @@ jobs:
           if ! git diff --quiet -- k8s/stage/deployment-api-stage.yaml k8s/stage/subscriber-deployment-stage.yaml; then
             git add k8s/stage/deployment-api-stage.yaml k8s/stage/subscriber-deployment-stage.yaml
             git commit -m "cicd deploy ${{ needs.build.outputs.version }} to stage [skip ci]"
+            pushed=0
             for i in 1 2 3 4 5; do
-              git pull --rebase origin master && git push && break
+              if git pull --rebase origin master && git push; then pushed=1; break; fi
               echo "Push attempt $i failed, retrying..."
               sleep $((i * 3))
             done
+            if [ "$pushed" -ne 1 ]; then
+              echo "::error::Could not push the deployed manifests to master - master does not show the version applied to the cluster."
+              exit 1
+            fi
           else
             echo "No manifest changes to commit"
           fi
+
+      - name: Roll out stage deployments
+        run: |
+          kubectl rollout restart deployment/avm-trade-reporter-stage-app-deployment -n "$NAMESPACE"
+          kubectl rollout status deployment/avm-trade-reporter-stage-app-deployment -n "$NAMESPACE"
+          kubectl rollout restart deployment/avmtradereporter-subscriber-stage -n "$NAMESPACE"
+          kubectl rollout status deployment/avmtradereporter-subscriber-stage -n "$NAMESPACE"
 
       - name: Remove kubeconfig
         if: always()

@@ -9,13 +9,18 @@
 # (HTTP 401). A `kubernetes.io/service-account-token` Secret holds a token that does not expire; it is revoked by
 # deleting that Secret (re-applying this file mints a new one).
 #
-# Least privilege, because stage, production and voi share the namespace biatec-scan: every Role only reaches its
-# own environment's objects by name (`resourceNames`), so the stage job - which runs on every push without a
-# reviewer - can neither read production's Secrets nor patch production's Deployments. No Role may create
-# Deployments / Pods (that would allow mounting any Secret) or list Secrets: the workflows only `kubectl apply`
-# objects that already exist (get + patch), `kubectl rollout restart` (patch) and `kubectl rollout status`
-# (get / watch). A NEW object (another Deployment, Service, ...) is therefore created once by an admin, and its name
-# added to the Role here. The images PersistentVolume (k8s/main/pv-images.yaml) must already exist, too.
+# Least privilege: every Role only reaches its own environment's objects by name (`resourceNames`), so no
+# environment's credential can read another environment's Secrets or patch its Deployments through the API. No Role
+# may create Deployments / Pods or list Secrets: the workflows only `kubectl apply` objects that already exist
+# (get + patch), `kubectl rollout restart` (patch) and `kubectl rollout status` (get / watch). Only the production
+# deployer touches the images PV/PVC that all environments mount. A NEW object (another Deployment, Service, ...) is
+# therefore created once by an admin, and its name added to the Role here.
+#
+# Not a security boundary: stage, production and voi share the namespace biatec-scan, so a deployer that may patch
+# its own Deployment can also change that Deployment's pod template - and a pod can mount any Secret of its
+# namespace. Real isolation of the stage job (every push, no reviewer) from production needs stage in its own
+# namespace (blocked today by the shared icon cache: a PersistentVolume binds to one PVC in one namespace) or an
+# admission policy that pins the pod templates' Secret / ServiceAccount references.
 #
 # Apply with cluster-admin rights via k8s/ci/make-kubeconfig.sh (which also builds the kubeconfigs).
 apiVersion: v1
@@ -58,10 +63,6 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     resourceNames: ["avm-trade-reporter-stage-secret", "avm-trade-reporter-subscriber-stage-secret"]
-    verbs: ["get", "patch", "update"]
-  - apiGroups: [""]
-    resources: ["persistentvolumeclaims"]
-    resourceNames: ["avm-trade-reporter-images-pvc"]
     verbs: ["get", "patch", "update"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -176,10 +177,6 @@ rules:
     resources: ["secrets"]
     resourceNames: ["avm-trade-reporter-voi-secret", "avm-trade-reporter-subscriber-voi-secret"]
     verbs: ["get", "patch", "update"]
-  - apiGroups: [""]
-    resources: ["persistentvolumeclaims"]
-    resourceNames: ["avm-trade-reporter-images-pvc"]
-    verbs: ["get", "patch", "update"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -195,8 +192,8 @@ roleRef:
   kind: Role
   name: github-deployer-voi
 ---
-# k8s/main/pv-images.yaml also applies the (cluster scoped) images PersistentVolume - only that one PV, which must
-# already exist (`create` cannot be limited to a name).
+# The production job applies k8s/main/pv-images.yaml, including the (cluster scoped) images PersistentVolume - only
+# that one PV, which must already exist (`create` cannot be limited to a name).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -213,13 +210,7 @@ metadata:
   name: github-deployer-images-pv
 subjects:
   - kind: ServiceAccount
-    name: github-deployer-stage
-    namespace: biatec-scan
-  - kind: ServiceAccount
     name: github-deployer-production
-    namespace: biatec-scan
-  - kind: ServiceAccount
-    name: github-deployer-voi
     namespace: biatec-scan
 roleRef:
   apiGroup: rbac.authorization.k8s.io

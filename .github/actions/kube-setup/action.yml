@@ -38,8 +38,9 @@ runs:
 
     - name: Check cluster credentials
       shell: bash
-      # shellcheck disable=SC2086 # CHECK_ARGS is a list of arguments
-      run: bash "$GITHUB_WORKSPACE/scripts/check-kubeconfig.sh" --namespace "$NAMESPACE_INPUT" --can-i "$CAN_I" $CHECK_ARGS
+      run: |
+        # shellcheck disable=SC2086 # CHECK_ARGS is a list of arguments
+        bash "$GITHUB_WORKSPACE/scripts/check-kubeconfig.sh" --namespace "$NAMESPACE_INPUT" --can-i "$CAN_I" $CHECK_ARGS
       env:
         NAMESPACE_INPUT: ${{ inputs.namespace }}
         CAN_I: ${{ inputs.can-i }}

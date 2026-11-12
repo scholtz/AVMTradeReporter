@@ -99,8 +99,9 @@ fi
 # --- does the cluster accept it, and may it deploy? ---
 # shellcheck disable=SC2086 # CAN_I is "verb resource[/name]" - two words on purpose
 if ! output=$(kubectl auth can-i $CAN_I -n "$NAMESPACE" --request-timeout=30s 2>&1); then
-  answer=$(printf '%s\n' "$output" | grep -vE '^(Warning|W[0-9]{4}) ' | tail -1)
-  if printf '%s' "$output" | grep -qiE "provide credentials|Unauthorized|401"; then
+  # (|| true: an output of nothing but warnings must not abort the explanation under set -e / pipefail)
+  answer=$(printf '%s\n' "$output" | grep -vE '^(Warning|W[0-9]{4}) ' | tail -1 || true)
+  if printf '%s' "$output" | grep -qiE 'provide credentials|Unauthorized|\b401\b'; then
     echo "::error::The cluster REJECTED the deployer credential (HTTP 401 Unauthorized - expired or revoked: $kind). $REMEDY"
   elif [[ "$answer" == no* ]]; then
     # "no", or "no - <reason>" from webhook authorizers

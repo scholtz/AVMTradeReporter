@@ -34,14 +34,20 @@ declare -A FOREIGN=( [stage]="get secrets/avm-trade-reporter-secret" [production
 here=$(cd "$(dirname "$0")" && pwd)
 check="$here/../../scripts/check-kubeconfig.sh"
 
-# the kubeconfigs hold credentials: never inside the repository, removed again when they went into the secrets
+# the kubeconfigs hold credentials: never inside the repository, removed again when they went into the secrets -
+# only what this script created (its own temp directory, or just its files in a given --out-dir)
+written=()
+cleanup() {
+  if [ -n "${OWN_DIR:-}" ]; then rm -rf "$OWN_DIR"; else rm -f "${written[@]}"; fi
+}
 if [ -z "$OUT_DIR" ]; then
   OUT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/github-deployer.XXXXXX")
+  OWN_DIR="$OUT_DIR"
+else
+  mkdir -p "$OUT_DIR"
 fi
-mkdir -p "$OUT_DIR"
-chmod 700 "$OUT_DIR"
 if [ "$SET_SECRETS" -eq 1 ]; then
-  trap 'rm -rf "$OUT_DIR"' EXIT
+  trap cleanup EXIT
 fi
 
 server="${KUBE_SERVER:-$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')}"
@@ -71,6 +77,7 @@ for env in "${ENVIRONMENTS[@]}"; do
   fi
 
   file="$OUT_DIR/$env.kubeconfig"
+  written+=("$file")
   ( umask 077; cat > "$file" <<EOF
 apiVersion: v1
 kind: Config
