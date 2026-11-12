@@ -92,15 +92,15 @@ anything is applied. The check prints the API server, the kind of credential and
 itself), fails with an explanation when the cluster rejects it or it may not deploy, and warns 14 days before it
 expires. `.github/workflows/kube-credentials.yml` runs the same check every Monday for `stage` and `production-voi`
 and fails 14 days ahead of an expiry (`production` is checked by its promote job instead - it needs a reviewer, a
-scheduled job would wait for one every week). The manifests are committed back to `master` after the rollout step,
-whenever `kubectl apply` succeeded (`.github/actions/commit-manifests`): the rollout is always watched, and `master`
-shows the spec the cluster got - also when the rollout failed. The commit is made on a fresh `origin/master` worktree
-(no rebase that another deploy's commit could conflict with) and a push that keeps failing fails the job. Overlapping
-deploys of one environment are serialized (`concurrency`): GitHub keeps at most one waiting deploy per environment,
-so a deploy that was still waiting when a newer push arrived shows as *cancelled* - the newer one deploys instead.
-Before anything in the cluster changes, a preflight step runs a server-side dry run of the manifests and (stage,
-Voi) checks the shared images PVC exists; once it passed, the version is recorded on `master` even when an apply then
-fails part-way.
+scheduled job would wait for one every week). Before anything in the cluster changes, a preflight step runs a
+server-side dry run of the manifests (production: also of the images PV/PVC) and, for stage and Voi, checks that the
+shared images PVC exists. The manifests are committed back to `master` only after a **successful** rollout
+(`.github/actions/commit-manifests`): promote-production's gate reads `master`'s stage manifest as "stage runs this
+version", and after a failed rollout the old pods keep serving - so `master` keeps showing the version that serves.
+The commit is made on a fresh `origin/master` worktree (no rebase that another deploy's commit could conflict with),
+fetch / push failures are retried and a push that keeps failing fails the job. Overlapping deploys of one environment
+are serialized (`concurrency`): GitHub keeps at most one waiting deploy per environment, so a deploy that was still
+waiting when a newer push arrived shows as *cancelled* - the newer one deploys instead.
 A credential whose expiry cannot be read (e.g. a Rancher token) makes the weekly check fail until it is replaced.
 
 **History:** the secrets used to hold a copy of a personal/admin kubeconfig whose credential expires about 30 days
@@ -159,7 +159,7 @@ the deploy fails with `forbidden`, naming the object.
 - `promote-production.yml`: `k8s/main/deployment-api.yaml`, `k8s/main/deployment2-api.yaml`,
   `k8s/main/subscriber-deployment.yaml` (production image tags), only when manually triggered.
 
-Each deploy job first applies the manifests with `kubectl apply` and watches the rollout, then - whenever the apply
+Each deploy job first applies the manifests with `kubectl apply` and watches the rollout, then - only when the rollout
 succeeded - records the deployed image tags on `master` with `[skip ci]` (only the tags are re-applied on a fresh
-`origin/master`, so concurrent edits to the same files are kept). The checked-in YAML therefore reflects what the
-cluster actually got; a run that failed before the apply records nothing.
+`origin/master`, so concurrent edits to the same files are kept). The checked-in YAML therefore names the version that
+actually serves; a failed run records nothing.

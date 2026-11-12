@@ -248,7 +248,7 @@ jobs:
       # forbidden or invalid object fails here
       - name: Preflight manifests
         run: |
-          kubectl apply --dry-run=server -n "$NAMESPACE" -f k8s/main/deployment-api.yaml -f k8s/main/deployment2-api.yaml -f k8s/main/subscriber-deployment.yaml
+          kubectl apply --dry-run=server -n "$NAMESPACE" -f k8s/main/pv-images.yaml -f k8s/main/deployment-api.yaml -f k8s/main/deployment2-api.yaml -f k8s/main/subscriber-deployment.yaml
 
       # Must run BEFORE "Apply Kubernetes manifests": on a freshly scheduled Pod, kubectl apply
       # schedules Pods immediately, so if the ConfigMap a Pod's volume mounts doesn't exist yet, the
@@ -267,11 +267,7 @@ jobs:
           kubectl apply -f k8s/main/pv-images.yaml -n "$NAMESPACE"
 
       - name: Apply Kubernetes manifests (production)
-        id: apply
         run: |
-          # the preflight passed: from here on the cluster changes, so the commit step records the version - also when an
-          # apply fails part-way (a Deployment of a file may already run the new image)
-          echo "applied=true" >> "$GITHUB_OUTPUT"
           kubectl apply -f k8s/main/deployment-api.yaml -n "$NAMESPACE"
           kubectl apply -f k8s/main/deployment2-api.yaml -n "$NAMESPACE"
           kubectl apply -f k8s/main/subscriber-deployment.yaml -n "$NAMESPACE"
@@ -285,10 +281,9 @@ jobs:
           kubectl rollout restart deployment/avmtradereporter-subscriber -n "$NAMESPACE"
           kubectl rollout status deployment/avmtradereporter-subscriber -n "$NAMESPACE"
 
-      # after the rollout (always watched), whenever the manifests were applied: master shows the spec the cluster
-      # got, also when the rollout failed - see .github/actions/commit-manifests
+      # only after a SUCCESSFUL rollout: promote-production's gate reads master's stage manifest as "stage runs this
+      # version". After a failed rollout the old pods keep serving, and master keeps saying so.
       - name: Commit updated production manifests
-        if: always() && steps.apply.outputs.applied == 'true'
         uses: ./.github/actions/commit-manifests
         with:
           files: k8s/main/deployment-api.yaml k8s/main/deployment2-api.yaml k8s/main/subscriber-deployment.yaml
@@ -388,11 +383,7 @@ jobs:
           kubectl create configmap avm-trade-reporter-voi-main-conf --from-file=k8s/voi/conf-api-voi -n "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Apply Kubernetes manifests (voi)
-        id: apply
         run: |
-          # the preflight passed: from here on the cluster changes, so the commit step records the version - also when an
-          # apply fails part-way (a Deployment of a file may already run the new image)
-          echo "applied=true" >> "$GITHUB_OUTPUT"
           kubectl apply -f k8s/voi/deployment-api-voi.yaml -n "$NAMESPACE"
           kubectl apply -f k8s/voi/subscriber-deployment-voi.yaml -n "$NAMESPACE"
 
@@ -403,10 +394,9 @@ jobs:
           kubectl rollout restart deployment/avmtradereporter-subscriber-voi -n "$NAMESPACE"
           kubectl rollout status deployment/avmtradereporter-subscriber-voi -n "$NAMESPACE"
 
-      # after the rollout (always watched), whenever the manifests were applied: master shows the spec the cluster
-      # got, also when the rollout failed - see .github/actions/commit-manifests
+      # only after a SUCCESSFUL rollout: promote-production's gate reads master's stage manifest as "stage runs this
+      # version". After a failed rollout the old pods keep serving, and master keeps saying so.
       - name: Commit updated voi manifests
-        if: always() && steps.apply.outputs.applied == 'true'
         uses: ./.github/actions/commit-manifests
         with:
           files: k8s/voi/deployment-api-voi.yaml k8s/voi/subscriber-deployment-voi.yaml

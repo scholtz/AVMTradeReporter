@@ -38,12 +38,19 @@ env_info() {
 env_objects() {
   local sa group resource names n
   IFS='|' read -r sa _ <<< "$(env_info "$1")"
+  # one line per rule: API groups | resources | names (each space separated; the core group is "")
   kubectl -n "$NAMESPACE" get role "$sa" \
-    -o jsonpath='{range .rules[*]}{.apiGroups[0]}{"|"}{.resources[0]}{"|"}{.resourceNames[*]}{"\n"}{end}' |
-    while IFS='|' read -r group resource names; do
-      [ "$resource" = persistentvolumeclaims ] && continue
-      if [ -z "$names" ]; then echo "UNRESTRICTED:$resource"; continue; fi
-      for n in $names; do echo "$resource${group:+.$group}/$n"; done
+    -o jsonpath='{range .rules[*]}{.apiGroups[*]}{"|"}{.resources[*]}{"|"}{.resourceNames[*]}{"\n"}{end}' |
+    while IFS='|' read -r groups resources names; do
+      [ -n "$groups" ] || groups="-"
+      for group in $groups; do
+        [ "$group" = "-" ] && group=""
+        for resource in $resources; do
+          [ "$resource" = persistentvolumeclaims ] && continue # checked separately below
+          if [ -z "$names" ]; then echo "UNRESTRICTED:$resource"; continue; fi
+          for n in $names; do echo "$resource${group:+.$group}/$n"; done
+        done
+      done
     done
   if [ "$1" = production ]; then
     echo "secrets/avm-trade-reporter-secret secrets/avm-trade-reporter2-secret secrets/avm-trade-reporter-subscriber-secret"
@@ -139,7 +146,29 @@ EOF
       done
     done
   done
-  echo "Denied on all $denied checks against the other environments' objects - separated."
+  # nothing broad, whatever the Roles say: no listing / creating, no RBAC changes
+  for perm in "list secrets" "watch secrets" "create secrets" "create pods" "create deployments.apps" \
+               "create serviceaccounts" "create rolebindings.rbac.authorization.k8s.io" "patch roles.rbac.authorization.k8s.io"; do
+    # shellcheck disable=SC2086 # "verb resource"
+    if [ "$(KUBECONFIG="$file" kubectl auth can-i $perm -n "$NAMESPACE" 2>/dev/null)" != "no" ]; then
+      echo "The $env deployer may '$perm' - Roles must stay get/patch/update on named objects" >&2
+      exit 1
+    fi
+    denied=$((denied + 1))
+  done
+  # the shared icon cache that production's API pods mount: only production may change it
+  if [ "$env" != production ]; then
+    for perm in "patch persistentvolumeclaims/avm-trade-reporter-images-pvc" "delete persistentvolumeclaims/avm-trade-reporter-images-pvc" \
+                 "patch persistentvolumes/avm-trade-reporter-images-pv" "delete persistentvolumes/avm-trade-reporter-images-pv"; do
+      # shellcheck disable=SC2086 # "verb resource/name"
+      if [ "$(KUBECONFIG="$file" kubectl auth can-i $perm -n "$NAMESPACE" 2>/dev/null)" != "no" ]; then
+        echo "The $env deployer may '$perm' - only production may change the shared images volume" >&2
+        exit 1
+      fi
+      denied=$((denied + 1))
+    done
+  fi
+  echo "Denied on all $denied checks against the other environments' objects and broad / shared-volume access - separated."
 done
 
 # only after ALL three verified: a failure above leaves every environment's secret as it was
