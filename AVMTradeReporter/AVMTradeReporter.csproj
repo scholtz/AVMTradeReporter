@@ -14,7 +14,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Algorand4" Version="4.7.4.2026080422" />
+    <PackageReference Include="Algorand5" Version="5.0.5.2026111217" />
+    <!-- AlgorandAuthentication 2.2.0 still depends on Algorand4, whose assembly has the same name and version as
+         Algorand5's (Algorand.dll 1.0.0.0): without this the build output silently ships the Algorand4 one.
+         Remove once AlgorandAuthentication references Algorand5. -->
+    <PackageReference Include="Algorand4" Version="4.7.4.2026071920" ExcludeAssets="all" PrivateAssets="all" />
     <PackageReference Include="AlgorandAuthentication" Version="2.2.0" />
     <PackageReference Include="Elastic.Clients.Elasticsearch" Version="9.5.3" />
     <!-- transitive (AlgorandAuthentication): pinned to the release that fixes GHSA-vrrp-6v32-2p8g - remove once AlgorandAuthentication references it -->
