@@ -131,10 +131,14 @@ k8s/ci/make-kubeconfig.sh --set-secrets   # applies the RBAC, builds + verifies 
 gh workflow run deploy.yml --ref master --repo scholtz/AVMTradeReporter   # deploys the current master to stage
 ```
 
-Do not re-run an *older* failed run: it re-deploys that run's (older) images; the commit step then refuses to move
-`master`'s record backwards and fails, and stage runs the older version until master is deployed again. Re-running the newest failed run is fine. A `deploy.yml` run dispatched from another branch deploys stage but records nothing on `master`. It does push the
-day's image tag (`1.<y>.<m>.<d>-main`, shared by every build of that day), though - the promote gate cannot tell
-such a build from master's; only dispatch `deploy.yml` from `master`.
+Do not re-run an *older* run. "Re-run failed jobs" of it is refused by the stage preflight before anything is
+deployed (master records a newer version). "Re-run all jobs" is worse: it rebuilds that old commit under *today's*
+tag, which passes every version check. Re-running the newest failed run is fine. A `deploy.yml` run dispatched from
+another branch deploys stage but records nothing on `master`; it does push the day's image tag, though.
+
+The image tag is per day (`1.<y>.<m>.<d>-main`, shared by every build of that day), so the promote gate ("stage runs
+this version") cannot tell two builds of one day apart - only deploy `master`, and its newest run. Making the tag
+unique per build (e.g. with the commit SHA) is the root fix, left for a follow-up.
 Nothing is set unless all three kubeconfigs verified.
 
 The kubeconfigs are written to a temporary directory outside the repository and deleted after `--set-secrets`. If

@@ -93,7 +93,9 @@ for env in $ENVIRONMENTS; do
   ca=""
   # the token controller fills the Secret asynchronously
   for _ in $(seq 1 30); do
-    token=$(kubectl -n "$DEPLOYER_NAMESPACE" get secret "$secret" -o jsonpath='{.data.token}' 2>/dev/null | base64 -d || true)
+    token_b64=$(kubectl -n "$DEPLOYER_NAMESPACE" get secret "$secret" -o jsonpath='{.data.token}' 2>/dev/null || true)
+    # (older macOS base64 only knows -D)
+    token=$(printf '%s' "$token_b64" | base64 -d 2>/dev/null || printf '%s' "$token_b64" | base64 -D 2>/dev/null || true)
     ca=$(kubectl -n "$DEPLOYER_NAMESPACE" get secret "$secret" -o jsonpath='{.data.ca\.crt}' 2>/dev/null || true)
     [ -n "$token" ] && [ -n "$ca" ] && break
     sleep 1
