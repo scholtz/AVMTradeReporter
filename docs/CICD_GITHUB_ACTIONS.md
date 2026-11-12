@@ -98,7 +98,9 @@ shows the spec the cluster got - also when the rollout failed. The commit is mad
 (no rebase that another deploy's commit could conflict with) and a push that keeps failing fails the job. Overlapping
 deploys of one environment are serialized (`concurrency`): GitHub keeps at most one waiting deploy per environment,
 so a deploy that was still waiting when a newer push arrived shows as *cancelled* - the newer one deploys instead.
-The apply step runs a server-side dry run of all manifests first and (stage, Voi) checks the shared images PVC exists.
+Before anything in the cluster changes, a preflight step runs a server-side dry run of the manifests and (stage,
+Voi) checks the shared images PVC exists; once it passed, the version is recorded on `master` even when an apply then
+fails part-way.
 A credential whose expiry cannot be read (e.g. a Rancher token) makes the weekly check fail until it is replaced.
 
 **History:** the secrets used to hold a copy of a personal/admin kubeconfig whose credential expires about 30 days

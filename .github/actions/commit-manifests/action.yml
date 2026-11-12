@@ -34,9 +34,13 @@ runs:
         worktree=$(mktemp -d)
         trap 'git worktree remove --force "$worktree" >/dev/null 2>&1 || true' EXIT
         for attempt in 1 2 3 4 5; do
-          git fetch --quiet origin master
+          [ "$attempt" -gt 1 ] && sleep $((attempt * 3))
           git worktree remove --force "$worktree" >/dev/null 2>&1 || true
-          git worktree add --quiet --detach "$worktree" origin/master
+          # a transient fetch / checkout failure is retried like a rejected push
+          if ! git fetch --quiet origin master || ! git worktree add --quiet --detach "$worktree" origin/master; then
+            echo "Fetching master failed (attempt $attempt), retrying..."
+            continue
+          fi
           (cd "$worktree" && bash "$set_tags" "$VERSION" "${files[@]}")
           if git -C "$worktree" diff --quiet -- "${files[@]}"; then
             echo "master already records version $VERSION"
@@ -49,7 +53,6 @@ runs:
             exit 0
           fi
           echo "Push attempt $attempt failed, retrying on a fresh master..."
-          sleep $((attempt * 3))
         done
         echo "::error::Could not push the deployed manifests to master - master does not show the version applied to the cluster."
         exit 1

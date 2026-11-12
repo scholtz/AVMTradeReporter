@@ -32,21 +32,22 @@ env_info() {
     production-voi) echo "github-deployer-voi|avm-trade-reporter-voi-app-deployment" ;;
   esac
 }
-# the objects of an environment (Deployments, Secrets - production's are managed by hand -, ConfigMaps): every OTHER
-# environment's credential must be denied on each of them
+# the objects of an environment: every object its Role names (read from the APPLIED Role, so the list cannot drift
+# from github-deployer.yaml) plus production's hand-managed Secrets. Every OTHER environment's credential must be
+# denied on each of them. The shared icon cache PVC is left out: every deployer may read it.
 env_objects() {
-  case "$1" in
-    stage) echo "deployments.apps/avm-trade-reporter-stage-app-deployment deployments.apps/avmtradereporter-subscriber-stage
-                 secrets/avm-trade-reporter-stage-secret secrets/avm-trade-reporter-subscriber-stage-secret
-                 configmaps/avm-trade-reporter-stage-main-conf" ;;
-    production) echo "deployments.apps/avm-trade-reporter-app-deployment deployments.apps/avm-trade-reporter2-app-deployment
-                      deployments.apps/avmtradereporter-subscriber secrets/avm-trade-reporter-secret
-                      secrets/avm-trade-reporter2-secret secrets/avm-trade-reporter-subscriber-secret
-                      configmaps/avm-trade-reporter-main-conf" ;;
-    production-voi) echo "deployments.apps/avm-trade-reporter-voi-app-deployment deployments.apps/avmtradereporter-subscriber-voi
-                          secrets/avm-trade-reporter-voi-secret secrets/avm-trade-reporter-subscriber-voi-secret
-                          configmaps/avm-trade-reporter-voi-main-conf" ;;
-  esac
+  local sa group resource names n
+  IFS='|' read -r sa _ <<< "$(env_info "$1")"
+  kubectl -n "$NAMESPACE" get role "$sa" \
+    -o jsonpath='{range .rules[*]}{.apiGroups[0]}{"|"}{.resources[0]}{"|"}{.resourceNames[*]}{"\n"}{end}' |
+    while IFS='|' read -r group resource names; do
+      [ "$resource" = persistentvolumeclaims ] && continue
+      if [ -z "$names" ]; then echo "UNRESTRICTED:$resource"; continue; fi
+      for n in $names; do echo "$resource${group:+.$group}/$n"; done
+    done
+  if [ "$1" = production ]; then
+    echo "secrets/avm-trade-reporter-secret secrets/avm-trade-reporter2-secret secrets/avm-trade-reporter-subscriber-secret"
+  fi
 }
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -123,8 +124,13 @@ EOF
   denied=0
   for other in $ENVIRONMENTS; do
     [ "$other" = "$env" ] && continue
-    for object in $(env_objects "$other"); do
-      for verb in get patch; do
+    objects=$(env_objects "$other")
+    if [ -z "$objects" ] || [[ "$objects" == *UNRESTRICTED:* ]]; then
+      echo "Role of $other is missing or has a rule without resourceNames - every rule must name its objects" >&2
+      exit 1
+    fi
+    for object in $objects; do
+      for verb in get patch update delete; do
         if [ "$(KUBECONFIG="$file" kubectl auth can-i "$verb" "$object" -n "$NAMESPACE" 2>/dev/null)" != "no" ]; then
           echo "The $env deployer may '$verb $object' of $other - it must not reach another environment's objects" >&2
           exit 1

@@ -244,6 +244,12 @@ jobs:
           version="${{ needs.resolve-version.outputs.version }}"
           bash scripts/set-image-tags.sh "$version" k8s/main/deployment-api.yaml k8s/main/deployment2-api.yaml k8s/main/subscriber-deployment.yaml
 
+      # before ANY change to the cluster (Secrets, ConfigMap, manifests): a server-side dry run of the manifests - a
+      # forbidden or invalid object fails here
+      - name: Preflight manifests
+        run: |
+          kubectl apply --dry-run=server -n "$NAMESPACE" -f k8s/main/deployment-api.yaml -f k8s/main/deployment2-api.yaml -f k8s/main/subscriber-deployment.yaml
+
       # Must run BEFORE "Apply Kubernetes manifests": on a freshly scheduled Pod, kubectl apply
       # schedules Pods immediately, so if the ConfigMap a Pod's volume mounts doesn't exist yet, the
       # Pod fails to start. Using `apply` (dry-run client -> apply) instead of delete+create means
@@ -263,11 +269,10 @@ jobs:
       - name: Apply Kubernetes manifests (production)
         id: apply
         run: |
-          # server-side dry run first: a forbidden or invalid manifest fails here, before the cluster changed
-          kubectl apply --dry-run=server -n "$NAMESPACE" -f k8s/main/deployment-api.yaml -f k8s/main/deployment2-api.yaml -f k8s/main/subscriber-deployment.yaml
-          kubectl apply -f k8s/main/deployment-api.yaml -n "$NAMESPACE"
-          # the cluster changed: from here on the commit step records the version (also if a later apply fails)
+          # the preflight passed: from here on the cluster changes, so the commit step records the version - also when an
+          # apply fails part-way (a Deployment of a file may already run the new image)
           echo "applied=true" >> "$GITHUB_OUTPUT"
+          kubectl apply -f k8s/main/deployment-api.yaml -n "$NAMESPACE"
           kubectl apply -f k8s/main/deployment2-api.yaml -n "$NAMESPACE"
           kubectl apply -f k8s/main/subscriber-deployment.yaml -n "$NAMESPACE"
 
@@ -345,6 +350,17 @@ jobs:
           version="${{ needs.resolve-version.outputs.version }}"
           bash scripts/set-image-tags.sh "$version" k8s/voi/deployment-api-voi.yaml k8s/voi/subscriber-deployment-voi.yaml
 
+      # before ANY change to the cluster (Secrets, ConfigMap, manifests): a server-side dry run of the manifests - a
+      # forbidden or invalid object fails here - and the shared icon cache their API pods mount, which only an admin can create
+      # (k8s/main/pv-images.yaml): fail now, not after a 20-minute rollout of Pending pods
+      - name: Preflight manifests
+        run: |
+          kubectl apply --dry-run=server -n "$NAMESPACE" -f k8s/voi/deployment-api-voi.yaml -f k8s/voi/subscriber-deployment-voi.yaml
+          if ! kubectl get pvc avm-trade-reporter-images-pvc -n "$NAMESPACE" -o name >/dev/null; then
+            echo "::error::PVC avm-trade-reporter-images-pvc is missing in $NAMESPACE - an admin must apply k8s/main/pv-images.yaml"
+            exit 1
+          fi
+
       # Voi's Elastic/Redis credentials live only as GitHub Environment secrets ("production-voi"),
       # never committed to the repo. Re-created on every promote so rotating a GitHub secret and
       # re-running the workflow is enough to rotate the deployed value (same pattern as stage).
@@ -374,17 +390,10 @@ jobs:
       - name: Apply Kubernetes manifests (voi)
         id: apply
         run: |
-          # server-side dry run first: a forbidden or invalid manifest fails here, before the cluster changed
-          kubectl apply --dry-run=server -n "$NAMESPACE" -f k8s/voi/deployment-api-voi.yaml -f k8s/voi/subscriber-deployment-voi.yaml
-          # its API pods mount the shared icon cache, which only an admin can create (production's PV/PVC manifest):
-          # fail here, not after a 20-minute rollout of Pending pods
-          if ! kubectl get pvc avm-trade-reporter-images-pvc -n "$NAMESPACE" -o name >/dev/null; then
-            echo "::error::PVC avm-trade-reporter-images-pvc is missing in $NAMESPACE - an admin must apply k8s/main/pv-images.yaml"
-            exit 1
-          fi
-          kubectl apply -f k8s/voi/deployment-api-voi.yaml -n "$NAMESPACE"
-          # the cluster changed: from here on the commit step records the version (also if a later apply fails)
+          # the preflight passed: from here on the cluster changes, so the commit step records the version - also when an
+          # apply fails part-way (a Deployment of a file may already run the new image)
           echo "applied=true" >> "$GITHUB_OUTPUT"
+          kubectl apply -f k8s/voi/deployment-api-voi.yaml -n "$NAMESPACE"
           kubectl apply -f k8s/voi/subscriber-deployment-voi.yaml -n "$NAMESPACE"
 
       - name: Roll out voi deployments
