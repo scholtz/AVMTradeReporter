@@ -17,14 +17,21 @@ namespace AVMTradeReporter.Services
 
         /// <summary>
         /// Algod has to be asked (wait-for-block-after) only when the block after <paramref name="round"/> is not known to
-        /// exist yet. While the tip seen by the last answer is still ahead, that answer already covers the round: one
-        /// HTTP round trip per block saved for the whole backlog.
+        /// exist yet. While the tip seen by the last answer is still far ahead, that answer already covers the round: one
+        /// HTTP round trip per block saved for the whole backlog. The known tip is as old as that answer, though - the
+        /// chain moved on during a long catch-up - so within <paramref name="lagThresholdBlocks"/> of it a catching-up
+        /// indexer asks again before it concludes that it has caught up (it would otherwise leave and re-enter the
+        /// catch-up mode once per stale tip).
         /// </summary>
-        public static bool MustWaitForBlock(ulong knownTip, ulong round) => knownTip <= round;
+        public static bool MustWaitForBlock(ulong knownTip, ulong round, bool catchingUp = false, int lagThresholdBlocks = 0)
+            => knownTip <= round || (catchingUp && !IsCatchingUp(knownTip, round, lagThresholdBlocks));
 
-        /// <summary>Block tasks that may run at once.</summary>
-        public static int ConcurrencyLimit(bool catchingUp, int maxConcurrentTasks, int catchUpMaxConcurrentTasks)
-            => Math.Max(1, catchingUp ? Math.Max(maxConcurrentTasks, catchUpMaxConcurrentTasks) : maxConcurrentTasks);
+        /// <summary>
+        /// Block tasks that may run at once. Under memory pressure a catch-up keeps the slots of the tip: the raised
+        /// concurrency is what holds more blocks in memory.
+        /// </summary>
+        public static int ConcurrencyLimit(bool catchingUp, int maxConcurrentTasks, int catchUpMaxConcurrentTasks, bool memoryPressure = false)
+            => Math.Max(1, catchingUp && !memoryPressure ? Math.Max(maxConcurrentTasks, catchUpMaxConcurrentTasks) : maxConcurrentTasks);
 
         /// <summary>
         /// At the tip the indexer document is written with every block (other tooling reads <c>Round</c>). While catching

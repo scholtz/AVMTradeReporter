@@ -56,6 +56,9 @@ namespace AVMTradeReporter.Services
         // the primary is usually not archival, and asking it first for every old block is a failed request plus a
         // warning with a stack trace per block.
         private int _preferredAlgod;
+        // Blocks no algod returned, being retried in the background (RecoverLostBlockAsync)
+        private int _blocksInRecovery;
+        private bool _memoryPressureHigh;
         private readonly List<Task> _runningTasks = new List<Task>();
         private readonly object _tasksLock = new object();
         private DateTime _lastMemoryCheck = DateTime.MinValue;
@@ -209,25 +212,28 @@ namespace AVMTradeReporter.Services
                     }
 
 #if !DEBUG
-                    // While the tip seen by the last answer is still ahead, that answer covers this round too: no round trip.
-                    var waited = !IndexerSyncPolicy.MustWaitForBlock(_knownTip, Indexer.Round);
-                    foreach (var (name, api) in waited ? Enumerable.Empty<(string Name, Algorand.Algod.IDefaultApi Api)>() : Algods())
+                    // While the tip seen by the last answer is still far ahead, that answer covers this round too: no round trip.
+                    var waited = !IndexerSyncPolicy.MustWaitForBlock(_knownTip, Indexer.Round, _catchingUp, _appConfig.Value.BlockProcessing.CatchUpLagBlocks);
+                    if (!waited)
                     {
-                        try
+                        foreach (var (name, api) in Algods())
                         {
-                            var status = await api.WaitForBlockAsync(stoppingToken, Indexer?.Round ?? throw new Exception("Rund not defined"));
-                            _knownTip = status?.LastRound ?? 0;
-                            waited = true;
-                            break;
-                        }
-                        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-                        {
-                            // only a real stop; an HttpClient timeout is a TaskCanceledException too and must fall through
-                            throw;
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "{algod} failed waiting for round {round}, trying the next one", name, Indexer?.Round);
+                            try
+                            {
+                                var status = await api.WaitForBlockAsync(stoppingToken, Indexer?.Round ?? throw new Exception("Rund not defined"));
+                                _knownTip = status?.LastRound ?? 0;
+                                waited = true;
+                                break;
+                            }
+                            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                            {
+                                // only a real stop; an HttpClient timeout is a TaskCanceledException too and must fall through
+                                throw;
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "{algod} failed waiting for round {round}, trying the next one", name, Indexer?.Round);
+                            }
                         }
                     }
                     if (!waited)
@@ -241,17 +247,30 @@ namespace AVMTradeReporter.Services
 #endif
                     UpdateCatchUpMode();
 
+                    if (_catchingUp && Volatile.Read(ref _blocksInRecovery) > 0)
+                    {
+                        // Catching up skips the wait-for-block call, which used to be what paused the loop while no algod
+                        // answers. A block that cannot be fetched is given up after 30 minutes (known limit), and at
+                        // catch-up speed an outage would feed hundreds of blocks into that: nothing new is started until
+                        // the blocks in recovery are settled. Nothing is urgent behind the tip.
+                        _logger.LogWarning("{count} block(s) could not be fetched and are being retried - catch-up is paused at round {round} until they are settled", Volatile.Read(ref _blocksInRecovery), Indexer.Round);
+                        await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+                        continue;
+                    }
+
                     // Clean up completed tasks
                     CleanupCompletedTasks();
 
-                    // Determine if we should process asynchronously
+                    // Determine if we should process asynchronously. Catching up stays asynchronous under memory pressure,
+                    // with the slots of the tip: the synchronous path would park the loop behind every refresh wait.
+                    var memoryPressure = IsMemoryPressureHigh();
                     bool useAsyncProcessing = _appConfig.Value.BlockProcessing.EnableAsyncProcessing &&
-                                            !IsMemoryPressureHigh();
+                                            (!memoryPressure || _catchingUp);
 
                     if (useAsyncProcessing)
                     {
                         // A free slot within the limit of the current mode (the semaphore itself is sized for catch-up)
-                        var limit = IndexerSyncPolicy.ConcurrencyLimit(_catchingUp, _appConfig.Value.BlockProcessing.MaxConcurrentTasks, _appConfig.Value.BlockProcessing.CatchUpMaxConcurrentTasks);
+                        var limit = IndexerSyncPolicy.ConcurrencyLimit(_catchingUp, _appConfig.Value.BlockProcessing.MaxConcurrentTasks, _appConfig.Value.BlockProcessing.CatchUpMaxConcurrentTasks, memoryPressure);
                         if (_concurrentTasksCapacity - _concurrentTasksSemaphore.CurrentCount < limit)
                         {
                             // Start async processing
@@ -405,32 +424,33 @@ namespace AVMTradeReporter.Services
             var now = DateTime.Now;
             if ((now - _lastMemoryCheck).TotalMilliseconds < _appConfig.Value.BlockProcessing.MemoryCheckIntervalMs)
             {
-                // Don't check memory too frequently, return false to allow processing
-                return false;
+                // Not measured again so soon: the last answer stands. (It used to be "false" here, which let all but one
+                // block per interval through at full concurrency while the memory was over the threshold.)
+                return _memoryPressureHigh;
             }
 
             _lastMemoryCheck = now;
 
             try
             {
-                var process = System.Diagnostics.Process.GetCurrentProcess();
+                using var process = System.Diagnostics.Process.GetCurrentProcess();
                 var memoryUsageMB = process.WorkingSet64 / 1024 / 1024;
                 
                 if (memoryUsageMB > _appConfig.Value.BlockProcessing.MemoryThresholdMB)
                 {
-                    _logger.LogWarning("High memory usage detected: {memoryUsageMB} MB (threshold: {threshold} MB). Disabling async processing temporarily.",
+                    _logger.LogWarning("High memory usage detected: {memoryUsageMB} MB (threshold: {threshold} MB). Reducing concurrent block processing.",
                         memoryUsageMB, _appConfig.Value.BlockProcessing.MemoryThresholdMB);
-                    return true;
+                    return _memoryPressureHigh = true;
                 }
 
                 _logger.LogDebug("Memory usage: {memoryUsageMB} MB (threshold: {threshold} MB)", 
                     memoryUsageMB, _appConfig.Value.BlockProcessing.MemoryThresholdMB);
-                return false;
+                return _memoryPressureHigh = false;
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to check memory usage, assuming normal memory pressure");
-                return false;
+                return _memoryPressureHigh = false;
             }
         }
 
@@ -474,8 +494,8 @@ namespace AVMTradeReporter.Services
             // While catching up: not one Elasticsearch write per block on the fetch loop (IndexerSyncPolicy.ShouldPersistIndexer)
             var now = DateTimeOffset.UtcNow;
             if (!IndexerSyncPolicy.ShouldPersistIndexer(_catchingUp, now - _lastIndexerPersist, TimeSpan.FromSeconds(_appConfig.Value.BlockProcessing.CatchUpIndexerPersistSeconds))) return;
-            _lastIndexerPersist = now;
-            await _indexerRepository.StoreIndexerAsync(Indexer, cancellationToken);
+            // only a write that succeeded counts: a failed one is tried again with the next block
+            if (await _indexerRepository.StoreIndexerAsync(Indexer, cancellationToken)) _lastIndexerPersist = now;
 #endif
         }
 
@@ -656,6 +676,7 @@ namespace AVMTradeReporter.Services
                     // wait for the block, so even a restart in between re-processes it.
                     _logger.LogWarning("Block {blockId} not found after {attempts} attempts - retrying in the background for up to {minutes} minutes",
                         blockId, BlockFetchAttempts, LostBlockRecoveryAttempts * LostBlockRecoveryDelay.TotalMinutes);
+                    Interlocked.Increment(ref _blocksInRecovery); // released when RecoverLostBlockAsync ends, however it ends
                     _ = RecoverLostBlockAsync(blockId, cancellationToken);
                     return;
                 }
@@ -708,6 +729,10 @@ namespace AVMTradeReporter.Services
             {
                 _logger.LogError(ex, "Recovering block {blockId} failed", blockId);
             }
+            finally
+            {
+                Interlocked.Decrement(ref _blocksInRecovery);
+            }
         }
 
         private async Task ProcessFetchedBlockAsync(ulong blockId, CertifiedBlock block, CancellationToken cancellationToken)
@@ -745,7 +770,8 @@ namespace AVMTradeReporter.Services
                     await FlushPendingAsync(cancellationToken, blockId);
                 }
 
-                await _blockRepository.PublishToHub(Model.Data.Block.FromAlgorandBlock(block.Block), cancellationToken);
+                // Not while catching up: every browser would get dozens of hours-old blocks per second as "the newest block".
+                if (!_catchingUp) await _blockRepository.PublishToHub(Model.Data.Block.FromAlgorandBlock(block.Block), cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {

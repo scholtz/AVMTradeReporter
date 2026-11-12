@@ -16,8 +16,12 @@ did **5.2 blocks/s** (about 6 hours). The cause was not CPU and not algod:
   `indexers` document write): ~30 ms, i.e. a hard cap of ~30 blocks/s even with nothing else.
 
 The same pipeline now does **~55 blocks/s** in the benchmark (8x; a day of Algorand blocks in
-under 10 minutes). Rules, all enforced by `SyncThroughputBenchmarkTests` (runs in CI on every PR,
-`Category=Performance`) and the unit tests named below:
+under 10 minutes). The rules below are covered by `SyncThroughputBenchmarkTests`,
+`PendingBlockBatchesFastPathTests` and `IndexerSyncPolicyTests` (all in the `ci.yml` filter - a new
+test class outside `Services.CoinGecko` / `Performance` must be added to that filter or it never
+runs on a PR). The benchmark drives the real `PendingBlockBatches` and `IndexerSyncPolicy` with a
+*copy* of the service's fetch loop: rules 1-3 and the policy are enforced, the wiring inside
+`TradeReporterBackgroundService` (rule 4) is not - keep the copy in step with the service.
 
 1. **A block without documents never touches the flush lock.** ~85% of mainnet blocks hold no DEX
    event; they complete through `PendingBlockBatches.TryCompleteEmpty`. Only when
@@ -44,6 +48,16 @@ under 10 minutes). Rules, all enforced by `SyncThroughputBenchmarkTests` (runs i
 6. **Ask the algod that has the block.** The primary is not archival; catching up, the node that
    served the last block is asked first (`_preferredAlgod`, reset at the tip). A failed request
    plus a warning with a stack trace per block is not free, and it buries the log.
+7. **Speed must not widen a failure.** The skipped wait-for-block call was also what paused the
+   loop during an algod outage, and a block no algod returns is given up after 30 minutes: while
+   catching up, nothing new is started as long as a block is in `RecoverLostBlockAsync`
+   (`_blocksInRecovery`). The known tip is as old as the last answer, so within `CatchUpLagBlocks`
+   of it the indexer asks again *before* it leaves the mode (otherwise it flips out and back in
+   once per stale tip). Under memory pressure (`MemoryThresholdMB`; the answer is cached for
+   `MemoryCheckIntervalMs`, it used to be "no pressure" in between) a catch-up keeps the tip's
+   `MaxConcurrentTasks` slots but still never processes a block on the loop. Blocks are not
+   broadcast to the hub while catching up (hours-old blocks as "the newest block", dozens per
+   second); trades and liquidity still are.
 
 What must **not** be traded for speed: `Refresh.WaitFor` stays (a block counts as indexed only
 once it is searchable); the watermark stays contiguous; documents are announced to the live feed

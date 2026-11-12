@@ -2,7 +2,6 @@ using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Repository;
 using AVMTradeReporter.Services;
 using System.Collections.Concurrent;
-using System.Diagnostics;
 
 namespace AVMTradeReporterTests.Services.CoinGecko
 {
@@ -164,13 +163,40 @@ namespace AVMTradeReporterTests.Services.CoinGecko
                 return StoreResult.AllStored;
             }
 
-            var watch = Stopwatch.StartNew();
             var flush = await batches.FlushAsync(Slow, Slow, default);
-            watch.Stop();
 
             Assert.That(flush.Completed.Select(c => c.Round), Is.EqualTo(new ulong[] { 10 }));
-            Assert.That(overlapped, Is.True, "the two stores overlap");
-            Assert.That(watch.ElapsedMilliseconds, Is.LessThan(290), "one refresh wait, not two");
+            Assert.That(overlapped, Is.True, "the two stores overlap: one refresh wait, not two");
+        }
+
+        [Test]
+        public async Task SameTransactionRejectedAsTradeAndLiquidity_EachDocumentGetsItsOwnAttempts()
+        {
+            // the rejection counter is per document type: the two stores run concurrently and share only the tx id
+            var batches = new PendingBlockBatches();
+            batches.Open(10, 1000);
+            batches.Add(Trade(10, "TX"));
+            batches.Add(Liq(10, "TX"));
+            batches.Close(10);
+
+            var tradeAttempts = 0;
+            var liquidityAttempts = 0;
+            Func<Trade[], bool, Task<StoreResult>> rejectTrades = (_, _) => { tradeAttempts++; return Task.FromResult(new StoreResult(true, new[] { "TX" })); };
+            Func<Liquidity[], bool, Task<StoreResult>> rejectLiquidity = (_, _) => { liquidityAttempts++; return Task.FromResult(new StoreResult(true, new[] { "TX" })); };
+
+            var abandoned = new List<string>();
+            PendingBlockBatches.FlushResult? last = null;
+            for (var flushNo = 1; flushNo <= 3; flushNo++)
+            {
+                last = await batches.FlushAsync(rejectTrades, rejectLiquidity, default, maxRejections: 3);
+                abandoned.AddRange(last.AbandonedDocuments);
+                if (flushNo < 3) Assert.That(last.AbandonedDocuments, Is.Empty, $"flush {flushNo}: neither document used up its attempts");
+            }
+
+            Assert.That(tradeAttempts, Is.EqualTo(3));
+            Assert.That(liquidityAttempts, Is.EqualTo(3));
+            Assert.That(abandoned, Is.EqualTo(new[] { "TX", "TX" }), "each dropped after its own third rejection");
+            Assert.That(last!.Completed.Select(c => c.Round), Is.EqualTo(new ulong[] { 10 }));
         }
 
         [Test]

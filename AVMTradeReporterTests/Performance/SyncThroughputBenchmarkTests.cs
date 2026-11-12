@@ -19,8 +19,13 @@ namespace AVMTradeReporterTests.Performance
     /// </list>
     /// The model runs the real <see cref="PendingBlockBatches"/> and the real <see cref="IndexerSyncPolicy"/>; only algod
     /// and Elasticsearch are delays. All latencies are scaled down by <see cref="Scale"/> to keep the test short; the
-    /// reported blocks/s are scaled back. It runs in CI: a change that puts a round trip per block back on the catch-up
-    /// path, or makes blocks queue behind the flush lock again, fails here.
+    /// reported blocks/s are scaled back. It runs in CI: a change that makes blocks queue behind the flush lock again,
+    /// breaks the group commit or changes what the policy decides fails here.
+    /// <para>
+    /// What it does NOT cover: the loop below is a copy of the one in <c>TradeReporterBackgroundService</c>, which cannot
+    /// run without algod and Elasticsearch. A round trip put back on the service's own loop does not show up here - when
+    /// the service loop changes, change this copy with it (and measure a real catch-up, see CLAUDE.md).
+    /// </para>
     /// </summary>
     [Category("Performance")]
     [NonParallelizable]
@@ -93,6 +98,7 @@ namespace AVMTradeReporterTests.Performance
 
             var watch = Stopwatch.StartNew();
             var lastPersist = TimeSpan.MinValue;
+            var wasCatchingUp = false;
             for (var round = first; round < tip; round++)
             {
                 if (legacy)
@@ -102,8 +108,8 @@ namespace AVMTradeReporterTests.Performance
                 else
                 {
                     var roundTrips = TimeSpan.Zero;
-                    if (IndexerSyncPolicy.MustWaitForBlock(tip, round)) roundTrips += LoopRoundTrips / 2;
-                    var catchingUp = IndexerSyncPolicy.IsCatchingUp(tip, round, config.CatchUpLagBlocks);
+                    if (IndexerSyncPolicy.MustWaitForBlock(tip, round, wasCatchingUp, config.CatchUpLagBlocks)) roundTrips += LoopRoundTrips / 2;
+                    var catchingUp = wasCatchingUp = IndexerSyncPolicy.IsCatchingUp(tip, round, config.CatchUpLagBlocks);
                     var sinceLastPersist = lastPersist == TimeSpan.MinValue ? TimeSpan.MaxValue : (watch.Elapsed - lastPersist) * Scale;
                     if (IndexerSyncPolicy.ShouldPersistIndexer(catchingUp, sinceLastPersist, TimeSpan.FromSeconds(config.CatchUpIndexerPersistSeconds)))
                     {
@@ -114,7 +120,7 @@ namespace AVMTradeReporterTests.Performance
                     limit = IndexerSyncPolicy.ConcurrencyLimit(catchingUp, config.MaxConcurrentTasks, config.CatchUpMaxConcurrentTasks);
                 }
 
-                if (!legacy)
+                if (!legacy && wasCatchingUp)
                 {
                     // catching up, the loop waits for a slot instead of processing the block itself (as the service does)
                     while (Volatile.Read(ref inFlight) >= limit) await Task.WhenAny(tasks.Where(t => !t.IsCompleted).DefaultIfEmpty(Task.CompletedTask));
@@ -127,7 +133,7 @@ namespace AVMTradeReporterTests.Performance
                 }
                 else
                 {
-                    await BlockAsync(round); // before: every slot is busy, the loop processes the block itself
+                    await BlockAsync(round); // at the tip (and before): every slot is busy, the loop processes the block itself
                 }
             }
             await Task.WhenAll(tasks);
@@ -149,9 +155,9 @@ namespace AVMTradeReporterTests.Performance
             TestContext.Out.WriteLine($"  speed-up: {after.BlocksPerSecond / before.BlocksPerSecond:F1}x");
 
             Assert.That(before.Contiguous && after.Contiguous, Is.True, "every block completes, with or without events");
-            // measured: ~7 -> ~60 blocks/s. The budget is far below that: it catches the regression, not the jitter of a CI runner.
+            // measured: 6.6 -> 55 blocks/s (8x). Only the ratio is asserted, with a budget far below it: both runs slow down
+            // together on a loaded CI runner, an absolute blocks/s floor would not.
             Assert.That(after.BlocksPerSecond, Is.GreaterThan(before.BlocksPerSecond * 3), "catching up must not fall back to the block-by-block pace");
-            Assert.That(after.BlocksPerSecond, Is.GreaterThan(25), "a day of Algorand blocks (~31 000) must be re-processed in well under half an hour");
         }
     }
 }

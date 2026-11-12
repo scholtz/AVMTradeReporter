@@ -42,7 +42,10 @@ namespace AVMTradeReporter.Services
         private DateTimeOffset _lastAttemptAt = DateTimeOffset.MinValue;
 
         private readonly ConcurrentDictionary<ulong, Batch> _pending = new();
-        private readonly ConcurrentDictionary<string, int> _rejections = new();
+        // Rejections per document type as well: one transaction may be a trade and a liquidity update (same tx id), and
+        // the two documents are retried and dropped independently.
+        private readonly ConcurrentDictionary<string, int> _tradeRejections = new();
+        private readonly ConcurrentDictionary<string, int> _liquidityRejections = new();
         // Sent at least once and not settled yet, per document type: the two stores of a flush run concurrently, each
         // touches only its own set (and only inside the flush lock).
         private readonly HashSet<string> _sentTrades = new(StringComparer.Ordinal);
@@ -139,8 +142,8 @@ namespace AVMTradeReporter.Services
                 // The two indices are stored at the same time: each bulk waits for an Elasticsearch refresh (up to a second),
                 // one after the other doubled the time every waiting block spends behind the flush lock.
                 var abandonedLiquidity = new List<string>();
-                var tradesTask = StoreAsync(closed, b => b.Trades, t => t.TxId, storeTrades, maxRejections, abandoned, _sentTrades);
-                var liquidityTask = StoreAsync(closed, b => b.Liquidity, l => l.TxId, storeLiquidity, maxRejections, abandonedLiquidity, _sentLiquidity);
+                var tradesTask = StoreAsync(closed, b => b.Trades, t => t.TxId, storeTrades, maxRejections, abandoned, _sentTrades, _tradeRejections);
+                var liquidityTask = StoreAsync(closed, b => b.Liquidity, l => l.TxId, storeLiquidity, maxRejections, abandonedLiquidity, _sentLiquidity, _liquidityRejections);
                 await Task.WhenAll(tradesTask, liquidityTask);
                 var unreachable = !await tradesTask | !await liquidityTask;
                 abandoned.AddRange(abandonedLiquidity);
@@ -188,7 +191,8 @@ namespace AVMTradeReporter.Services
             Func<T[], bool, Task<StoreResult>> store,
             int maxRejections,
             List<string> abandoned,
-            HashSet<string> sent)
+            HashSet<string> sent,
+            ConcurrentDictionary<string, int> rejections)
         {
             var all = closed.SelectMany(kv => documents(kv.Value).Values).ToArray();
             if (all.Length == 0) return true;
@@ -207,13 +211,13 @@ namespace AVMTradeReporter.Services
                         continue;
                     }
                     var covered = docs.Select(idOf).ToHashSet(StringComparer.Ordinal);
-                    Settle(closed, documents, covered, result.RejectedIds, maxRejections, abandoned, sent);
+                    Settle(closed, documents, covered, result.RejectedIds, maxRejections, abandoned, sent, rejections);
                 }
             }
             return reached;
         }
 
-        private void Settle<T>(KeyValuePair<ulong, Batch>[] closed, Func<Batch, ConcurrentDictionary<string, T>> documents, IReadOnlySet<string> covered, IReadOnlyCollection<string> rejectedIds, int maxRejections, List<string> abandoned, HashSet<string> sent)
+        private void Settle<T>(KeyValuePair<ulong, Batch>[] closed, Func<Batch, ConcurrentDictionary<string, T>> documents, IReadOnlySet<string> covered, IReadOnlyCollection<string> rejectedIds, int maxRejections, List<string> abandoned, HashSet<string> sent, ConcurrentDictionary<string, int> rejections)
         {
             var rejected = rejectedIds as IReadOnlySet<string> ?? rejectedIds.ToHashSet(StringComparer.Ordinal);
             foreach (var kv in closed)
@@ -224,22 +228,22 @@ namespace AVMTradeReporter.Services
                     if (!covered.Contains(txId)) continue;
                     if (!rejected.Contains(txId))
                     {
-                        Forget(docs, txId, sent);
+                        Forget(docs, txId, sent, rejections);
                         continue;
                     }
-                    if (_rejections.AddOrUpdate(txId, 1, (_, count) => count + 1) >= Math.Max(1, maxRejections))
+                    if (rejections.AddOrUpdate(txId, 1, (_, count) => count + 1) >= Math.Max(1, maxRejections))
                     {
-                        Forget(docs, txId, sent);
+                        Forget(docs, txId, sent, rejections);
                         abandoned.Add(txId);
                     }
                 }
             }
         }
 
-        private void Forget<T>(ConcurrentDictionary<string, T> docs, string txId, HashSet<string> sent)
+        private static void Forget<T>(ConcurrentDictionary<string, T> docs, string txId, HashSet<string> sent, ConcurrentDictionary<string, int> rejections)
         {
             docs.TryRemove(txId, out _);
-            _rejections.TryRemove(txId, out _);
+            rejections.TryRemove(txId, out _);
             sent.Remove(txId);
         }
     }

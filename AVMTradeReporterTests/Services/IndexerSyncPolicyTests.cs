@@ -43,6 +43,33 @@ namespace AVMTradeReporterTests.Services
         }
 
         [Test]
+        public void NearAStaleTip_ACatchingUpIndexerAsksAgain_BeforeItConcludesThatItCaughtUp()
+        {
+            // The tip was read when the catch-up began; 30 minutes later the chain is hundreds of blocks further. Without
+            // asking again the indexer would declare "caught up" 20 blocks below the stale tip, drop to the slots of the
+            // tip, and re-enter the catch-up mode one block later - once per stale tip.
+            const int lag = 20;
+            Assert.That(IndexerSyncPolicy.MustWaitForBlock(knownTip: 5000, round: 4000, catchingUp: true, lagThresholdBlocks: lag), Is.False, "far behind: no round trip");
+            Assert.That(IndexerSyncPolicy.MustWaitForBlock(5000, 4979, true, lag), Is.False, "21 behind: still no round trip");
+            Assert.That(IndexerSyncPolicy.MustWaitForBlock(5000, 4980, true, lag), Is.True, "about to leave the mode: refresh the tip first");
+
+            // the refreshed tip decides: still far behind -> stays in the mode without another round trip
+            Assert.That(IndexerSyncPolicy.IsCatchingUp(5700, 4980, lag), Is.True);
+            Assert.That(IndexerSyncPolicy.MustWaitForBlock(5700, 4981, true, lag), Is.False);
+
+            // at the tip (not catching up) nothing changes: the answer that reported block round + 1 covers the round
+            Assert.That(IndexerSyncPolicy.MustWaitForBlock(1001, 1000, false, lag), Is.False);
+        }
+
+        [Test]
+        public void MemoryPressure_KeepsACatchUpAtTheSlotsOfTheTip()
+        {
+            Assert.That(IndexerSyncPolicy.ConcurrencyLimit(true, 3, 16, memoryPressure: true), Is.EqualTo(3));
+            Assert.That(IndexerSyncPolicy.ConcurrencyLimit(true, 3, 16, memoryPressure: false), Is.EqualTo(16));
+            Assert.That(IndexerSyncPolicy.ConcurrencyLimit(false, 3, 16, memoryPressure: true), Is.EqualTo(3));
+        }
+
+        [Test]
         public void Concurrency_IsRaisedOnlyWhileCatchingUp()
         {
             Assert.That(IndexerSyncPolicy.ConcurrencyLimit(false, 3, 16), Is.EqualTo(3));
