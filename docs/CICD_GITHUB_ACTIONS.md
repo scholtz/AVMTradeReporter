@@ -131,8 +131,9 @@ k8s/ci/make-kubeconfig.sh --set-secrets   # applies the RBAC, builds + verifies 
 gh workflow run deploy.yml --ref master --repo scholtz/AVMTradeReporter   # deploys the current master to stage
 ```
 
-Do not re-run an *older* failed run: it re-deploys that run's (older) images and records their tags on `master`.
-Re-running the newest failed run is fine. Nothing is set unless all three kubeconfigs verified.
+Do not re-run an *older* failed run: it re-deploys that run's (older) images; the commit step then refuses to move
+`master`'s record backwards and fails, and stage runs the older version until master is deployed again. Re-running the newest failed run is fine. A `deploy.yml` run dispatched from another branch deploys stage but records nothing on `master`.
+Nothing is set unless all three kubeconfigs verified.
 
 The kubeconfigs are written to a temporary directory outside the repository and deleted after `--set-secrets`. If
 the admin context reaches the cluster through a proxy (a Rancher `/k8s/clusters/...` URL does not accept

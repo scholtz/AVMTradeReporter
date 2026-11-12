@@ -42,6 +42,14 @@ runs:
             echo "Fetching master failed (attempt $attempt), retrying..."
             continue
           fi
+          # never move master's record backwards (e.g. a re-run of an older run): the versions (1.<y>.<m>.<d>-main)
+          # sort by date
+          recorded=$(grep -oE 'image:[[:space:]]*"?[^[:space:]"]+:[^[:space:]"]+' "$worktree/${files[0]}" | head -n1 | sed 's/.*://' || true)
+          if [ -n "$recorded" ] && [ "$recorded" != "$VERSION" ] \
+             && [ "$(printf '%s\n%s\n' "$VERSION" "$recorded" | sort -V | tail -n1)" = "$recorded" ]; then
+            echo "::error::This run rolled out $VERSION, but master already records the newer $recorded - the cluster now runs an older version than master says. Deploy the current master again: gh workflow run deploy.yml --ref master"
+            exit 1
+          fi
           if ! (cd "$worktree" && bash "$set_tags" "$VERSION" "${files[@]}"); then
             echo "::error::master's manifests changed shape (see above) - record $VERSION on master by hand; the rollout itself succeeded."
             exit 1
