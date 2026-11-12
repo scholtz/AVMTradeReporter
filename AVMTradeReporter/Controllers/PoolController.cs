@@ -1,3 +1,4 @@
+using AVMTradeReporter.Middleware;
 using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Models.Data.Enums;
@@ -41,7 +42,7 @@ namespace AVMTradeReporter.Controllers
                 var pools = await _poolRepository.GetPoolsAsync(assetIdA, assetIdB, address, protocol, size, orderBy, direction, HttpContext.RequestAborted);
                 return Ok(pools);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!ClientDisconnectMiddleware.IsClientAbort(ex, HttpContext))
             {
                 _logger.LogError(ex, "Failed to get pools");
                 return StatusCode(500, new { error = "Failed to retrieve pools" });
@@ -73,7 +74,7 @@ namespace AVMTradeReporter.Controllers
 
                 return Ok(stats);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!ClientDisconnectMiddleware.IsClientAbort(ex, HttpContext))
             {
                 _logger.LogError(ex, "Failed to get pool statistics");
                 return StatusCode(500, new { error = "Failed to retrieve pool statistics" });
@@ -95,7 +96,7 @@ namespace AVMTradeReporter.Controllers
                 }
                 return Ok(await processor.LoadPoolAsync(poolAddress, poolId));
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!ClientDisconnectMiddleware.IsClientAbort(ex, HttpContext))
             {
                 _logger.LogError(ex, "Failed to get pool statistics");
                 return StatusCode(500, new { error = "Failed to retrieve pool statistics" });

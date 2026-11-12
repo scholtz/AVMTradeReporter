@@ -402,6 +402,10 @@ namespace AVMTradeReporter
             app.UseForwardedHeaders(forwardedHeadersOptions);
 
             // Configure the HTTP request pipeline
+            // Ahead of everything that can run an endpoint (only header forwarding sits outside it): a request whose client
+            // disconnected ends as a quiet 499, not an "unhandled exception" ERROR log.
+            app.UseMiddleware<Middleware.ClientDisconnectMiddleware>();
+
             // Compression first so that all subsequent response-producing middleware is compressed
             app.UseResponseCompression();
 

@@ -1,3 +1,4 @@
+using AVMTradeReporter.Middleware;
 using AVMTradeReporter.Hubs;
 using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Models.Data;
@@ -76,7 +77,7 @@ namespace AVMTradeReporter.Controllers
                 _logger.LogInformation("Test message sent to all clients: {message}", message);
                 return Ok(new { success = true, message = "Test message sent successfully" });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!ClientDisconnectMiddleware.IsClientAbort(ex, HttpContext))
             {
                 _logger.LogError(ex, "Failed to send test message");
                 return StatusCode(500, new { success = false, error = ex.Message });
@@ -112,7 +113,7 @@ namespace AVMTradeReporter.Controllers
                 _logger.LogInformation("Test trade sent to all clients: {txId}", testTrade.TxId);
                 return Ok(new { success = true, trade = testTrade });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!ClientDisconnectMiddleware.IsClientAbort(ex, HttpContext))
             {
                 _logger.LogError(ex, "Failed to send test trade");
                 return StatusCode(500, new { success = false, error = ex.Message });

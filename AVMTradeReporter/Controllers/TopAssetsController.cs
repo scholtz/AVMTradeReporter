@@ -1,3 +1,4 @@
+using AVMTradeReporter.Middleware;
 using AVMTradeReporter.Model.DTO;
 using AVMTradeReporter.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -41,7 +42,7 @@ namespace AVMTradeReporter.Controllers
             {
                 return StatusCode(499, new { error = "Request canceled" });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!ClientDisconnectMiddleware.IsClientAbort(ex, HttpContext))
             {
                 _logger.LogError(ex, "Failed to get top assets");
                 return StatusCode(500, new { error = "Failed to retrieve top assets" });
