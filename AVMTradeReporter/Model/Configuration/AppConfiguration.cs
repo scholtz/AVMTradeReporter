@@ -21,13 +21,14 @@ namespace AVMTradeReporter.Model.Configuration
         /// <summary>
         /// AVM Algod configuration
         /// </summary>
-        public AlgodConfiguration Algod { get; set; } = new AlgodConfiguration();
+        public AlgodConfiguration Algod { get; set; } = new AlgodConfiguration { Host = "https://algorand-algod-public.de-4.biatec.io" };
         /// <summary>
-        /// Fallback algod configuration
+        /// Fallback algod configuration. Not used unless a host is configured. Our own node keeps about 1 000 rounds: a
+        /// catch-up of more than ~45 minutes needs an ARCHIVAL algod here, or the older blocks are given up as lost.
         /// </summary>
         public AlgodConfiguration Algod2 { get; set; } = new AlgodConfiguration();
         /// <summary>
-        /// Fallback algod configuration
+        /// Second fallback algod configuration. Not used unless a host is configured.
         /// </summary>
         public AlgodConfiguration Algod3 { get; set; } = new AlgodConfiguration();
 

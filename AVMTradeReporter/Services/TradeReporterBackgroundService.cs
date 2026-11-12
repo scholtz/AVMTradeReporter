@@ -52,10 +52,10 @@ namespace AVMTradeReporter.Services
         private ulong _knownTip;
         private volatile bool _catchingUp;
         private DateTimeOffset _lastIndexerPersist = DateTimeOffset.MinValue;
-        // Index into Algods() of the node asked first. While catching up it follows the node that served the last block:
-        // the primary is usually not archival, and asking it first for every old block is a failed request plus a
-        // warning with a stack trace per block.
-        private int _preferredAlgod;
+        // Which algod is asked first for a round: our own node whenever it has the block, the archival fallback only for
+        // the blocks it no longer keeps (see AlgodBlockAvailability). Both arrays are indexed like Algods().
+        private readonly AlgodBlockAvailability _algodAvailability;
+        private readonly AlgodRateLimiter[] _algodLimiters;
         // Blocks no algod returned, being retried in the background (RecoverLostBlockAsync)
         private int _blocksInRecovery;
         private bool _memoryPressureHigh;
@@ -110,6 +110,12 @@ namespace AVMTradeReporter.Services
                 _httpClient3 = HttpClientConfigurator.ConfigureHttpClient(appConfig.Value.Algod3.Host, appConfig.Value.Algod3.ApiKey, appConfig.Value.Algod3.Header);
                 _algod3 = new DefaultApi(_httpClient3);
             }
+            // one request rate limit per configured algod, in the order of Algods()
+            var limiters = new List<AlgodRateLimiter> { new(appConfig.Value.Algod.MaxRequestsPerSecond) };
+            if (_algod2 != null) limiters.Add(new AlgodRateLimiter(appConfig.Value.Algod2!.MaxRequestsPerSecond));
+            if (_algod3 != null) limiters.Add(new AlgodRateLimiter(appConfig.Value.Algod3!.MaxRequestsPerSecond));
+            _algodLimiters = limiters.ToArray();
+            _algodAvailability = new AlgodBlockAvailability(_algodLimiters.Length);
 
 
 #if DEBUG
@@ -513,7 +519,7 @@ namespace AVMTradeReporter.Services
             }
             else
             {
-                Volatile.Write(ref _preferredAlgod, 0); // at the tip the primary algod is asked first again
+                _algodAvailability.Reset(); // at the tip every algod has the block: the configured order applies again
                 _logger.LogInformation("Indexer caught up with the chain tip at round {round}", Indexer.Round);
             }
         }
@@ -622,19 +628,21 @@ namespace AVMTradeReporter.Services
         private async Task<CertifiedBlock?> TryFetchBlockAsync(ulong blockId, bool headerOnly)
         {
             var algods = Algods().ToList();
-            var first = Volatile.Read(ref _preferredAlgod);
-            if (first < 0 || first >= algods.Count) first = 0;
-            for (var offset = 0; offset < algods.Count; offset++)
+            List<int>? notKept = null;
+            foreach (var index in _algodAvailability.Order(blockId))
             {
-                var index = (first + offset) % algods.Count;
                 var (name, api) = algods[index];
+                // every request to this algod - first attempt, retry, probe, recovery - stays below its rate limit
+                await _algodLimiters[index].WaitAsync(_processingCts.Token);
                 try
                 {
                     var block = await api.GetBlockAsync(blockId, Format.Msgpack, headerOnly);
                     if (block?.Block != null)
                     {
-                        // catching up: the node that has the old blocks is asked first from now on (reset at the tip)
-                        if (index != first && _catchingUp) Volatile.Write(ref _preferredAlgod, index);
+                        _algodAvailability.MarkAvailable(index);
+                        // Catching up: a node that does not keep this block does not keep the older ones either - it is not
+                        // asked first again until the catch-up gets near the blocks it keeps (forgotten at the tip).
+                        if (notKept != null && _catchingUp) foreach (var missing in notKept) _algodAvailability.MarkMissing(missing, blockId);
                         return block;
                     }
                     _logger.LogWarning("{algod} returned no block {blockId}", name, blockId);
@@ -642,9 +650,25 @@ namespace AVMTradeReporter.Services
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "{algod} failed to return block {blockId}", name, blockId);
+                    // only "this node does not keep the block": a timeout or a 5xx says nothing about the other rounds
+                    if (IsBlockNotKept(ex)) (notKept ??= new List<int>()).Add(index);
                 }
             }
             return null;
+        }
+
+        /// <summary>
+        /// The answer of an algod that does not keep the requested block (it is not archival and the block is older than
+        /// what it keeps): HTTP 404 "failed to retrieve information from the ledger".
+        /// </summary>
+        internal static bool IsBlockNotKept(Exception exception)
+        {
+            for (var e = exception; e != null; e = e.InnerException)
+            {
+                if (e is Algorand.ApiException { StatusCode: 404 }) return true;
+                if (e.Message.Contains("failed to retrieve information from the ledger", StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            return false;
         }
 
         private const int LostBlockRecoveryAttempts = 60; // 30 minutes at the delay below

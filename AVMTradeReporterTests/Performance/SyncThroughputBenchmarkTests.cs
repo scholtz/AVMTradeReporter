@@ -40,9 +40,12 @@ namespace AVMTradeReporterTests.Performance
         private sealed record Result(double BlocksPerSecond, int Flushes, int Completed, bool Contiguous);
 
         /// <param name="legacy">The pipeline before 2026-11: MaxConcurrentTasks slots, two round trips per block on the loop, every block flushes.</param>
-        private static async Task<Result> RunAsync(int blocks, bool legacy)
+        /// <param name="algodRequestsPerSecond">The request rate limit of the algod the blocks come from (0: an own node, no limit).</param>
+        private static async Task<Result> RunAsync(int blocks, bool legacy, double algodRequestsPerSecond = 0)
         {
             var config = new BlockProcessingConfiguration();
+            // the real limiter; model time runs Scale times faster than the wall clock, so does its rate
+            var algodLimiter = new AlgodRateLimiter(algodRequestsPerSecond * Scale);
             var pending = new PendingBlockBatches();
             var completed = new ConcurrentDictionary<ulong, byte>();
             var flushes = 0;
@@ -72,6 +75,7 @@ namespace AVMTradeReporterTests.Performance
                 try
                 {
                     pending.Open(round, null);
+                    await algodLimiter.WaitAsync(default);
                     await Task.Delay(Fetch);
                     if (round % TradeEvery == 0) pending.Add(new Trade { BlockId = round, TxId = "T" + round });
                     if (round % (TradeEvery * 5) == 0) pending.Add(new Liquidity { BlockId = round, TxId = "L" + round });
@@ -146,18 +150,23 @@ namespace AVMTradeReporterTests.Performance
         [Test]
         public async Task CatchUp_IsSeveralTimesFasterThanTheBlockByBlockPipeline()
         {
+            var publicLimit = new AlgodConfiguration().MaxRequestsPerSecond;
             var before = await RunAsync(blocks: 210, legacy: true);
-            var after = await RunAsync(blocks: 840, legacy: false);
+            var ownNode = await RunAsync(blocks: 840, legacy: false);
+            var publicAlgod = await RunAsync(blocks: 420, legacy: false, algodRequestsPerSecond: publicLimit);
 
             TestContext.Out.WriteLine($"catch-up throughput at mainnet latencies (fetch 60 ms, bulk 700 ms, 1 in {TradeEvery} blocks with events):");
-            TestContext.Out.WriteLine($"  before: {before.BlocksPerSecond,6:F1} blocks/s ({before.Flushes} bulk requests for {before.Completed} blocks)");
-            TestContext.Out.WriteLine($"  after:  {after.BlocksPerSecond,6:F1} blocks/s ({after.Flushes} bulk requests for {after.Completed} blocks)");
-            TestContext.Out.WriteLine($"  speed-up: {after.BlocksPerSecond / before.BlocksPerSecond:F1}x");
+            TestContext.Out.WriteLine($"  before:               {before.BlocksPerSecond,6:F1} blocks/s ({before.Flushes} bulk requests for {before.Completed} blocks)");
+            TestContext.Out.WriteLine($"  after, own node:      {ownNode.BlocksPerSecond,6:F1} blocks/s ({ownNode.Flushes} bulk requests for {ownNode.Completed} blocks)");
+            TestContext.Out.WriteLine($"  after, public algod:  {publicAlgod.BlocksPerSecond,6:F1} blocks/s, limited to {publicLimit} requests/s ({publicAlgod.Flushes} bulk requests for {publicAlgod.Completed} blocks)");
+            TestContext.Out.WriteLine($"  speed-up: {ownNode.BlocksPerSecond / before.BlocksPerSecond:F1}x (own node), {publicAlgod.BlocksPerSecond / before.BlocksPerSecond:F1}x (public algod)");
 
-            Assert.That(before.Contiguous && after.Contiguous, Is.True, "every block completes, with or without events");
-            // measured: 6.6 -> 55 blocks/s (8x). Only the ratio is asserted, with a budget far below it: both runs slow down
-            // together on a loaded CI runner, an absolute blocks/s floor would not.
-            Assert.That(after.BlocksPerSecond, Is.GreaterThan(before.BlocksPerSecond * 3), "catching up must not fall back to the block-by-block pace");
+            Assert.That(before.Contiguous && ownNode.Contiguous && publicAlgod.Contiguous, Is.True, "every block completes, with or without events");
+            Assert.That(publicAlgod.BlocksPerSecond, Is.LessThanOrEqualTo(publicLimit * 1.05), "the request limit of a public algod holds (it answers 429 above its own)");
+            // measured: 6.6 -> 55 blocks/s (8x) from an own node. Only ratios are asserted, with budgets far below them: all
+            // runs slow down together on a loaded CI runner, an absolute blocks/s floor would not.
+            Assert.That(ownNode.BlocksPerSecond, Is.GreaterThan(before.BlocksPerSecond * 3), "catching up must not fall back to the block-by-block pace");
+            Assert.That(publicAlgod.BlocksPerSecond, Is.GreaterThan(before.BlocksPerSecond * 2), "the rate limit, not the pipeline, bounds a catch-up through a public algod");
         }
     }
 }
