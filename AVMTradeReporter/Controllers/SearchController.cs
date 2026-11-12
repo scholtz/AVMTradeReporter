@@ -1,3 +1,4 @@
+using AVMTradeReporter.Middleware;
 using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Services;
@@ -38,7 +39,7 @@ namespace AVMTradeReporter.Controllers
                 var res = await _searchService.SearchAsync(q, ct);
                 return Ok(res);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!ClientDisconnectMiddleware.IsClientAbort(ex, HttpContext))
             {
                 _logger.LogError(ex, "Search failed");
                 return StatusCode(500, "Search failed");

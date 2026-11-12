@@ -1,4 +1,5 @@
-﻿using AVMTradeReporter.Model.Data;
+﻿using AVMTradeReporter.Middleware;
+using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Processors.Image;
 using AVMTradeReporter.Repository;
@@ -67,7 +68,7 @@ namespace AVMTradeReporter.Controllers
             {
                 return StatusCode(499, new { error = "Request canceled" });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!ClientDisconnectMiddleware.IsClientAbort(ex, HttpContext))
             {
                 _logger.LogError(ex, "Failed to list assets");
                 return StatusCode(500, new { error = "Failed to list assets" });
@@ -109,7 +110,7 @@ namespace AVMTradeReporter.Controllers
                 _logger.LogWarning(ex, "Request canceled while retrieving asset image for id {AssetId}", assetId);
                 return StatusCode(499, new { error = "Request canceled" }); // 499 Client Closed Request (non-standard)
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!ClientDisconnectMiddleware.IsClientAbort(ex, HttpContext))
             {
                 _logger.LogError(ex, "Failed to retrieve asset image for id {AssetId}", assetId);
                 return StatusCode(500, new { error = "Failed to retrieve asset image" });

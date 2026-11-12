@@ -1,3 +1,4 @@
+using AVMTradeReporter.Middleware;
 using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Models.Data.Enums;
@@ -46,7 +47,7 @@ namespace AVMTradeReporter.Controllers
                 }
                 return Ok(pools.ToList());
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!ClientDisconnectMiddleware.IsClientAbort(ex, HttpContext))
             {
                 _logger.LogError(ex, "Failed to get pools");
                 return StatusCode(500, new { error = "Failed to retrieve pools" });
@@ -67,7 +68,7 @@ namespace AVMTradeReporter.Controllers
                 var pool = _aggregatedPoolRepository.GetAggregatedPool(assetIdA, assetIdB);
                 return Ok(pool);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!ClientDisconnectMiddleware.IsClientAbort(ex, HttpContext))
             {
                 _logger.LogError(ex, "Failed to update or retrieve pool");
                 return StatusCode(500, new { error = "Failed to update or retrieve pool" });

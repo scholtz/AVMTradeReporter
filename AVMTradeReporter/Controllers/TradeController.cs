@@ -1,3 +1,4 @@
+using AVMTradeReporter.Middleware;
 using AVMTradeReporter.Model.Data;
 using AVMTradeReporter.Model.DTO;
 using AVMTradeReporter.Models.Data;
@@ -140,7 +141,7 @@ namespace AVMTradeReporter.Controllers
             {
                 return StatusCode(499, new { error = "Request canceled" });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!ClientDisconnectMiddleware.IsClientAbort(ex, HttpContext))
             {
                 _logger.LogError(ex, "Failed to get trades");
                 return StatusCode(500, new { error = "Failed to get trades" });

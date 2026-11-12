@@ -1,3 +1,4 @@
+using AVMTradeReporter.Middleware;
 using AVMTradeReporter.Model.DTO;
 using AVMTradeReporter.Models.Data.Enums;
 using AVMTradeReporter.Services;
@@ -67,7 +68,7 @@ namespace AVMTradeReporter.Controllers
                 var stats = await _statsService.GetDexStatsAsync(protocol, timestamp, to, ct);
                 return Ok(stats);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!ClientDisconnectMiddleware.IsClientAbort(ex, HttpContext))
             {
                 _logger.LogError(ex, "Unhandled error retrieving DEX stats for {Dex} at {Timestamp} to {To}", dex, timestamp, to);
                 return StatusCode(StatusCodes.Status500InternalServerError, "An error occurred while retrieving DEX statistics.");

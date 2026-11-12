@@ -1,3 +1,4 @@
+using AVMTradeReporter.Middleware;
 using AVMTradeReporter.Models.Data;
 using AVMTradeReporter.Models.Data.Enums;
 using AVMTradeReporter.Repository;
@@ -39,7 +40,7 @@ namespace AVMTradeReporter.Controllers
                 var stats = _assetStatRepository.GetAllAsync(protocol, sortBy, direction == SortDirection.Desc);
                 return Ok(stats.ToList());
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!ClientDisconnectMiddleware.IsClientAbort(ex, HttpContext))
             {
                 _logger.LogError(ex, "Failed to get asset stats");
                 return StatusCode(500, new { error = "Failed to retrieve asset stats" });
@@ -60,7 +61,7 @@ namespace AVMTradeReporter.Controllers
                 if (stat == null) return NotFound();
                 return Ok(stat);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!ClientDisconnectMiddleware.IsClientAbort(ex, HttpContext))
             {
                 _logger.LogError(ex, "Failed to get asset stat for {assetId}", assetId);
                 return StatusCode(500, new { error = "Failed to retrieve asset stat" });

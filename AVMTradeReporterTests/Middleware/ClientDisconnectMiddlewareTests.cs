@@ -74,6 +74,64 @@ namespace AVMTradeReporterTests.Middleware
         }
 
         [Test]
+        public async Task ClientAborted_NonCancellationFault_Propagates()
+        {
+            // A real bug that merely coincides with the caller giving up on a slow request must stay an ERROR.
+            var (context, aborted) = NewContext();
+            var logger = new RecordingLogger();
+            var middleware = new ClientDisconnectMiddleware(_ =>
+            {
+                aborted.Cancel();
+                throw new InvalidOperationException("boom");
+            }, logger);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() => middleware.InvokeAsync(context));
+            Assert.That(logger.Levels, Is.Empty);
+        }
+
+        [Test]
+        public async Task ClientAborted_HeadersSetByFailedAction_AreCleared()
+        {
+            var (context, aborted) = NewContext();
+            var middleware = new ClientDisconnectMiddleware(ctx =>
+            {
+                ctx.Response.Headers["Cache-Control"] = "public,max-age=300";
+                ctx.Response.ContentLength = 1234;
+                aborted.Cancel();
+                throw ElasticCancellation();
+            }, new RecordingLogger());
+
+            await middleware.InvokeAsync(context);
+
+            Assert.That(context.Response.StatusCode, Is.EqualTo(ClientDisconnectMiddleware.ClientClosedRequestStatusCode));
+            Assert.That(context.Response.Headers.ContainsKey("Cache-Control"), Is.False);
+            Assert.That(context.Response.ContentLength, Is.Null);
+        }
+
+        [Test]
+        public void IsClientAbort_NullContext_IsFalse()
+        {
+            Assert.That(ClientDisconnectMiddleware.IsClientAbort(new OperationCanceledException(), (HttpContext?)null), Is.False);
+        }
+
+        [Test]
+        public async Task Controller_BlanketCatch_LetsElasticWrappedAbortThrough()
+        {
+            // AssetController-style "catch (Exception) -> LogError + 500" must not claim the abort: it has to reach the middleware.
+            using var aborted = new CancellationTokenSource();
+            var topAssets = new Moq.Mock<AVMTradeReporter.Services.ITopAssetsService>();
+            topAssets.Setup(s => s.GetTopAssetsAsync(Moq.It.IsAny<CancellationToken>()))
+                .Returns<CancellationToken>(_ => { aborted.Cancel(); throw ElasticCancellation(); });
+            var controller = new AVMTradeReporter.Controllers.TopAssetsController(
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<AVMTradeReporter.Controllers.TopAssetsController>.Instance, topAssets.Object)
+            {
+                ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext { HttpContext = new DefaultHttpContext { RequestAborted = aborted.Token } }
+            };
+
+            await Assert.ThrowsAsync<Elastic.Transport.TransportException>(() => controller.GetTopAssets());
+        }
+
+        [Test]
         public async Task NoException_ResponseUntouched()
         {
             var (context, _) = NewContext();
