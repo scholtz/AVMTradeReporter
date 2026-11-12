@@ -50,6 +50,7 @@ rm -f "$view_err"
 echo "API server: ${server%%\?*}"
 
 expires_epoch=""
+expiry_known=0 # set when the expiry was read, or the credential provably has none
 kind="unknown"
 token=$(kubectl config view --minify --raw -o jsonpath='{.users[0].user.token}' 2>/dev/null || true)
 cert_data=$(kubectl config view --minify --raw -o jsonpath='{.users[0].user.client-certificate-data}' 2>/dev/null || true)
@@ -67,6 +68,7 @@ if [ -n "$token" ]; then
       exp=$(printf '%s' "$claims" | jq -r '.exp // empty')
       kind="ServiceAccount token (JWT) for ${sub:-unknown subject}"
       if [ -n "$exp" ]; then expires_epoch="$exp"; else kind="$kind, no expiry (long-lived)"; fi
+      expiry_known=1
     else
       # never claim "long-lived" for a token whose claims could not be read
       kind="JWT bearer token, expiry unknown (jq missing or the claims did not decode)"
@@ -80,7 +82,7 @@ elif [ -n "$cert_data" ]; then
   not_after=$(printf '%s' "$cert_data" | base64 -d | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2 || true)
   subject=$(printf '%s' "$cert_data" | base64 -d | openssl x509 -noout -subject 2>/dev/null | sed 's/^subject=//' || true)
   kind="client certificate (${subject:-unknown subject})"
-  if [ -n "$not_after" ]; then expires_epoch=$(to_epoch "$not_after"); fi
+  if [ -n "$not_after" ]; then expires_epoch=$(to_epoch "$not_after"); expiry_known=1; fi
 elif [ -n "$exec_cmd" ]; then
   kind="exec credential plugin '$exec_cmd' (needs that binary and its login on the runner)"
 elif [ -n "$auth_provider" ]; then
@@ -89,6 +91,12 @@ fi
 echo "Credential: $kind"
 
 warn=0
+if [ "$expiry_known" -eq 0 ]; then
+  # e.g. a Rancher kubeconfig token - the kind of credential that expired after 30 days and broke the deploys: the
+  # check cannot see it coming, so the scheduled check (--fail-on-warn) fails until it is replaced
+  echo "::warning::The expiry of the deployer credential ($kind) cannot be checked in advance. $REMEDY"
+  warn=1
+fi
 if [ -n "$expires_epoch" ]; then
   now=$(date +%s)
   days_left=$(( (expires_epoch - now) / 86400 ))

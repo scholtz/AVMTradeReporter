@@ -64,6 +64,10 @@ rules:
     resources: ["secrets"]
     resourceNames: ["avm-trade-reporter-stage-secret", "avm-trade-reporter-subscriber-stage-secret"]
     verbs: ["get", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    resourceNames: ["avm-trade-reporter-images-pvc"]
+    verbs: ["get"]  # read only: the preflight that the shared icon cache exists (only production may change it)
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -177,6 +181,10 @@ rules:
     resources: ["secrets"]
     resourceNames: ["avm-trade-reporter-voi-secret", "avm-trade-reporter-subscriber-voi-secret"]
     verbs: ["get", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    resourceNames: ["avm-trade-reporter-images-pvc"]
+    verbs: ["get"]  # read only: the preflight that the shared icon cache exists (only production may change it)
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

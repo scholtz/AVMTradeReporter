@@ -135,7 +135,17 @@ jobs:
       - name: Apply Kubernetes manifests (stage)
         id: apply
         run: |
+          # server-side dry run first: a forbidden or invalid manifest fails here, before the cluster changed
+          kubectl apply --dry-run=server -n "$NAMESPACE" -f k8s/stage/deployment-api-stage.yaml -f k8s/stage/subscriber-deployment-stage.yaml
+          # its API pods mount the shared icon cache, which only an admin can create (production's PV/PVC manifest):
+          # fail here, not after a 20-minute rollout of Pending pods
+          if ! kubectl get pvc avm-trade-reporter-images-pvc -n "$NAMESPACE" -o name >/dev/null; then
+            echo "::error::PVC avm-trade-reporter-images-pvc is missing in $NAMESPACE - an admin must apply k8s/main/pv-images.yaml"
+            exit 1
+          fi
           kubectl apply -f k8s/stage/deployment-api-stage.yaml -n "$NAMESPACE"
+          # the cluster changed: from here on the commit step records the version (also if a later apply fails)
+          echo "applied=true" >> "$GITHUB_OUTPUT"
           kubectl apply -f k8s/stage/subscriber-deployment-stage.yaml -n "$NAMESPACE"
 
       - name: Roll out stage deployments
@@ -148,7 +158,7 @@ jobs:
       # after the rollout (always watched), whenever the manifests were applied: master shows the spec the cluster
       # got, also when the rollout failed - see .github/actions/commit-manifests
       - name: Commit updated stage manifests
-        if: always() && steps.apply.outcome == 'success'
+        if: always() && steps.apply.outputs.applied == 'true'
         uses: ./.github/actions/commit-manifests
         with:
           files: k8s/stage/deployment-api-stage.yaml k8s/stage/subscriber-deployment-stage.yaml

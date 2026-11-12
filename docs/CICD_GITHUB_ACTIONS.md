@@ -96,7 +96,10 @@ scheduled job would wait for one every week). The manifests are committed back t
 whenever `kubectl apply` succeeded (`.github/actions/commit-manifests`): the rollout is always watched, and `master`
 shows the spec the cluster got - also when the rollout failed. The commit is made on a fresh `origin/master` worktree
 (no rebase that another deploy's commit could conflict with) and a push that keeps failing fails the job. Overlapping
-deploys of one environment are serialized (`concurrency`).
+deploys of one environment are serialized (`concurrency`): GitHub keeps at most one waiting deploy per environment,
+so a deploy that was still waiting when a newer push arrived shows as *cancelled* - the newer one deploys instead.
+The apply step runs a server-side dry run of all manifests first and (stage, Voi) checks the shared images PVC exists.
+A credential whose expiry cannot be read (e.g. a Rancher token) makes the weekly check fail until it is replaced.
 
 **History:** the secrets used to hold a copy of a personal/admin kubeconfig whose credential expires about 30 days
 after it is issued. The stage deploy broke on 2026-09-09 (fixed 2026-09-12 by pasting fresh kubeconfigs into all
@@ -118,9 +121,12 @@ namespace) - or an admission policy pinning the pod templates' Secret / ServiceA
 With a cluster-admin kubectl context:
 
 ```bash
-k8s/ci/make-kubeconfig.sh --set-secrets   # applies the RBAC, builds + verifies the 3 kubeconfigs, sets the secrets
-gh run rerun <failed run id> --failed --repo scholtz/AVMTradeReporter
+k8s/ci/make-kubeconfig.sh --set-secrets   # applies the RBAC, builds + verifies the 3 kubeconfigs, then sets the secrets
+gh workflow run deploy.yml --ref master --repo scholtz/AVMTradeReporter   # deploys the current master to stage
 ```
+
+Do not re-run an *older* failed run: it re-deploys that run's (older) images and records their tags on `master`.
+Re-running the newest failed run is fine. Nothing is set unless all three kubeconfigs verified.
 
 The kubeconfigs are written to a temporary directory outside the repository and deleted after `--set-secrets`. If
 the admin context reaches the cluster through a proxy (a Rancher `/k8s/clusters/...` URL does not accept

@@ -31,7 +31,10 @@ runs:
       shell: bash
       run: |
         mkdir -p "$HOME/.kube"
-        echo "$KUBE_CONFIG" | base64 -d > "$HOME/.kube/config"
+        if ! printf '%s' "$KUBE_CONFIG" | base64 -d > "$HOME/.kube/config" 2>/dev/null; then
+          echo "::error::The KUBE_CONFIG secret is not base64 (set it with k8s/ci/make-kubeconfig.sh --set-secrets, or: base64 -w0 <file> | gh secret set KUBE_CONFIG --env <environment>)"
+          exit 1
+        fi
         chmod 600 "$HOME/.kube/config"
       env:
         KUBE_CONFIG: ${{ inputs.kube-config }}

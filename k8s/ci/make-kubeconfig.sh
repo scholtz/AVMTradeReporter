@@ -134,16 +134,17 @@ EOF
     done
   done
   echo "Denied on all $denied checks against the other environments' objects - separated."
+done
 
-  if [ "$SET_SECRETS" -eq 1 ]; then
+# only after ALL three verified: a failure above leaves every environment's secret as it was
+if [ "$SET_SECRETS" -eq 1 ]; then
+  for env in $ENVIRONMENTS; do
+    file="$OUT_DIR/$env.kubeconfig"
     encoded=$(base64 -w0 "$file" 2>/dev/null || base64 "$file" | tr -d '\n')
     printf '%s' "$encoded" | gh secret set KUBE_CONFIG --env "$env" --repo "$REPO"
     echo "Set KUBE_CONFIG of environment $env"
-  fi
-done
-
-if [ "$SET_SECRETS" -eq 1 ]; then
-  echo "Done (the kubeconfigs were removed). Re-run the failed deploy: gh run rerun <run-id> --failed --repo $REPO"
+  done
+  echo "Done (the kubeconfigs were removed). Deploy the current master again: gh workflow run deploy.yml --ref master --repo $REPO"
 else
   echo "Verified kubeconfigs in $OUT_DIR - they contain credentials: store them (base64) as KUBE_CONFIG of their"
   echo "environment and delete the directory, or simply run: $0 --set-secrets"
